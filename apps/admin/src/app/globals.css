@@ -1,0 +1,3 @@
+@import "tailwindcss";
+@import "@isu/ui/tokens.css";
+@layer base { body { @apply bg-fondo-suave font-sans text-tinta antialiased; } h1, h2 { @apply font-display tracking-tight; } }

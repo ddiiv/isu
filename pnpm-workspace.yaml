@@ -1,0 +1,14 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Sólo estos paquetes pueden correr scripts al instalarse: un paquete
+# comprometido no ejecuta código en tu máquina ni en Railway.
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - "@tailwindcss/oxide"
+
+# Acelerador nativo opcional de BullMQ: sin él usa la versión en JS.
+ignoredBuiltDependencies:
+  - msgpackr-extract
