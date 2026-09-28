@@ -1,0 +1,50 @@
+# Cada push corre el doble chequeo de la etapa: QA (tests, e2e) y seguridad
+# (auditoría, aislamiento de la base, dependencias). Un rojo frena el deploy.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: postgres, POSTGRES_HOST_AUTH_METHOD: trust, POSTGRES_DB: stocker_test }
+        ports: ["5433:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6380:6379"]
+    env:
+      TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5433/stocker_test
+      TEST_REDIS_URL: redis://127.0.0.1:6380/5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Simula la base de Stocker: la tienda tiene que convivir con tablas ajenas en public.
+      - run: psql postgres://postgres@127.0.0.1:5433/stocker_test -c "CREATE TABLE public.products (id serial primary key, nombre text); CREATE TABLE public.sales (id serial primary key, total numeric);"
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm --filter @isu/shared --filter @isu/db build
+      - run: pnpm test
+      - run: pnpm audit --prod
+      - run: node tests/seguridad/aislamiento-db.mjs
+        env: { ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5433/stocker_test }
+      - run: pnpm build
+        env: { API_URL: http://127.0.0.1:4000, NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000 }
+      - name: levantar servicios
+        run: |
+          DATABASE_URL=$TEST_DATABASE_URL REDIS_URL=redis://127.0.0.1:6380/1 HOST=127.0.0.1 PORT=4000 NODE_ENV=production ORIGENES_PERMITIDOS=http://127.0.0.1:3000 LOG_LEVEL=warn nohup pnpm --filter @isu/api start &
+          sleep 3
+          PORT=3000 HOSTNAME=127.0.0.1 nohup pnpm --filter @isu/web start &
+          PORT=3001 HOSTNAME=127.0.0.1 API_URL=http://127.0.0.1:4000 nohup pnpm --filter @isu/admin start &
+          sleep 5
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - run: pnpm seguridad

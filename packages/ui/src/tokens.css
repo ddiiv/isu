@@ -1,0 +1,35 @@
+/*
+ * Sistema de diseño de ISUWAYA.
+ *
+ * La estructura es la de las tiendas de ropa que mejor convierten (mucho
+ * blanco, tipografía grande y en bold, la foto manda); los colores salen del
+ * logo: el azul acero del cuerpo, el azul del punto y el verde de la base.
+ *
+ * El azul es el color de la marca y del precio. El verde queda para lo que es
+ * "plata a favor" del cliente: el precio con transferencia, el envío gratis.
+ * Separarlos hace que el ahorro se lea de un vistazo.
+ */
+@theme {
+  --color-tinta: #171717;
+  --color-tinta-suave: #525252;
+  --color-tinta-tenue: #6b6b6b;   /* 4,9:1 sobre fondo-suave: pasa WCAG AA */
+  --color-fondo: #ffffff;
+  --color-fondo-suave: #f6f6f5;
+  --color-linea: #e7e5e4;
+
+  --color-marca: #2c5f91;          /* azul acero del logo */
+  --color-marca-fuerte: #1d4675;   /* hover y texto sobre fondo claro */
+  --color-marca-vivo: #3a67b8;     /* el punto del logo: foco y enlaces */
+  --color-marca-claro: #eaf1f8;    /* fondos de banners */
+
+  --color-ahorro: #2e6b3f;         /* verde del logo: transferencia, envío gratis */
+  --color-ahorro-claro: #e9f3ec;
+  --color-oferta: #c8102e;         /* liquidación: se usa poco a propósito */
+  --color-whatsapp: #25d366;
+
+  --font-display: var(--fuente-display), system-ui, Arial, sans-serif;
+  --font-sans: var(--fuente-texto), system-ui, Arial, sans-serif;
+
+  --radius-foto: 14px;
+  --radius-control: 999px;
+}

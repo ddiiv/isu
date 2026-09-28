@@ -1,0 +1,32 @@
+{
+  "name": "@isu/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/servidor.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/servidor.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/under-pressure": "^9.2.0",
+    "@isu/db": "workspace:*",
+    "@isu/shared": "workspace:*",
+    "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
+    "fastify-type-provider-zod": "^7.0.0",
+    "ioredis": "^5.11.1",
+    "zod": "^4.6.5",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.2",
+    "@types/pg": "^8.23.1"
+  }
+}

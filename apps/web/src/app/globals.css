@@ -1,0 +1,32 @@
+@import "tailwindcss";
+@import "@isu/ui/tokens.css";
+
+/* Tailwind 4 no escanea paquetes del monorepo por su cuenta. */
+@source "../../../../packages/ui/src";
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body { @apply bg-fondo font-sans text-tinta antialiased; }
+  h1, h2, h3 { @apply font-display tracking-tight; text-wrap: balance; }
+  :focus-visible { outline: 2px solid var(--color-marca-vivo); outline-offset: 2px; border-radius: 4px; }
+  ::selection { background: var(--color-marca-claro); }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+}
+
+/* Utilidades propias: Tailwind 4 sólo deja componerlas con @apply si son @utility. */
+@utility contenedor { @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-10; }
+@utility boton { @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-[15px] font-bold transition; }
+@utility boton-primario { @apply boton bg-tinta text-white hover:bg-marca-fuerte; }
+@utility boton-marca { @apply boton bg-marca text-white hover:bg-marca-fuerte; }
+@utility boton-borde { @apply boton border border-tinta text-tinta hover:bg-tinta hover:text-white; }
+
+@layer components {
+  .texto-legal h2 { @apply mt-10 mb-3 text-2xl; }
+  .texto-legal p, .texto-legal li { @apply leading-relaxed text-tinta-suave; }
+  .texto-legal p + p { @apply mt-3; }
+  .texto-legal ul { @apply mt-2 list-disc space-y-1.5 pl-5; }
+  .texto-legal a:not(.boton-marca) { @apply font-bold text-marca underline underline-offset-2; }
+}
