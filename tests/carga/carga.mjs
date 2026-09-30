@@ -51,6 +51,34 @@ filas.push(await correr("API /v1/buscar?q=remera (sin caché)", `${API}/v1/busca
 filas.push(await correr("Tienda / (HTML)", `${WEB}/`, 50));
 filas.push(await correr("Tienda /mujer/remeras-y-tops", `${WEB}/mujer/remeras-y-tops`, 50));
 if (unSlug) filas.push(await correr("Tienda /producto/:slug", `${WEB}/producto/${unSlug}`, 50));
+
+/*
+ * Etapas 2 a 5 (POST, sin caché de Cloudflare): carrito, opciones de envío y
+ * asistente. Cada pedido simula un cliente distinto (x-isu-ip, que la API
+ * sólo cree con la credencial interna), así se mide el origen y no los
+ * frenos por IP (que se prueban en la auditoría).
+ */
+if (process.env.INTERNO_TOKEN) {
+  const sku = unSlug ? (await (await fetch(`${API}/v1/productos/${unSlug}`, interno)).json()).variantes?.[0]?.sku : null;
+  let n = 0;
+  const post = (ruta, cuerpo) => ({
+    url: `${API}${ruta}`,
+    requests: [{
+      method: "POST",
+      setupRequest: (req) => ({ ...req, headers: { ...req.headers, "content-type": "application/json", "x-isu-interno": process.env.INTERNO_TOKEN, "x-isu-ip": `10.${(n >> 16) & 255}.${(n >> 8) & 255}.${n++ & 255}` }, body: JSON.stringify(cuerpo) }),
+    }],
+  });
+  if (sku) {
+    filas.push(await correr("API POST /v1/carrito", `${API}/v1/carrito`, 50, post("/v1/carrito", { items: [{ sku, cantidad: 1 }] })));
+    // Etapa 6: con un cupón (se valida contra la base en cada cotización).
+    filas.push(await correr("API POST /v1/carrito (con cupón)", `${API}/v1/carrito`, 50, post("/v1/carrito", { items: [{ sku, cantidad: 1 }], cupon: "BIENVENIDA10" })));
+    // Con caché de 30 min por CP: la primera le pega a los transportes y el resto sale de Redis.
+    filas.push(await correr("API POST /v1/envios/opciones", `${API}/v1/envios/opciones`, 50, post("/v1/envios/opciones", { items: [{ sku, cantidad: 1 }], destino: { cp: "1406", provincia: "CABA", localidad: "Flores" } })));
+  }
+  filas.push(await correr("API POST /v1/chat (pregunta frecuente)", `${API}/v1/chat`, 50, post("/v1/chat", { mensaje: "cuanto tarda en llegar el envio" })));
+  filas.push(await correr("API POST /v1/chat (búsqueda de productos)", `${API}/v1/chat`, 50, post("/v1/chat", { mensaje: "tienen remeras?" })));
+  filas.push(await correr("Tienda /checkout (HTML)", `${WEB}/checkout`, 50));
+}
 clearInterval(vigia);
 await pool.end();
 

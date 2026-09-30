@@ -18,7 +18,11 @@ import { SITIO } from "@/lib/sitio";
  * el producto, el color y el talle ya escritos en el mensaje.
  */
 export function FichaProducto({ p, config }: { p: ProductoDetalle; config: ConfigPublica }) {
-  const primerConStock = p.colores.find((c) => p.variantes.some((v) => v.color === c.clave && v.stock > 0))?.clave ?? p.colores[0]?.clave ?? null;
+  const hay = (c: string | null) => p.variantes.some((v) => v.color === c && v.stock > 0);
+  // Abre en el color de la foto principal (la primera de exhibición), si hay stock; si no, en el primero que tenga.
+  const dePrincipal = p.exhibicion[0]?.color ?? null;
+  const primerConStock = (dePrincipal && hay(dePrincipal) ? dePrincipal : null)
+    ?? p.colores.find((c) => hay(c.clave))?.clave ?? p.colores[0]?.clave ?? null;
   const [color, setColor] = useState<string | null>(primerConStock);
   const [talle, setTalle] = useState<string | null>(null);
   const carrito = useCarrito();
@@ -38,11 +42,16 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
   const variante = conTalle ? delColor.find((v) => v.talle === talle) : delColor[0];
   const colorActual = p.colores.find((c) => c.clave === color);
 
-  const fotos = useMemo(() => [
-    ...p.exhibicion.filter((f) => f.color === color),
-    ...(colorActual?.fotos ?? []),
-    ...p.exhibicion.filter((f) => f.color === null),
-  ], [p.exhibicion, colorActual, color]);
+  const fotos = useMemo(() => {
+    const delColorElegido = [
+      ...p.exhibicion.filter((f) => f.color === color),
+      ...(colorActual?.fotos ?? []),
+      ...p.exhibicion.filter((f) => f.color === null),
+    ];
+    if (delColorElegido.length) return delColorElegido;
+    // Un color sin ninguna foto: mejor las del producto (la principal primero) que "foto próximamente".
+    return [...p.exhibicion, ...(p.colores.find((c) => c.fotos.length)?.fotos ?? [])];
+  }, [p.exhibicion, p.colores, colorActual, color]);
 
   const base = delColor.length ? delColor : p.variantes;
   const precio = variante?.precio ?? Math.min(...base.map((v) => v.precio));
@@ -52,7 +61,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
 
   const mensaje = [
     `Hola Isuwaya! Quiero comprar: ${p.nombre}`,
-    colorActual && colorActual.clave !== "unico" ? `Color: ${colorActual.nombre}` : null,
+    colorActual && colorActual.nombre !== "Único" ? `Color: ${colorActual.nombre}` : null,
     variante?.talle ? `Talle: ${variante.talle}` : null,
     `${SITIO.url}/producto/${p.slug}`,
   ].filter(Boolean).join("\n");
@@ -78,7 +87,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
         <p className="mt-1 text-sm text-tinta-tenue">Art. {p.sku}</p>
         <div className="mt-5"><Precio precio={precio} precioLista={precioLista} rebaja={p.descuento} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} grande /></div>
 
-        {p.colores.length > 0 && !(p.colores.length === 1 && p.colores[0]!.clave === "unico") && (
+        {p.colores.length > 0 && !(p.colores.length === 1 && p.colores[0]!.nombre === "Único") && (
           <fieldset className="mt-7">
             <legend className="text-sm"><span className="font-bold">Color:</span> {colorActual?.nombre}</legend>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -145,7 +154,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
               const foto = colorActual?.fotos[0] ?? p.exhibicion[0] ?? null;
               carrito.agregar({
                 sku: variante.sku, nombre: p.nombre, slug: p.slug,
-                color: colorActual && colorActual.clave !== "unico" ? colorActual.nombre : null,
+                color: colorActual && colorActual.nombre !== "Único" ? colorActual.nombre : null,
                 talle: variante.talle, precio: variante.precio, foto: foto?.clave ?? null,
               });
             }}

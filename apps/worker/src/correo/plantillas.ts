@@ -7,7 +7,12 @@ import { formatearPesos } from "@isu/shared";
  * TODO lo que viene del pedido se escapa: un "nombre" con HTML adentro no
  * puede convertir nuestro mail en un phishing con nuestro remitente.
  */
-export type Plantilla = "bienvenida" | "restablecer" | "pedido_recibido" | "pago_confirmado" | "pedido_vencido" | "arrepentimiento" | "transferencia_informada";
+export const PLANTILLAS = [
+  "bienvenida", "restablecer", "pedido_recibido", "pago_confirmado", "pedido_vencido", "arrepentimiento", "transferencia_informada",
+  // Etapa 4: cómo viene el envío.
+  "envio_en_camino", "envio_en_sucursal", "envio_llega_hoy", "envio_entregado", "envio_no_entregado",
+] as const;
+export type Plantilla = (typeof PLANTILLAS)[number];
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const MARCA = "#2c5f91", AHORRO = "#2e6b3f";
@@ -15,6 +20,8 @@ const MARCA = "#2c5f91", AHORRO = "#2e6b3f";
 interface Item { nombre: string; color: string | null; talle: string | null; precio: number; cantidad: number }
 interface DatosPedido {
   numero: string; nombre: string; medioPago: string; total: number; subtotal: number; descuento: number; envio: number;
+  /** "cupón VERANO10 (10% OFF)" o "promo …" (etapa 6) */
+  cupon?: string | null; descuentoCupon?: number;
   entrega: "envio" | "retiro"; local: string | null; venceEn: string | null; items: Item[]; enlace: string;
   transferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string } | null;
 }
@@ -38,6 +45,7 @@ const boton = (texto: string, url: string) =>
 function tablaItems(d: DatosPedido) {
   const filas = d.items.map((i) => `<tr><td style="padding:6px 0">${esc(i.cantidad)} × ${esc(i.nombre)}${i.color ? ` · ${esc(i.color)}` : ""}${i.talle ? ` · ${esc(i.talle)}` : ""}</td><td align="right">${esc(formatearPesos(i.precio * i.cantidad))}</td></tr>`).join("");
   const extra = [
+    d.cupon ? `<tr><td style="color:${AHORRO}">${esc(d.cupon.charAt(0).toUpperCase() + d.cupon.slice(1))}</td><td align="right" style="color:${AHORRO}">${d.descuentoCupon ? `−${esc(formatearPesos(d.descuentoCupon))}` : "Envío gratis"}</td></tr>` : "",
     d.descuento ? `<tr><td style="color:${AHORRO}">Descuento por transferencia</td><td align="right" style="color:${AHORRO}">−${esc(formatearPesos(d.descuento))}</td></tr>` : "",
     d.entrega === "envio" ? `<tr><td>Envío</td><td align="right">${d.envio ? esc(formatearPesos(d.envio)) : "Gratis"}</td></tr>` : `<tr><td>Retiro en ${esc(d.local)}</td><td align="right">Gratis</td></tr>`,
   ].join("");
@@ -107,6 +115,29 @@ export function armar(plantilla: Plantilla, datos: Record<string, unknown>): { a
         html: marco("Recibimos tu comprobante", `<p>Hola, ${esc(datos.nombre)}. Estamos verificando la transferencia del pedido <b>${esc(datos.numero)}</b>. Te avisamos apenas se acredite.</p>`),
         texto: `Recibimos el comprobante del pedido ${datos.numero}. Te avisamos cuando se acredite.`,
       };
+    case "envio_en_camino":
+    case "envio_en_sucursal":
+    case "envio_llega_hoy":
+    case "envio_entregado":
+    case "envio_no_entregado": {
+      const d = datos as { numero: string; nombre: string; transporte: string; seguimiento: string | null; sucursal: string | null; enlace: string };
+      const num = d.seguimiento ? ` (seguimiento ${esc(d.seguimiento)})` : "";
+      const t: Record<typeof plantilla, [string, string, string]> = {
+        envio_en_camino: [`Tu pedido ${d.numero} está en camino`, "¡Tu pedido salió!", `Ya lo despachamos con <b>${esc(d.transporte)}</b>${num}. Te avisamos cuando esté por llegar.`],
+        envio_en_sucursal: [`Tu pedido ${d.numero} ya está en la sucursal`, "Ya podés retirarlo", `Tu pedido llegó a la sucursal <b>${esc(d.sucursal ?? d.transporte)}</b>. Llevá tu DNI para retirarlo.`],
+        envio_llega_hoy: [`Tu pedido ${d.numero} llega hoy`, "¡Llega hoy!", `Tu pedido salió a reparto con <b>${esc(d.transporte)}</b>. Si no vas a estar, avisá a alguien que lo pueda recibir.`],
+        envio_entregado: [`Entregamos tu pedido ${d.numero}`, "¡Pedido entregado!", "Esperamos que te encante. Si algo no te queda bien, respondé este mail y lo resolvemos."],
+        envio_no_entregado: [`No pudimos entregar tu pedido ${d.numero}`, "No pudimos entregarlo", `<b>${esc(d.transporte)}</b> intentó entregar tu pedido y no pudo. Mirá el seguimiento para ver cómo sigue, o respondé este mail y te ayudamos.`],
+        // (las demás plantillas no llegan acá)
+      } as never;
+      const [asunto, titulo, cuerpo] = t[plantilla];
+      const textoPlano = cuerpo.replace(/<[^>]+>/g, "");
+      return {
+        asunto,
+        html: marco(titulo, `<p>Hola, ${esc(d.nombre)}. ${cuerpo}</p>${plantilla === "envio_entregado" ? "" : boton("Seguir mi envío", d.enlace)}`),
+        texto: `Hola, ${d.nombre}. ${textoPlano}${plantilla === "envio_entregado" ? "" : `\nSeguí tu envío: ${d.enlace}`}`,
+      };
+    }
     case "arrepentimiento":
       return {
         asunto: `Arrepentimiento de compra · código ${datos.codigo}`,

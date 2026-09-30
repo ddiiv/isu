@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EnvioPublico, ID_OPCION, ID_SUCURSAL, OpcionEnvio } from "./envios.js";
 
 /*
  * Carrito, checkout, cuenta y pedido: lo que viaja entre la tienda y la API.
@@ -38,7 +39,13 @@ export const Direccion = z.object({
 export type Direccion = z.infer<typeof Direccion>;
 
 export const Entrega = z.discriminatedUnion("tipo", [
-  z.object({ tipo: z.literal("envio"), direccion: Direccion }).strict(),
+  z.object({
+    tipo: z.literal("envio"),
+    direccion: Direccion,
+    // La opción elegida de las que cotizó la API ("andreani:sucursal"). Sin transportes configurados, el envío estándar.
+    opcion: z.string().regex(ID_OPCION, "Elegí cómo te lo mandamos").optional(),
+    sucursal: ID_SUCURSAL.optional(),
+  }).strict(),
   z.object({ tipo: z.literal("retiro"), local: texto(2, 100) }).strict(),
 ]);
 export type Entrega = z.infer<typeof Entrega>;
@@ -52,20 +59,31 @@ export const Contacto = z.object({
 }).strict();
 export type Contacto = z.infer<typeof Contacto>;
 
+/* Lo que escribe el cliente; la API lo normaliza (mayúsculas, sin espacios) y lo valida. */
+export const CodigoCupon = z.string().trim().max(40);
+
 export const PedidoNuevo = z.object({
   items: Items,
+  cupon: CodigoCupon.optional(),
   contacto: Contacto,
   entrega: Entrega,
   medioPago: MedioPago,
   notas: z.string().trim().max(500).optional(),
+  // Avisos del envío por WhatsApp (además del email). Opcional: se pide permiso.
+  avisosWhatsapp: z.boolean().optional().default(false),
   aceptaTerminos: z.literal(true, { error: "Tenés que aceptar los términos y condiciones" }),
 }).strict();
 export type PedidoNuevo = z.infer<typeof PedidoNuevo>;
 
 export const PedidoCotizar = z.object({
   items: Items,
+  cupon: CodigoCupon.optional(),
+  // Con el email del checkout se controla el tope de usos por cliente.
+  email: Email.optional(),
   entrega: z.enum(["envio", "retiro"]).optional(),
   medioPago: MedioPago.optional(),
+  // Con una opción de envío elegida, el total la incluye (el checkout la manda).
+  envio: z.object({ cp: z.string().trim().max(8), provincia: z.string().trim().max(60), localidad: z.string().trim().max(80), opcion: z.string().regex(ID_OPCION) }).strict().optional(),
 }).strict();
 
 export const LineaCotizada = z.object({
@@ -89,9 +107,24 @@ export const Problema = z.object({
   mensaje: z.string(),
 });
 
+export const CuponCotizado = z.object({
+  codigo: z.string().nullable(),        // null = promoción automática
+  nombre: z.string(),
+  envioGratis: z.boolean(),
+});
+export type CuponCotizado = z.infer<typeof CuponCotizado>;
+
 export const Cotizacion = z.object({
   lineas: z.array(LineaCotizada),
   subtotal: z.number().int(),
+  /** Cupón o promoción aplicado (uno por compra) y cuánto descuenta. */
+  cupon: CuponCotizado.nullable().optional(),
+  descuentoCupon: z.number().int().optional(),
+  /** Por qué el cupón escrito no se aplicó (vencido, falta monto…). */
+  avisoCupon: z.string().nullable().optional(),
+  /** La promoción automática más cercana que todavía no alcanza ("te faltan $X para 10% OFF"). */
+  promoCerca: z.object({ nombre: z.string(), falta: z.number().int() }).nullable().optional(),
+  /** Descuento por transferencia. */
   descuento: z.number().int(),
   envio: z.number().int(),
   total: z.number().int(),
@@ -99,6 +132,8 @@ export const Cotizacion = z.object({
   faltaParaEnvioGratis: z.number().int().nullable(),
   montoMinimo: z.number().int(),
   problemas: z.array(Problema),
+  /** La opción de envío con la que se calculó (null = sin elegir o retiro). */
+  opcionEnvio: OpcionEnvio.nullable().optional(),
 });
 export type Cotizacion = z.infer<typeof Cotizacion>;
 
@@ -117,9 +152,13 @@ export const PedidoPublico = z.object({
   contacto: z.object({ email: z.string(), nombre: z.string(), apellido: z.string(), telefono: z.string() }),
   items: z.array(z.object({ sku: z.string(), nombre: z.string(), color: z.string().nullable(), talle: z.string().nullable(), precio: z.number().int(), cantidad: z.number().int() })),
   subtotal: z.number().int(),
+  cupon: z.object({ codigo: z.string().nullable(), nombre: z.string() }).nullable().optional(),
+  descuentoCupon: z.number().int().optional(),
   descuento: z.number().int(),
   envio: z.number().int(),
   total: z.number().int(),
+  /** Con qué viaja y por dónde anda (null para retiro en el local). */
+  envioDetalle: EnvioPublico.nullable().optional(),
   pago: z.object({
     // Mercado Pago / Pago Fácil: a dónde ir a pagar (si todavía no pagó)
     url: z.string().nullable(),

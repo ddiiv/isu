@@ -4,10 +4,12 @@ import { use, useState } from "react";
 import { api, ESTADOS, fecha, MEDIOS, pesos, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, claseEntrada, EntradaPesos, Insignia, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
 import { puede, useYo } from "@/components/Marco";
+import { CajaEnvio } from "@/components/CajaEnvio";
 
 interface Detalle {
   pedido: Record<string, unknown> & {
     numero: string; estado: string; medio_pago: string; entrega: string; total: number; subtotal: number; descuento: number; envio: number;
+    cupon_codigo: string | null; cupon_nombre: string | null; descuento_cupon: number; envio_bonificado: number;
     nombre: string; apellido: string; email: string; telefono: string; dni: string; direccion: Record<string, string> | null; local_retiro: string | null;
     notas: string | null; notas_internas: string | null; creado_en: string; vence_en: string | null; pagado_en: string | null;
   };
@@ -36,7 +38,9 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
     try { await fn(); aviso.ok(ok); await recargar(); } catch (e) { aviso.error(e); }
   };
   const medioPago = p.medio_pago === "local" ? "local" : "transferencia";
-  const entregas: Array<[string, string]> = p.estado === "pagado"
+  // Con transporte (etapa 4) el envío avanza solo (despacho en Stocker + seguimiento): a mano sólo el estándar.
+  const conTransporte = p.entrega === "envio" && typeof p.transporte === "string" && p.transporte !== "estandar";
+  const entregas: Array<[string, string]> = conTransporte ? [] : p.estado === "pagado"
     ? (p.entrega === "retiro" ? [["listo_para_retirar", "Listo para retirar"], ["retirado", "Retirado"]] : [["enviado", "Marcar enviado"]])
     : p.estado === "listo_para_retirar" ? [["retirado", "Retirado"]] : p.estado === "enviado" ? [["entregado", "Entregado"]] : [];
 
@@ -58,7 +62,13 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
             </ul>
             <dl className="mt-3 space-y-1 border-t border-linea pt-3 text-sm">
               <div className="flex justify-between"><dt>Subtotal</dt><dd>{pesos(p.subtotal)}</dd></div>
-              {p.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento</dt><dd>−{pesos(p.descuento)}</dd></div>}
+              {p.cupon_nombre && (
+                <div className="flex justify-between gap-3 text-ahorro">
+                  <dt>{p.cupon_codigo ? <>Cupón <b>{p.cupon_codigo}</b> <span className="text-xs">({p.cupon_nombre})</span></> : <>Promo: {p.cupon_nombre}</>}</dt>
+                  <dd className="shrink-0">{p.descuento_cupon ? `−${pesos(p.descuento_cupon)}` : `Envío gratis (${pesos(p.envio_bonificado)})`}</dd>
+                </div>
+              )}
+              {p.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento{p.medio_pago === "transferencia" ? " transferencia" : ""}</dt><dd>−{pesos(p.descuento)}</dd></div>}
               <div className="flex justify-between"><dt>Envío</dt><dd>{p.envio ? pesos(p.envio) : "Gratis"}</dd></div>
               <div className="flex justify-between text-base font-bold"><dt>Total</dt><dd>{pesos(p.total)}</dd></div>
             </dl>
@@ -94,6 +104,8 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
             {p.notas && <p className="mt-3 rounded-xl bg-fondo-suave p-3 text-sm">“{p.notas}”</p>}
             <p className="mt-3 text-xs text-tinta-tenue">Pago: {MEDIOS[p.medio_pago]} · Creado {fecha(p.creado_en)}{p.vence_en && PENDIENTES.includes(p.estado) ? ` · Vence ${fecha(p.vence_en)}` : ""}</p>
           </Tarjeta>
+
+          {p.entrega === "envio" && <CajaEnvio numero={p.numero} pedido={p} />}
 
           {operador && PENDIENTES.includes(p.estado) && p.medio_pago !== "mercadopago" && p.medio_pago !== "pagofacil" && (
             <Tarjeta titulo={p.medio_pago === "local" ? "Registrar cobro en el local" : "Registrar transferencia"}>

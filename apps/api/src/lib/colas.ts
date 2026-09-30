@@ -11,7 +11,9 @@ export type Plantilla = "bienvenida" | "restablecer" | "pedido_recibido" | "pago
 
 export interface Colas {
   email(plantilla: Plantilla, para: string, datos: Record<string, unknown>): Promise<void>;
-  stocker(nombre: "cliente" | "pagado" | "cancelar" | "stock" | "invalidar" | "catalogo", datos: Record<string, unknown>, id?: string): Promise<void>;
+  stocker(nombre: "cliente" | "pagado" | "cancelar" | "stock" | "invalidar" | "catalogo" | "envio", datos: Record<string, unknown>, id?: string): Promise<void>;
+  /** Etapa 4: trabajos de envíos (Mercado Envíos después del pago, seguir un envío ya). */
+  envios(nombre: "mercado-envios" | "seguir", datos: Record<string, unknown>, id?: string): Promise<void>;
   cerrar(): Promise<void>;
 }
 
@@ -20,6 +22,8 @@ export function crearColas(redis: Redis, log: { warn: (o: object, m: string) => 
   conexion.on("error", () => {});
   const noti = new Queue(COLAS.notificaciones, { connection: conexion, prefix: "isu", defaultJobOptions: OPCIONES_TRABAJO });
   const stk = new Queue(COLAS.stocker, { connection: conexion, prefix: "isu", defaultJobOptions: { ...OPCIONES_TRABAJO, attempts: 12 } });
+  const env = new Queue(COLAS.envios, { connection: conexion, prefix: "isu", defaultJobOptions: { ...OPCIONES_TRABAJO, attempts: 8 } });
+  env.on("error", () => {});
   noti.on("error", () => {});
   stk.on("error", () => {});
   const seguro = async (fn: () => Promise<unknown>, que: string) => {
@@ -28,6 +32,7 @@ export function crearColas(redis: Redis, log: { warn: (o: object, m: string) => 
   return {
     email: (plantilla, para, datos) => seguro(() => noti.add("email", { plantilla, para, datos }), `el mail ${plantilla}`),
     stocker: (nombre, datos, id) => seguro(() => stk.add(nombre, datos, id ? { jobId: id } : undefined), `stocker/${nombre}`),
-    async cerrar() { await Promise.allSettled([noti.close(), stk.close()]); conexion.disconnect(); },
+    envios: (nombre, datos, id) => seguro(() => env.add(nombre, datos, id ? { jobId: id } : undefined), `envios/${nombre}`),
+    async cerrar() { await Promise.allSettled([noti.close(), stk.close(), env.close()]); conexion.disconnect(); },
   };
 }

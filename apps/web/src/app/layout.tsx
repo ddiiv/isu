@@ -4,6 +4,7 @@ import { Anuncio } from "@/components/Anuncio";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { BotonWhatsapp } from "@/components/BotonWhatsapp";
+import { Asistente } from "@/components/chat/Asistente";
 import { Analytics } from "@/components/Analytics";
 import { Hidratado } from "@/components/Hidratado";
 import { ProveedorCarrito } from "@/components/carrito/Carrito";
@@ -47,7 +48,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <Header categorias={categorias} />
           <main id="contenido">{children}</main>
           <Footer config={config} categorias={categorias} />
-          <BotonWhatsapp numero={config.whatsapp} />
+          {/* Con el asistente prendido, la burbuja es el chat (con WhatsApp adentro); si no, WhatsApp directo. */}
+          {config.chatbot.activo ? <Asistente saludo={config.chatbot.saludo} whatsapp={config.whatsapp} /> : <BotonWhatsapp numero={config.whatsapp} />}
           <CajonCarrito descuento={config.descuentoTransferencia} montoMinimo={config.montoMinimoCarrito} />
         </ProveedorCarrito>
         <JsonLd

@@ -35,6 +35,7 @@ const enviados: Array<{ tipo: string; nombre: string; datos: Record<string, unkn
 const colas: Colas = {
   async email(plantilla, para, datos) { enviados.push({ tipo: "email", nombre: plantilla, datos: { ...datos, para } }); },
   async stocker(nombre, datos) { enviados.push({ tipo: "stocker", nombre, datos }); },
+  async envios(nombre, datos) { enviados.push({ tipo: "envios", nombre, datos }); },
   async cerrar() {},
 };
 
@@ -82,6 +83,7 @@ const limpiar = async () => {
   await pool.query("DELETE FROM tienda.productos WHERE stocker_id >= $1 AND stocker_id < $2", [BASE, BASE + 1000]);
   await pool.query("DELETE FROM tienda.admins WHERE email LIKE 'qa-adm%'");
   await pool.query("DELETE FROM tienda.descuentos WHERE nombre LIKE 'QA adm%'");
+  await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA adm%'");
   await pool.query("DELETE FROM tienda.guias_talles WHERE nombre LIKE 'QA adm%'");
   await pool.query("DELETE FROM tienda.categorias WHERE slug LIKE 'qa-adm%'");
 };
@@ -482,5 +484,79 @@ describe("ajustes (sólo el dueño)", () => {
   it("la auditoría registra quién cambió qué", async () => {
     const a = (await req("GET", "/v1/admin/auditoria?entidad=ajuste", dueno)).json().registros;
     expect(a[0]).toMatchObject({ actor: "qa-adm-dueno@test.com", accion: "ajustes", ip: "10.9.9.9" });
+  });
+});
+
+let lectura2 = "";
+describe("cupones y promociones", () => {
+  const base = { nombre: "QA adm 10% en todo", tipo: "porcentaje", valor: 10 };
+  beforeAll(async () => {
+    // La de lectura de más arriba quedó restablecida: una nueva para estas pruebas.
+    const le = await req("POST", "/v1/admin/usuarios", dueno, { email: "qa-adm-lec2@test.com", nombre: "Lectura 2", rol: "lectura" });
+    lectura2 = await ingresar("qa-adm-lec2@test.com", le.json().claveProvisoria);
+  });
+  it("crear, listar, editar; el código se guarda en mayúsculas y no se repite", async () => {
+    const r = await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "qa-adm-10" });
+    expect(r.statusCode, r.body).toBe(201);
+    const id = r.json().id;
+    expect((await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QA-ADM-10" })).json()).toMatchObject({ error: "codigo_repetido" });
+    const l = (await req("GET", "/v1/admin/cupones", lectura2)).json().cupones.find((c: { id: number }) => c.id === id);
+    expect(l).toMatchObject({ codigo: "QA-ADM-10", vigente: true, usos: 0, pedidosPagados: 0, descontado: 0 });
+    const e = await req("PUT", `/v1/admin/cupones/${id}`, operador, { ...base, codigo: "QA-ADM-10", nombre: "QA adm pausado", activo: false });
+    expect(e.statusCode, e.body).toBe(200);
+    expect((await req("GET", "/v1/admin/cupones", operador)).json().cupones.find((c: { id: number }) => c.id === id).vigente).toBe(false);
+    const aud = (await req("GET", "/v1/admin/auditoria?entidad=cupon", dueno)).json().registros;
+    expect(aud.slice(0, 2).map((a: { accion: string }) => a.accion)).toEqual(["editar_cupon", "crear_cupon"]);
+  });
+  it("valida: porcentaje 1-90, monto mínimo $1, promo sin código, cupón con código, fechas en orden, alcance con elementos", async () => {
+    const mal = [
+      { ...base, codigo: "QAADM1", valor: 95 },
+      { ...base, codigo: "QAADM2", tipo: "monto", valor: 50 },
+      { ...base, codigo: "QAADM3", automatico: true },
+      { ...base },
+      { ...base, codigo: "QA ADM" },
+      { ...base, codigo: "QAADM4", desde: "2026-10-10T00:00:00Z", hasta: "2026-10-01T00:00:00Z" },
+      { ...base, codigo: "QAADM5", alcance: "categorias", categoriaIds: [] },
+      { ...base, codigo: "QAADM6", usos: 99 },
+      { ...base, automatico: true, usosPorCliente: 1 },
+    ];
+    for (const b of mal) expect((await req("POST", "/v1/admin/cupones", operador, b)).statusCode, JSON.stringify(b)).toBe(400);
+    const promo = await req("POST", "/v1/admin/cupones", operador, { nombre: "QA adm envío gratis desde $50.000", tipo: "envio_gratis", valor: 0, automatico: true, minimo: 5_000_000 });
+    expect(promo.statusCode, promo.body).toBe(201);
+  });
+  it("lectura no crea; un cupón usado no se borra (se desactiva)", async () => {
+    expect((await req("POST", "/v1/admin/cupones", lectura2, { ...base, codigo: "QAADMLEC" })).json().error).toBe("sin_permiso");
+    const id = (await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMUSADO" })).json().id;
+    const pedido = await pool.query(
+      `INSERT INTO tienda.pedidos (acceso_hash, email, nombre, apellido, telefono, dni, entrega, local_retiro, medio_pago, subtotal, descuento_cupon, descuento, envio, total, estado, cupon_id, cupon_codigo)
+       VALUES ('x','qa-adm-cup@test.com','A','B','1','1','retiro','L','local',1000000,100000,0,0,900000,'pagado',$1,'QAADMUSADO') RETURNING id`, [id]);
+    expect(pedido.rowCount).toBe(1);
+    expect((await req("DELETE", `/v1/admin/cupones/${id}`, operador)).statusCode).toBe(409);
+    const sinUso = (await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMBORRAR" })).json().id;
+    expect((await req("DELETE", `/v1/admin/cupones/${sinUso}`, operador)).statusCode).toBe(200);
+  });
+});
+
+describe("colores y talles (importación del mayorista)", () => {
+  it("renombrar un color lo fija; null lo devuelve a Stocker", async () => {
+    const det = (await req("GET", `/v1/admin/productos/${ids["qa-adm-3"]}`, operador)).json();
+    const c = det.colores[0];
+    expect((await req("PATCH", `/v1/admin/colores/${c.id}`, operador, { nombre: "Negro azabache" })).statusCode).toBe(200);
+    let d2 = (await req("GET", `/v1/admin/productos/${ids["qa-adm-3"]}`, operador)).json().colores[0];
+    expect([d2.nombre, d2.nombreFijo, d2.hex]).toEqual(["Negro azabache", true, c.hex]);
+    await req("PATCH", `/v1/admin/colores/${c.id}`, operador, { nombre: null });
+    d2 = (await req("GET", `/v1/admin/productos/${ids["qa-adm-3"]}`, operador)).json().colores[0];
+    expect(d2.nombreFijo).toBe(false);
+    expect((await req("PATCH", `/v1/admin/colores/${c.id}`, operador, { nombre: "x" })).statusCode).toBe(400);
+  });
+  it("ocultar un talle lo saca de la tienda; mostrarlo lo vuelve a poner", async () => {
+    const r = await req("PATCH", "/v1/admin/variantes/QA-ADM-5-2", operador, { oculta: true });
+    expect(r.statusCode, r.body).toBe(200);
+    const ficha = async () => (await app.inject("/v1/productos/qa-adm-5")).json();
+    expect((await ficha()).variantes.map((v: { talle: string }) => v.talle)).toEqual(["M"]);
+    await req("PATCH", "/v1/admin/variantes/QA-ADM-5-2", operador, { oculta: false });
+    expect((await ficha()).variantes.map((v: { talle: string }) => v.talle)).toEqual(["M", "XXL"]);
+    expect((await req("PATCH", "/v1/admin/variantes/NO-EXISTE-9", operador, { oculta: true })).statusCode).toBe(404);
+    expect((await req("PATCH", "/v1/admin/variantes/QA-ADM-5-2", lectura2, { oculta: true })).json().error).toBe("sin_permiso");
   });
 });

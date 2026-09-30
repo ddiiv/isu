@@ -24,8 +24,10 @@ test.describe("inicio", () => {
     expect(errores).toEqual([]);
   });
 
-  test("botón flotante de WhatsApp al número de trabajo", async ({ page }) => {
+  test("botón flotante de WhatsApp al número de trabajo (adentro del asistente si está prendido)", async ({ page }) => {
     await page.goto("/");
+    const asistente = page.getByRole("button", { name: "Abrir el asistente de la tienda" });
+    if (await asistente.isVisible()) await asistente.click();
     const wa = page.getByRole("link", { name: "Escribinos por WhatsApp" });
     await expect(wa).toBeVisible();
     await expect(wa).toHaveAttribute("href", /^https:\/\/wa\.me\/5491168515444\?text=/);

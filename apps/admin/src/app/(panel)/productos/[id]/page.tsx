@@ -12,11 +12,11 @@ interface Detalle {
     descripcion: string | null; descripcionStocker: string | null; seoTitulo: string | null; seoDescripcion: string | null;
     categoriaStocker: string | null; generoStocker: string | null; categoriasFijas: boolean;
     destacado: boolean; destacadoOrden: number; nuevo: boolean; categorias: number[];
-    guiaTallesId: number | null; parteOutfit: string | null; parteOutfitSugerida: string | null;
+    guiaTallesId: number | null; parteOutfit: string | null; parteOutfitSugerida: string | null; pesoGramos: number | null;
   };
-  colores: Array<{ id: number; clave: string; nombre: string; hex: string | null; orden: number; activo: boolean }>;
+  colores: Array<{ id: number; clave: string; nombre: string; hex: string | null; orden: number; activo: boolean; nombreFijo: boolean }>;
   fotos: Array<{ id: number; tipo: "color" | "exhibicion"; colorId: number | null; orden: number; clave: string; ancho: number; alto: number; alt: string | null }>;
-  variantes: Array<{ sku: string; talle: string | null; precio: number; stock: number; activo: boolean; colorId: number | null }>;
+  variantes: Array<{ sku: string; talle: string | null; precio: number; stock: number; activo: boolean; oculta: boolean; colorId: number | null }>;
   topeFotos: number;
 }
 type Form = Detalle["producto"];
@@ -44,7 +44,7 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
   async function guardar() {
     if (!f) return;
     const cambios: Record<string, unknown> = {};
-    const campos = ["nombre", "descripcion", "seoTitulo", "seoDescripcion", "visible", "destacado", "destacadoOrden", "nuevo", "guiaTallesId", "parteOutfit"] as const;
+    const campos = ["nombre", "descripcion", "seoTitulo", "seoDescripcion", "visible", "destacado", "destacadoOrden", "nuevo", "guiaTallesId", "parteOutfit", "pesoGramos"] as const;
     for (const k of campos) if (JSON.stringify(f[k]) !== JSON.stringify(original[k])) cambios[k] = f[k];
     if (JSON.stringify([...f.categorias].sort()) !== JSON.stringify([...original.categorias].sort())) cambios.categorias = f.categorias;
     if (!Object.keys(cambios).length) return;
@@ -91,18 +91,24 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
           <Tarjeta titulo="Variantes (de Stocker)">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="text-tinta-tenue"><tr><th className="py-2">SKU</th><th>Color</th><th>Talle</th><th className="text-right">Precio</th><th className="text-right">Stock</th></tr></thead>
+                <thead className="text-tinta-tenue"><tr><th className="py-2">SKU</th><th>Color</th><th>Talle</th><th className="text-right">Precio</th><th className="text-right">Stock</th><th className="pl-3 text-center">En la tienda</th></tr></thead>
                 <tbody className="divide-y divide-linea">
                   {d.variantes.map((v) => (
-                    <tr key={v.sku} className={v.activo ? "" : "text-tinta-tenue line-through"}>
-                      <td className="py-1.5">{v.sku}</td><td>{d.colores.find((c) => c.id === v.colorId)?.nombre ?? "—"}</td><td>{v.talle ?? "—"}</td>
+                    <tr key={v.sku} className={v.activo ? "" : "text-tinta-tenue"}>
+                      <td className={`py-1.5 ${v.activo ? "" : "line-through"}`}>{v.sku}</td><td>{d.colores.find((c) => c.id === v.colorId)?.nombre ?? "—"}</td><td>{v.talle ?? "—"}</td>
                       <td className="text-right">{pesos(v.precio)}</td><td className={`text-right ${v.stock ? "" : "text-oferta"}`}>{v.stock}</td>
+                      <td className="pl-3 text-center">
+                        {/* Un talle que existe en Stocker pero no se vende online (ej. una musculosa sólo en talle Único). */}
+                        <input type="checkbox" checked={!v.oculta} disabled={!operador} aria-label={`Vender ${v.sku} en la tienda`} className="size-4 accent-marca"
+                          onChange={(e) => void api(`variantes/${encodeURIComponent(v.sku)}`, { metodo: "PATCH", cuerpo: { oculta: !e.target.checked } })
+                            .then(() => { aviso.ok(e.target.checked ? "Talle a la venta." : "Talle oculto en la tienda (sigue en Stocker)."); return recargar(); }, aviso.error)} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="mt-2 text-xs text-tinta-tenue">Precio y stock se cambian en Stocker. Para rebajas usá Descuentos.</p>
+            <p className="mt-2 text-xs text-tinta-tenue">Precio y stock se cambian en Stocker. Para rebajas usá Descuentos. Destildá «En la tienda» para no vender un talle online.</p>
           </Tarjeta>
         </div>
 
@@ -156,6 +162,13 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
             </select>
           </Tarjeta>
 
+          <Tarjeta titulo="Peso para el envío">
+            <Campo etiqueta="Gramos por prenda" ayuda="Vacío = el peso por defecto de Ajustes. Sirve para cotizar prendas pesadas (camperas, jeans).">
+              <input type="number" min={10} max={30000} inputMode="numeric" className={`${claseEntrada} w-36`} disabled={!operador}
+                value={f.pesoGramos ?? ""} onChange={(e) => cambiar("pesoGramos", e.target.value ? Math.round(Number(e.target.value)) : null)} />
+            </Campo>
+          </Tarjeta>
+
           <Colores d={d} operador={operador} recargar={recargar} aviso={aviso} />
         </div>
       </div>
@@ -171,7 +184,18 @@ function Colores({ d, operador, recargar, aviso }: { d: Detalle; operador: boole
       <ul className="space-y-2">
         {d.colores.map((c) => (
           <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-            <span className={c.activo ? "" : "text-tinta-tenue line-through"}>{c.nombre}</span>
+            <span className="min-w-0 flex-1">
+              <label className="sr-only" htmlFor={`color-${c.id}`}>Nombre del color {c.nombre}</label>
+              <input id={`color-${c.id}`} disabled={!operador} defaultValue={c.nombre} maxLength={60}
+                className={`w-full rounded-lg border border-transparent bg-transparent px-1.5 py-1 hover:border-linea focus:border-marca focus:outline-none ${c.activo ? "" : "text-tinta-tenue line-through"}`}
+                onBlur={(e) => { const v = e.target.value.trim(); if (v.length >= 2 && v !== c.nombre) void api(`colores/${c.id}`, { metodo: "PATCH", cuerpo: { nombre: v } }).then(() => { aviso.ok("Nombre guardado: Stocker ya no lo cambia."); return recargar(); }, aviso.error); }} />
+              {c.nombreFijo && operador && (
+                <button type="button" className="px-1.5 text-xs text-tinta-tenue underline"
+                  onClick={() => void api(`colores/${c.id}`, { metodo: "PATCH", cuerpo: { nombre: null } }).then(() => { aviso.ok("Vuelve al nombre de Stocker en la próxima sincronización."); return recargar(); }, aviso.error)}>
+                  Nombre puesto a mano · volver al de Stocker
+                </button>
+              )}
+            </span>
             <label className="flex items-center gap-2">
               <span className="sr-only">Color de muestra de {c.nombre}</span>
               <input type="color" disabled={!operador} defaultValue={c.hex ?? "#cccccc"} className="h-8 w-12 cursor-pointer rounded border border-linea"
@@ -180,7 +204,7 @@ function Colores({ d, operador, recargar, aviso }: { d: Detalle; operador: boole
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs text-tinta-tenue">Es el circulito que se ve en la grilla. Los colores salen de Stocker.</p>
+      <p className="mt-2 text-xs text-tinta-tenue">El circulito es la muestra que se ve en la grilla. Los colores salen de Stocker; si le cambiás el nombre acá (ej. «Único» → «Negro»), la tienda usa el tuyo.</p>
     </Tarjeta>
   );
 }

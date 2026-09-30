@@ -62,7 +62,9 @@ async function pasar(req: NextRequest, ctx: { params: Promise<{ ruta: string[] }
   if (disposicion) {
     return new NextResponse(await r.arrayBuffer(), {
       status: r.status,
-      headers: { ...cabeceras, "content-type": r.headers.get("content-type") ?? "application/octet-stream", "content-disposition": disposicion, "content-security-policy": "default-src 'none'; sandbox", "x-content-type-options": "nosniff" },
+      headers: { ...cabeceras, "content-type": r.headers.get("content-type") ?? "application/octet-stream", "content-disposition": disposicion, "content-security-policy": "default-src 'none'; sandbox", "x-content-type-options": "nosniff",
+        // Etiquetas: qué pedidos no tenían etiqueta para imprimir.
+        ...(r.headers.get("x-isu-sin-etiqueta") ? { "x-isu-sin-etiqueta": r.headers.get("x-isu-sin-etiqueta")!.slice(0, 400) } : {}) },
     });
   }
   if (ruta === "salir") return new NextResponse(null, { status: 204, headers: { ...cabeceras, "set-cookie": cookieAdmin(null) } });

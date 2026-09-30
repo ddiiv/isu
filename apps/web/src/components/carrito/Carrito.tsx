@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { MAX_LINEAS_CARRITO, MAX_UNIDADES_POR_ARTICULO, type Cotizacion } from "@isu/shared";
 import { api } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
@@ -9,6 +9,10 @@ import { evento, pesos } from "@/lib/ga";
  * instantáneo y no le pega a la base por cada clic. Lo que se guarda es sólo
  * SKU y cantidad (más lo necesario para dibujarlo); precios, stock, envío y
  * descuentos los calcula SIEMPRE la API al cotizar.
+ *
+ * El cupón también: se guarda el código que escribió el cliente y la API
+ * dice si sirve. Si no se aplicó (no existe, venció, falta monto…), se
+ * muestra por qué y se descarta: no se sigue mandando en cada cotización.
  */
 export interface LineaCarrito { sku: string; cantidad: number; nombre: string; slug: string; color: string | null; talle: string | null; precio: number; foto: string | null }
 
@@ -24,16 +28,32 @@ interface Ctx {
   vaciar(): void;
   cotizacion: Cotizacion | null;
   cotizando: boolean;
-  cotizar(opciones?: { entrega?: "envio" | "retiro"; medioPago?: string }): Promise<Cotizacion | null>;
+  cotizar(opciones?: OpcionesCotizar): Promise<Cotizacion | null>;
+  /** código de cupón aplicado (o recién escrito, mientras se valida) */
+  cupon: string | null;
+  ponerCupon(codigo: string | null): void;
+  /** por qué el último cupón escrito no se aplicó, o un aviso sobre la promo */
+  avisoCupon: string | null;
 }
 const Contexto = createContext<Ctx | null>(null);
 const CLAVE = "isu:carrito";
+const CLAVE_CUPON = "isu:cupon";
+const normalizar = (c: string) => c.trim().toUpperCase().replace(/\s+/g, "");
+/** `envio`: la opción de envío elegida en el checkout (la API la vuelve a cotizar y la suma). */
+export interface OpcionesCotizar {
+  entrega?: "envio" | "retiro"; medioPago?: string;
+  envio?: { cp: string; provincia: string; localidad: string; opcion: string };
+}
 
 export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
   const [lineas, setLineas] = useState<LineaCarrito[]>([]);
   const [abierto, setAbierto] = useState(false);
   const [cotizacion, setCotizacion] = useState<Cotizacion | null>(null);
   const [cotizando, setCotizando] = useState(false);
+  const [cupon, setCupon] = useState<string | null>(null);
+  const [avisoCupon, setAvisoCupon] = useState<string | null>(null);
+  // Con qué se cotizó la última vez (el checkout manda entrega y pago): al cambiar el cupón se repite igual.
+  const ultimas = useRef<OpcionesCotizar>({});
   // Nada se guarda hasta haber leído lo guardado: si no, el carrito vacío del
   // primer dibujo pisa el de verdad (React en desarrollo corre los efectos dos veces).
   const [cargado, setCargado] = useState(false);
@@ -42,6 +62,8 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     try {
       const g = JSON.parse(localStorage.getItem(CLAVE) ?? "[]");
       if (Array.isArray(g)) setLineas(g.filter((l) => typeof l?.sku === "string" && Number.isInteger(l?.cantidad)).slice(0, MAX_LINEAS_CARRITO));
+      const cu = localStorage.getItem(CLAVE_CUPON);
+      if (cu && /^[A-Z0-9_-]{3,30}$/.test(cu)) setCupon(cu);
     } catch { /* carrito roto: se empieza de cero */ }
     setCargado(true);
     // Otra pestaña cambió el carrito.
@@ -53,13 +75,23 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     if (!cargado) return;
     try { localStorage.setItem(CLAVE, JSON.stringify(lineas)); } catch { /* modo privado */ }
   }, [lineas, cargado]);
+  useEffect(() => {
+    if (!cargado) return;
+    try { if (cupon) localStorage.setItem(CLAVE_CUPON, cupon); else localStorage.removeItem(CLAVE_CUPON); } catch { /* modo privado */ }
+  }, [cupon, cargado]);
 
-  const cotizar = useCallback(async (opciones: { entrega?: "envio" | "retiro"; medioPago?: string } = {}) => {
+  const cotizar = useCallback(async (opciones: OpcionesCotizar = {}) => {
+    ultimas.current = opciones;
     if (!lineas.length) { setCotizacion(null); return null; }
     setCotizando(true);
     try {
-      const c = await api<Cotizacion>("carrito", { cuerpo: { items: lineas.map(({ sku, cantidad }) => ({ sku, cantidad })), ...opciones } });
+      const c = await api<Cotizacion>("carrito", { cuerpo: { items: lineas.map(({ sku, cantidad }) => ({ sku, cantidad })), ...opciones, ...(cupon ? { cupon } : {}) } });
       setCotizacion(c);
+      if (cupon) {
+        // No se aplicó: se dice por qué y se deja de mandar.
+        if (c.cupon?.codigo !== cupon) { setAvisoCupon(c.avisoCupon ?? "Ese cupón no se puede usar."); setCupon(null); }
+        else setAvisoCupon(null);
+      }
       // Los precios guardados se actualizan con los de verdad.
       setLineas((ls) => ls.map((l) => { const x = c.lineas.find((y) => y.sku === l.sku); return x && x.precio !== l.precio ? { ...l, precio: x.precio } : l; }));
       return c;
@@ -68,7 +100,12 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     } finally {
       setCotizando(false);
     }
-  }, [lineas]);
+  }, [lineas, cupon]);
+  // Cupón nuevo (o quitado): se vuelve a cotizar con lo mismo de la última vez.
+  useEffect(() => {
+    if (cargado && lineas.length) void cotizar(ultimas.current);
+    // Dependencias a propósito: sólo cuando cambia el cupón
+  }, [cupon]);
 
   const valor = useMemo<Ctx>(() => ({
     lineas,
@@ -94,9 +131,12 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
         return ls.filter((x) => x.sku !== sku);
       });
     },
-    vaciar: () => { setLineas([]); setCotizacion(null); },
+    vaciar: () => { setLineas([]); setCotizacion(null); setCupon(null); setAvisoCupon(null); },
     cotizacion, cotizando, cotizar,
-  }), [lineas, abierto, cotizacion, cotizando, cotizar]);
+    cupon,
+    ponerCupon: (codigo) => { setAvisoCupon(null); setCupon(codigo ? normalizar(codigo).slice(0, 40) || null : null); },
+    avisoCupon,
+  }), [lineas, abierto, cotizacion, cotizando, cotizar, cupon, avisoCupon]);
 
   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;
 }

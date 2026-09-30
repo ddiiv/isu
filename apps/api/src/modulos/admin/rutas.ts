@@ -16,6 +16,7 @@ import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
 import { rutasGuiasAdmin } from "./talles.js";
 import { auditar, exigir, type Admin } from "./sesion.js";
+import { AjusteChatbot, AjusteChatbotIa, AjusteTransportes, EnviosEnElDia, OrigenEnvios, PaqueteEnvios } from "@isu/shared";
 
 /*
  * Backoffice. Todo exige sesión con doble factor y un rol:
@@ -139,11 +140,19 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const validos: Record<string, string[]> = {
       listo_para_retirar: ["pagado"], retirado: ["listo_para_retirar", "pagado"], enviado: ["pagado"], entregado: ["enviado"],
     };
+    /*
+     * Con transporte (etapa 4) el "enviado" lo marca el despacho en Stocker y
+     * el "entregado" el seguimiento del transporte: a mano, sólo el envío
+     * estándar y el retiro. Un pedido de envío no se marca "retirado" ni al revés.
+     */
     const { rows } = await pool.query<{ id: number; estado: string; entrega: string }>(
-      "UPDATE tienda.pedidos SET estado = $2, actualizado_en = now() WHERE numero = $1 AND estado = ANY($3::text[]) RETURNING id, estado, entrega",
+      `UPDATE tienda.pedidos SET estado = $2, actualizado_en = now()
+        WHERE numero = $1 AND estado = ANY($3::text[])
+          AND CASE WHEN $2 IN ('enviado', 'entregado') THEN entrega = 'envio' AND COALESCE(transporte, 'estandar') = 'estandar' ELSE entrega = 'retiro' END
+        RETURNING id, estado, entrega`,
       [req.params.numero, req.body.estado, validos[req.body.estado]],
     );
-    if (!rows[0]) throw new ErrorHttp(409, "transicion", "Ese cambio de estado no corresponde para este pedido.");
+    if (!rows[0]) throw new ErrorHttp(409, "transicion", "Ese cambio de estado no corresponde para este pedido (los envíos con transporte se actualizan solos desde Envíos).");
     await deps.servicio.evento(pool, rows[0].id, req.body.estado, a.email, req.body.detalle);
     await auditar(pool, a, "entrega", "pedido", req.params.numero, req.body, ip(req));
     return { numero: req.params.numero, estado: req.body.estado };
@@ -220,15 +229,15 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const p = rows[0];
     if (!p) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
     const [colores, fotos, variantes, cats] = await Promise.all([
-      pool.query("SELECT id, clave, nombre, hex, orden, activo FROM tienda.producto_colores WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
+      pool.query("SELECT id, clave, nombre, hex, orden, activo, nombre_fijo AS \"nombreFijo\" FROM tienda.producto_colores WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
       pool.query("SELECT id, tipo, color_id AS \"colorId\", orden, clave, ancho, alto, alt FROM tienda.fotos WHERE producto_id = $1 ORDER BY tipo, color_id NULLS FIRST, orden, id", [p.id]),
-      pool.query("SELECT sku, talle, precio, stock, activo, color_id AS \"colorId\" FROM tienda.variantes WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
+      pool.query("SELECT sku, talle, precio, stock, activo, oculta, color_id AS \"colorId\" FROM tienda.variantes WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
       pool.query<{ categoria_id: number }>("SELECT categoria_id FROM tienda.producto_categorias WHERE producto_id = $1", [p.id]),
     ]);
     const nColores = colores.rows.filter((c) => c.activo).length;
     return {
       producto: {
-        id: p.id, slug: p.slug, nombre: p.nombre, nombreFijo: p.nombre_fijo, sku: p.stocker_padre, visible: p.visible, enStocker: p.en_stocker,
+        id: p.id, slug: p.slug, nombre: p.nombre, nombreFijo: p.nombre_fijo, pesoGramos: p.peso_gramos, sku: p.stocker_padre, visible: p.visible, enStocker: p.en_stocker,
         descripcion: p.descripcion, descripcionStocker: p.stocker_descripcion, seoTitulo: p.seo_titulo, seoDescripcion: p.seo_descripcion,
         categoriaStocker: p.stocker_categoria, generoStocker: p.stocker_genero, categoriasFijas: p.categorias_fijas,
         destacado: p.destacado, destacadoOrden: p.destacado_orden, nuevo: p.nuevo, categorias: cats.rows.map((c) => c.categoria_id),
@@ -254,6 +263,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     guiaTallesId: Id.nullable().optional(),
     // null = automático (según la categoría).
     parteOutfit: z.enum(["arriba", "abajo", "abrigo", "ninguna"]).nullable().optional(),
+    // Etapa 4: para cotizar el envío. null = el peso por defecto de Ajustes.
+    pesoGramos: z.number().int().min(10).max(30_000).nullable().optional(),
   }).strict();
 
   async function aplicarCambios(cli: pg.PoolClient, ids: number[], c: z.infer<typeof CambiosProducto>) {
@@ -269,6 +280,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     if (c.destacado !== undefined) poner("destacado", c.destacado);
     if (c.destacadoOrden !== undefined) poner("destacado_orden", c.destacadoOrden);
     if (c.parteOutfit !== undefined) poner("parte_outfit", c.parteOutfit);
+    if (c.pesoGramos !== undefined) poner("peso_gramos", c.pesoGramos);
     if (c.guiaTallesId !== undefined) {
       if (c.guiaTallesId !== null && !(await cli.query("SELECT 1 FROM tienda.guias_talles WHERE id = $1", [c.guiaTallesId])).rowCount) throw new ErrorHttp(400, "guia", "Esa guía de talles no existe.");
       poner("guia_talles_id", c.guiaTallesId);
@@ -309,7 +321,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     schema: {
       body: z.object({
         ids: z.array(Id).min(1).max(500),
-        cambios: CambiosProducto.pick({ visible: true, destacado: true, nuevo: true, categorias: true, guiaTallesId: true, parteOutfit: true }).extend({
+        cambios: CambiosProducto.pick({ visible: true, destacado: true, nuevo: true, categorias: true, guiaTallesId: true, parteOutfit: true, pesoGramos: true }).extend({
           agregarCategoria: Id.optional(), quitarCategoria: Id.optional(),
         }).strict(),
       }).strict(),
@@ -339,11 +351,42 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     return { ok: true, productos: ids.length };
   });
 
-  api.patch("/v1/admin/colores/:id", { schema: { params: z.object({ id: Id }), body: z.object({ hex: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable() }).strict() } }, async (req) => {
+  // Color: el hex de la muestra y, si hace falta, otro nombre ("Único" → "Negro"). Un nombre puesto a mano
+  // queda fijo (la sincronización con Stocker no lo pisa); null lo devuelve al de Stocker en la próxima pasada.
+  api.patch("/v1/admin/colores/:id", {
+    schema: {
+      params: z.object({ id: Id }),
+      body: z.object({ hex: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(), nombre: z.string().trim().min(2).max(60).nullable().optional() }).strict(),
+    },
+  }, async (req) => {
     const a = await exigir(pool, req, "operador");
-    const { rows } = await pool.query<{ producto_id: number }>("UPDATE tienda.producto_colores SET hex = $2 WHERE id = $1 RETURNING producto_id", [req.params.id, req.body.hex]);
+    const { hex, nombre } = req.body;
+    const { rows } = await pool.query<{ producto_id: number }>(
+      `UPDATE tienda.producto_colores SET
+          hex = CASE WHEN $2 THEN $3 ELSE hex END,
+          nombre = COALESCE($4, nombre),
+          nombre_fijo = CASE WHEN $5 THEN $4 IS NOT NULL ELSE nombre_fijo END
+        WHERE id = $1 RETURNING producto_id`,
+      [req.params.id, hex !== undefined, hex ?? null, nombre ?? null, nombre !== undefined]);
     if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese color.");
-    await auditar(pool, a, "color_hex", "color", req.params.id, req.body, ip(req));
+    await auditar(pool, a, nombre !== undefined ? "color_nombre" : "color_hex", "color", req.params.id, req.body, ip(req));
+    await invalidar(await slugsDe([rows[0].producto_id]));
+    return { ok: true };
+  });
+
+  // Talle que existe en Stocker pero la tienda no vende (queda oculto aunque Stocker lo tenga).
+  api.patch("/v1/admin/variantes/:sku", {
+    schema: { params: z.object({ sku: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/) }), body: z.object({ oculta: z.boolean() }).strict() },
+  }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const { rows } = await pool.query<{ producto_id: number }>(
+      `UPDATE tienda.variantes v SET oculta = $2,
+          -- al volver a mostrarla, activa sólo si el producto sigue en Stocker (la sincronización lo confirma igual)
+          activo = CASE WHEN $2 THEN false ELSE (SELECT p.en_stocker FROM tienda.productos p WHERE p.id = v.producto_id) END,
+          actualizado_en = now()
+        WHERE sku = $1 RETURNING producto_id`, [req.params.sku, req.body.oculta]);
+    if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese SKU.");
+    await auditar(pool, a, req.body.oculta ? "ocultar_talle" : "mostrar_talle", "variante", req.params.sku, req.body, ip(req));
     await invalidar(await slugsDe([rows[0].producto_id]));
     return { ok: true };
   });
@@ -590,6 +633,15 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     horasPagoLocal: z.number().int().min(24).max(720),
     datosTransferencia: Transferencia,
     publicarNuevos: z.boolean(),
+    // Etapa 4
+    transportes: AjusteTransportes,
+    origenEnvios: OrigenEnvios,
+    paqueteEnvios: PaqueteEnvios,
+    enviosEnElDia: EnviosEnElDia,
+    avisosWhatsapp: z.boolean(),
+    // Etapa 5
+    chatbot: AjusteChatbot,
+    chatbotIa: AjusteChatbotIa,
   };
   api.get("/v1/admin/ajustes", async (req) => {
     await exigir(pool, req, "dueno");

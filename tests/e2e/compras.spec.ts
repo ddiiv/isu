@@ -138,9 +138,9 @@ test.describe("checkout", () => {
     await expect(page.getByText("Pagar al retirar en el local")).toBeHidden();
     await page.getByText("Retiro en el local").click();
     await expect(page.getByText("Pagar al retirar en el local")).toBeVisible();
-    await page.getByText("Envío a domicilio").click();
+    await page.getByText("A domicilio o a sucursal, a todo el país").click();
     await datos(page, email("envio", info));
-    await page.getByRole("checkbox").check();
+    await page.getByRole("checkbox", { name: /Acepto los/ }).check();
     await page.getByRole("button", { name: /Confirmar compra|Ir a pagar/ }).click();
     await expect(page.locator("[aria-invalid=true]").first()).toBeFocused();
   });

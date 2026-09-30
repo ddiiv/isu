@@ -5,6 +5,8 @@ import type { ClienteStocker } from "./stocker/cliente.js";
 import { MAX_SKUS_POR_PEDIDO } from "./stocker/cliente.js";
 import { aplicarCatalogo, aplicarStock, registrar } from "./stocker/sincronizar.js";
 import type { Invalidador } from "./stocker/invalidar.js";
+import type { Envios } from "./envios/envios.js";
+import type { Whatsapp } from "@isu/envios";
 
 /*
  * Qué hace cada trabajo de cada cola.
@@ -16,7 +18,13 @@ import type { Invalidador } from "./stocker/invalidar.js";
  * stocker/pagado    avisarle a Stocker que un pedido se cobró (sin esto no se despacha).
  * stocker/cliente   alta o actualización del cliente en Stocker.
  * stocker/invalidar el backoffice cambió la vidriera: regenerar páginas (ISR).
- * notificaciones/email   mails al cliente.
+ * stocker/envio    el número de seguimiento al pedido de Stocker (Envíos del día).
+ * notificaciones/email · notificaciones/whatsapp   avisos al cliente.
+ * envios/despachado      Stocker despachó (o le falta mercadería): el pedido sale.
+ * envios/seguimiento     cada 10 minutos, los envíos a los que les toca.
+ * envios/seguir          uno ya (botón "Actualizar" del backoffice).
+ * envios/revisar-despachos  repaso por si se perdió un aviso de Stocker.
+ * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
  * pagos/vencer · pagos/conciliar-mp   los corre la API (tiene la lógica del pedido);
  *                   el worker sólo marca el ritmo (cada 1 y 10 minutos).
  */
@@ -36,7 +44,12 @@ export interface Extras {
   correo?: (datos: unknown) => Promise<unknown>;
   /** POST a una ruta interna de la API (con la credencial interna). */
   api?: (ruta: string) => Promise<unknown>;
+  envios?: Envios;
+  whatsapp?: Whatsapp | null;
 }
+
+const NUMERO = /^ISU-\d{4,10}$/;
+const sinReintento = (m: string) => Object.assign(new Error(m), { sinReintento: true });
 
 export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Record<string, Record<string, Procesador>> {
   const necesita = () => {
@@ -94,6 +107,22 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         return { slugs: slugs.length };
       },
 
+      envio: async (t) => {
+        const d = necesita();
+        const numero = String(t.data?.numero ?? "");
+        const tipo = String(t.data?.tipo ?? "");
+        const seguimiento = t.data?.seguimiento === undefined || t.data.seguimiento === null ? undefined : String(t.data.seguimiento);
+        if (!NUMERO.test(numero) || !/^[a-z_]{3,20}$/.test(tipo)) throw sinReintento("Datos de envío inválidos");
+        try {
+          const r = await d.stocker.cargarEnvio(numero, { tipo, seguimiento });
+          return { envioTipo: r.envioTipo, envioId: r.envioId };
+        } catch (e) {
+          // Ya despachado con otro número, o el pedido no está: lo ve una persona.
+          if ([404, 409].includes((e as { status?: number }).status ?? 0)) throw Object.assign(e as Error, { sinReintento: true });
+          throw e;
+        }
+      },
+
       cliente: async (t) => {
         const d = necesita();
         const c = t.data ?? {};
@@ -108,8 +137,51 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         if (!extras.correo) throw Object.assign(new Error("Correo sin configurar"), { sinReintento: true });
         return extras.correo(t.data);
       },
+      whatsapp: async (t) => {
+        if (!extras.whatsapp) throw sinReintento("WhatsApp sin configurar");
+        const tel = String(t.data?.telefono ?? "");
+        const plantilla = String(t.data?.plantilla ?? "");
+        const parametros = Array.isArray(t.data?.parametros) ? (t.data.parametros as unknown[]).map((p) => String(p).slice(0, 200)).slice(0, 10) : [];
+        if (!/^549\d{10}$/.test(tel)) throw sinReintento("Teléfono inválido");
+        try {
+          return await extras.whatsapp.plantilla(tel, plantilla, parametros);
+        } catch (e) {
+          // Meta rechaza (plantilla no aprobada, número sin WhatsApp): reintentar no lo arregla.
+          if ((e as { reintentable?: boolean }).reintentable === false) throw Object.assign(e as Error, { sinReintento: true });
+          throw e;
+        }
+      },
     },
-    envios: {},
+    envios: {
+      despachado: async (t) => {
+        const e = extras.envios ?? (() => { throw sinReintento("Envíos sin configurar"); })();
+        const numero = String(t.data?.numero ?? "");
+        const que = t.data?.evento === "faltante" ? "faltante" : "despachado";
+        if (!NUMERO.test(numero)) throw sinReintento("Número de pedido inválido");
+        return e.despachado(numero, que);
+      },
+      seguimiento: async () => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        return extras.envios.seguirPendientes();
+      },
+      seguir: async (t) => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        const id = Number(t.data?.envioId);
+        if (!Number.isInteger(id) || id <= 0) throw sinReintento("Envío inválido");
+        return extras.envios.seguir(id);
+      },
+      "revisar-despachos": async () => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        return extras.envios.revisarDespachos();
+      },
+      "mercado-envios": async (t) => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        const numero = String(t.data?.numero ?? "");
+        const pagoId = String(t.data?.pagoId ?? "");
+        if (!NUMERO.test(numero) || !/^\d{1,20}$/.test(pagoId)) throw sinReintento("Datos inválidos");
+        return extras.envios.mercadoEnvios(numero, pagoId);
+      },
+    },
     pagos: {
       vencer: async () => {
         if (!extras.api) throw Object.assign(new Error("Falta API_URL / INTERNO_TOKEN en el worker"), { sinReintento: true });

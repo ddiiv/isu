@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { formatearPesos, type PedidoPublico } from "@isu/shared";
 import { api, guardarAcceso, leerAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
+import { SeguimientoEnvio } from "./SeguimientoEnvio";
 
 /*
  * El pedido y su pago. Mientras el pago está en camino (volviendo de Mercado
@@ -21,6 +22,10 @@ const TEXTO: Record<string, [string, string]> = {
   vencido: ["El pedido venció", "No recibimos el pago a tiempo y liberamos las prendas. Si ya pagaste, escribinos con el comprobante."],
   cancelado: ["Pedido cancelado", "Si pagaste, te devolvemos el dinero por el mismo medio."],
   sin_stock: ["No pudimos confirmar el pedido", "Justo se vendió algo de tu carrito. No se te cobró nada."],
+  listo_para_retirar: ["¡Listo para retirar!", "Ya podés pasar a buscarlo por el local."],
+  retirado: ["Pedido retirado", "¡Gracias por tu compra!"],
+  enviado: ["¡Tu pedido está en camino!", "Te avisamos cuando esté por llegar. Abajo ves cómo viene."],
+  entregado: ["Pedido entregado", "¡Esperamos que te encante! Si algo no te queda bien, escribinos."],
 };
 const PENDIENTE_DE_CONFIRMAR = new Set(["esperando_pago", "transferencia_informada", "esperando_transferencia"]);
 
@@ -149,7 +154,8 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
         {aviso && <p className="mt-4 text-sm font-bold" role="status">{aviso}</p>}
 
         {p.estado === "a_pagar_en_local" && p.local && <p className="mt-6 rounded-2xl bg-marca-claro p-4">Retirás en <b>{p.local}</b>. Llevá tu DNI y el número de pedido.</p>}
-        {["pagado", "vencido", "cancelado", "sin_stock"].includes(p.estado) && <Link href="/" className="boton-borde mt-6">Seguir comprando</Link>}
+        {p.envioDetalle && ["pagado", "enviado", "entregado"].includes(p.estado) && <SeguimientoEnvio envio={p.envioDetalle} />}
+        {["pagado", "vencido", "cancelado", "sin_stock", "enviado", "entregado", "retirado"].includes(p.estado) && <Link href="/" className="boton-borde mt-6">Seguir comprando</Link>}
       </section>
 
       <aside className="self-start rounded-[var(--radius-foto)] border border-linea p-5">
@@ -158,8 +164,17 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
           {p.items.map((i) => <li key={i.sku} className="flex justify-between gap-3"><span>{i.cantidad} × {i.nombre}{i.color ? ` · ${i.color}` : ""}{i.talle ? ` · ${i.talle}` : ""}</span><span className="shrink-0">{formatearPesos(i.precio * i.cantidad)}</span></li>)}
         </ul>
         <dl className="mt-4 space-y-1 border-t border-linea pt-4 text-[15px]">
-          {p.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento</dt><dd>−{formatearPesos(p.descuento)}</dd></div>}
-          <div className="flex justify-between"><dt>{p.entrega === "retiro" ? "Retiro en el local" : "Envío"}</dt><dd>{p.envio ? formatearPesos(p.envio) : "Gratis"}</dd></div>
+          {p.cupon && (
+            <div className="flex justify-between gap-3 text-ahorro">
+              <dt>{p.cupon.codigo ? <>Cupón <b>{p.cupon.codigo}</b></> : <>Promo: {p.cupon.nombre}</>}</dt>
+              <dd className="shrink-0">{p.descuentoCupon ? `−${formatearPesos(p.descuentoCupon)}` : "Envío gratis"}</dd>
+            </div>
+          )}
+          {p.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento{p.medioPago === "transferencia" ? " transferencia" : ""}</dt><dd>−{formatearPesos(p.descuento)}</dd></div>}
+          <div className="flex justify-between gap-3">
+            <dt>{p.entrega === "retiro" ? "Retiro en el local" : "Envío"}{p.envioDetalle && <span className="block text-xs text-tinta-suave">{p.envioDetalle.nombreTransporte}</span>}</dt>
+            <dd className="shrink-0 text-right">{p.envioDetalle?.transporte === "mercado_envios" ? <span className="text-sm">Pagado en Mercado Pago</span> : p.envio ? formatearPesos(p.envio) : "Gratis"}</dd>
+          </div>
           <div className="flex justify-between pt-1 font-display text-2xl"><dt>Total</dt><dd>{formatearPesos(p.total)}</dd></div>
         </dl>
         <p className="mt-4 text-sm text-tinta-suave">{p.entrega === "envio" && p.direccion ? `${p.direccion.calle} ${p.direccion.numero}${p.direccion.piso ? `, ${p.direccion.piso}` : ""} · ${p.direccion.localidad}, ${p.direccion.provincia}` : p.local}</p>

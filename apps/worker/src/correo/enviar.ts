@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 import { z } from "zod";
-import { armar, type Plantilla } from "./plantillas.js";
+import { armar, PLANTILLAS, type Plantilla } from "./plantillas.js";
 
 /*
  * Envío por SMTP (en local, Mailpit; en producción, el proveedor que se elija:
@@ -8,7 +8,7 @@ import { armar, type Plantilla } from "./plantillas.js";
  * en el log y no se manda: una tienda sin mails sigue vendiendo.
  */
 const Trabajo = z.object({
-  plantilla: z.enum(["bienvenida", "restablecer", "pedido_recibido", "pago_confirmado", "pedido_vencido", "arrepentimiento", "transferencia_informada"]),
+  plantilla: z.enum(PLANTILLAS),
   para: z.string().email().max(150),
   datos: z.record(z.string(), z.unknown()),
 });

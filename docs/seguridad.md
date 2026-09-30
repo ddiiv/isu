@@ -42,7 +42,40 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
 | Outfits y medidas | Entrada estricta y acotada; las medidas del cliente viajan por POST, no se guardan en el servidor ni quedan en URLs | `admin.test.ts`, `auditoria.mjs` |
 | Búsqueda | El texto se reduce a `[a-z0-9]` antes de armar la consulta de texto completo; parámetro, nunca concatenado; 2–60 caracteres | `productos.test.ts`, `auditoria.mjs` |
 
+### Etapa 4: envíos
+
+| Qué | Defensa | Prueba |
+|---|---|---|
+| Precio del envío | Lo calcula siempre la API (se vuelve a cotizar al confirmar); el navegador sólo manda el id de la opción; entrada estricta | `envios.test.ts`, `auditoria.mjs` |
+| Seguimiento público | `/seguimiento/ISU-…?t=` con firma HMAC (clave derivada de `INTERNO_TOKEN`), comparación en tiempo constante; muestra sólo el envío y el nombre de pila; misma respuesta exista o no; sin indexar | `envios.test.ts`, `auditoria.mjs`, e2e |
+| Respuestas de los transportes | XML sin DOCTYPE/ENTITY (XXE), sin redirecciones, tiempo máximo, números de seguimiento validados (`^[A-Za-z0-9_-]{3,60}$`, también en la base) | `envios.test.ts` (paquete) |
+| Etiquetas | Se valida que sean PDF, bucket privado con nombre aleatorio, descarga sólo como adjunto con CSP `sandbox`; imprimir y preparar exigen rol operador y quedan auditados | `envios.test.ts` |
+| Cotizaciones | Freno propio por IP (120 cada 10 min), caché y tope de 6 s por transporte | `envios.test.ts`, `auditoria.mjs` |
+| Avisos | Una sola vez por pedido, tipo y canal (`tienda.avisos`); WhatsApp sólo con plantillas y al celular normalizado; el mail escapa todo lo del pedido | worker `envios.test.ts` |
+| Doble preparación | Candado por pedido y un solo envío vigente por pedido (índice único) | `envios.test.ts` |
+| Simuladores | `TRANSPORTES_SIMULADOR` se ignora con `NODE_ENV=production`; las pantallas de los simuladores sólo responden desde la misma máquina | — |
+
+### Etapa 5: asistente
+
+| Qué | Defensa | Prueba |
+|---|---|---|
+| Respuestas | Las arma la API (preguntas frecuentes, cotizador, buscador); el navegador sólo manda el mensaje. Se muestran como texto (React escapa); nunca HTML | `chat.test.ts`, e2e, `auditoria.mjs` |
+| Enlaces | Sólo rutas de la tienda (`/algo`, nunca `//otro.sitio`) o `https://wa.me/<número de la tienda>`: lo controlan el esquema, la base (CHECK) y otra vez la tienda antes de mostrarlos | `chat.test.ts`, `db.test.ts`, `auditoria.mjs` |
+| Pedido por chat | Número **y** email; misma respuesta exista o no; frenos por IP (10/10 min) y por número (5/hora); no muestra dirección, ítems ni montos | `chat.test.ts`, `auditoria.mjs` |
+| IA (opcional) | Instrucciones fijas + información de la tienda; el mensaje del cliente va marcado como dato; salida limpiada (sin enlaces); tope diario y por IP; sin respuesta o con error → respuesta normal | `chat.test.ts` (IA de mentira), `auditoria.mjs` |
+| Datos personales | La charla no se guarda; lo sin respuesta se guarda tachado y 90 días; estadísticas sólo por tema | `chat.test.ts` |
+| Abuso | Freno por IP (60 consultas/10 min), cotización con el freno de envíos, votos 30/10 min | `chat.test.ts`, `auditoria.mjs` |
+
 ## Pendiente por etapa
 
 - **Producción (etapa 3):** poner `admin.` detrás de Cloudflare Access (ver despliegue) como segunda llave además del 2FA.
-- **Etapa 4:** firmas de webhooks de correos y de WhatsApp.
+- **Etapa 4 (hecho):** no se usan webhooks de los correos ni de WhatsApp (el seguimiento es por consulta, sin nada público que firmar). Si más adelante se suman, van con firma y lista de IPs.
+- **Producción (etapa 4):** homologar cada transporte con credenciales reales antes de abrir (los adaptadores sólo se probaron contra los simuladores).
+
+## Cupones e importación (etapa 6)
+
+- El descuento lo calcula siempre la API con lo que hay en la base: el navegador manda sólo el código. Al crear el pedido se vuelve a calcular con el cupón **bloqueado** (`FOR UPDATE`, antes de insertar el pedido): dos compras a la vez no pueden pasar un tope. Si el cupón dejó de servir entre el carrito y la compra, el pedido no se crea (409 `cupon`).
+- Probar códigos: tope de 40 cotizaciones con cupón por IP cada 10 minutos (carrito y opciones de envío), además del límite general.
+- El uso de un cupón se libera por un trigger de la base cuando el pedido se cae (vencido, cancelado, sin stock, error de reserva): no depende de cada camino del código.
+- La base impone las reglas aunque falle la validación de la API: código en mayúsculas y único, porcentaje 1–90, monto ≥ $1, promo sin código, total del pedido que cierra (`total = subtotal − cupón − transferencia + envío`), precio cobrado nunca mayor al de la prenda.
+- Importador del mayorista: pide sólo rutas `/fotos/<id>.(jpg|png|webp)` del origen configurado, sin seguir redirecciones, con tope de 25 MB y 60 s, y exige `content-type` de imagen; el catálogo se valida con un esquema; las fotos pasan por el mismo procesado que las subidas (sin metadatos, tope de píxeles). No guarda textos del mayorista.

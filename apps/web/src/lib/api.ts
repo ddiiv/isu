@@ -20,7 +20,8 @@ async function pedir<T>(ruta: string, esquema: z.ZodType<T>, respaldo: T): Promi
   try {
     const r = await fetch(`${API}${ruta}`, {
       headers: CABECERAS,
-      next: { revalidate: REVALIDAR, tags: [ruta] },
+      // "catalogo": un cambio en el backoffice (Ajustes, categorías) regenera también esto, no a los 60 s.
+      next: { revalidate: REVALIDAR, tags: [ruta, "catalogo"] },
       signal: AbortSignal.timeout(4000),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -46,6 +47,8 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   locales: [
     { nombre: "Vía Flores · Local 21", direccion: "Bacacay 3231, Galería Vía Flores", localidad: "Flores, CABA", horario: "Lunes a viernes de 8 a 14 h", mapa: null, retiro: true },
   ],
+  // Sin API no hay asistente: queda el botón de WhatsApp.
+  chatbot: { activo: false, saludo: "" },
 };
 
 export const CATEGORIAS_RESPALDO: CategoriaNodo[] = [

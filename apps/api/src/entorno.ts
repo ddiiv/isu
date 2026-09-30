@@ -60,6 +60,11 @@ const Entorno = z.object({
   // Etapa 3 ─────────────────────────────────────────────────────────
   // Cifra el secreto del doble factor del backoffice. openssl rand -base64 32
   ADMIN_CLAVE_CIFRADO: z.string().refine((k) => Buffer.from(k, "base64").length === 32, "Tienen que ser 32 bytes en base64: openssl rand -base64 32").optional(),
+
+  // Etapa 5 ─────────────────────────────────────────────────────────
+  // Asistente con IA (opcional): sin clave, el asistente responde sólo con las preguntas frecuentes.
+  ANTHROPIC_API_KEY: z.string().min(20).optional(),
+  CHATBOT_MODELO: z.string().regex(/^[a-z0-9.-]{3,60}$/).default("claude-opus-5-5"),
 });
 
 export type Entorno = z.infer<typeof Entorno>;

@@ -1,12 +1,17 @@
 import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
-import { ESTADOS_PENDIENTES, formatearPesos, type MedioPago, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
+import { CP, ESTADOS_PENDIENTES, formatearPesos, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
+import type { Paquete, Transportes } from "@isu/envios";
+import type { CotizadorEnvios } from "../envios/cotizador.js";
+import { hoyA } from "../envios/cotizador.js";
+import { envioPublico } from "../envios/publico.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { sha256, tokenNuevo } from "../../lib/cripto.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorMp, type MercadoPago, type PagoMp } from "../../lib/mercadopago.js";
-import { cotizar, leerAjustes, type Ajustes } from "./cotizar.js";
+import { conEnvio, cotizar, leerAjustes, type Ajustes } from "./cotizar.js";
+import { motivoNoVigente, normalizarCodigo } from "../../lib/cupones.js";
 import type { Descuentos } from "../../lib/descuentos.js";
 
 /*
@@ -33,6 +38,9 @@ export interface DepsPedidos {
   apiPublica: string;
   log: FastifyBaseLogger;
   descuentos?: Descuentos;
+  /** Etapa 4: transportes y cotizador (sin ellos, el envío de costo fijo de la etapa 2). */
+  transportes?: Transportes;
+  cotizador?: CotizadorEnvios;
 }
 
 const ESTADO_INICIAL: Record<MedioPago, string> = {
@@ -48,13 +56,18 @@ const NOMBRE_MEDIO: Record<MedioPago, string> = {
   mercadopago: "Mercado Pago", pagofacil: "Pago Fácil / Rapipago", transferencia: "Transferencia", local: "Pago en el local",
 };
 const pesos = (c: number) => Math.round(c) / 100;
+/** "cupón VERANO10 (10% OFF)" o "promo 10% superando $80.000" */
+const conCupon = (c: { codigo: string | null; nombre: string }) => (c.codigo ? `cupón ${c.codigo} (${c.nombre})` : `promo ${c.nombre}`);
 const vence = (d: Date) => d.toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 interface FilaPedido {
   id: number; numero: string; acceso_hash: string; cliente_id: number | null; email: string; nombre: string; apellido: string;
   telefono: string; dni: string; entrega: "envio" | "retiro"; direccion: PedidoPublico["direccion"]; local_retiro: string | null;
   medio_pago: MedioPago; subtotal: number; descuento: number; envio: number; total: number; estado: string;
+  cupon_id: number | null; cupon_codigo: string | null; cupon_nombre: string | null; descuento_cupon: number;
   vence_en: Date | null; pagado_en: Date | null; mp_preferencia: string | null; creado_en: Date;
+  transporte: string | null; servicio_envio: string | null; sucursal_envio: { id: string; nombre: string; direccion: string } | null;
+  avisos_whatsapp: boolean; paquete_envio: Paquete | null;
 }
 
 async function evento(db: pg.Pool | pg.PoolClient, pedidoId: number, estado: string, actor: string, detalle?: string) {
@@ -74,14 +87,17 @@ export function crearServicioPedidos(deps: DepsPedidos) {
   async function linkDePago(p: FilaPedido, _acceso: string | null): Promise<string | null> {
     if (!["mercadopago", "pagofacil"].includes(p.medio_pago)) return null;
     if (!deps.mp) throw new ErrorHttp(503, "sin_mercadopago", "El pago online no está disponible en este momento. Elegí transferencia o escribinos por WhatsApp.");
+    // Con el cupón ya repartido por unidad: la suma da el total del pedido.
     const items = await pool.query<{ sku: string; nombre: string; color: string | null; talle: string | null; precio: number; cantidad: number }>(
-      "SELECT sku, nombre, color, talle, precio, cantidad FROM tienda.pedido_items WHERE pedido_id = $1 ORDER BY id", [p.id],
+      "SELECT sku, nombre, color, talle, COALESCE(precio_cobrado, precio) AS precio, cantidad FROM tienda.pedido_items WHERE pedido_id = $1 ORDER BY id", [p.id],
     );
     const lineas = items.rows.map((i) => ({
       id: i.sku, title: [i.nombre, i.color, i.talle].filter(Boolean).join(" · ").slice(0, 250),
       quantity: i.cantidad, unit_price: pesos(i.precio), currency_id: "ARS" as const,
     }));
     if (p.envio > 0) lineas.push({ id: "ENVIO", title: "Envío a domicilio", quantity: 1, unit_price: pesos(p.envio), currency_id: "ARS" });
+    // Mercado Envíos: el envío lo arma y lo cobra Mercado Pago en su checkout.
+    const me = p.transporte === "mercado_envios" && p.paquete_envio ? deps.transportes?.mercadoEnvios : null;
     const pref = await deps.mp.crearPreferencia({
       numero: p.numero, items: lineas, email: p.email, nombre: p.nombre, apellido: p.apellido,
       // La vuelta de Mercado Pago NO lleva el token de acceso al pedido: no tiene por qué
@@ -90,6 +106,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       aviso: `${deps.apiPublica.replace(/\/+$/, "")}/v1/pagos/mercadopago/aviso`,
       vence: p.vence_en ?? new Date(Date.now() + 2 * 3600_000),
       soloEfectivo: p.medio_pago === "pagofacil",
+      envio: me ? me.preferencia(p.paquete_envio!, p.direccion?.cp ?? "") : undefined,
     });
     await pool.query("UPDATE tienda.pedidos SET mp_preferencia = $2, actualizado_en = now() WHERE id = $1", [p.id, pref.id]);
     return pref.url;
@@ -105,9 +122,42 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     if (medioPago === "transferencia" && !a.datosTransferencia.cbu && !a.datosTransferencia.alias) {
       throw new ErrorHttp(400, "sin_transferencia", "La transferencia todavía no está disponible. Elegí otro medio de pago.");
     }
-    const c = await cotizar(pool, datos.items, { entrega: entrega.tipo, medioPago, ajustes: a, descuentos: deps.descuentos });
+    const c = await cotizar(pool, datos.items, { entrega: entrega.tipo, medioPago, ajustes: a, descuentos: deps.descuentos, cupon: datos.cupon, email: contacto.email });
     if (c.problemas.length) {
       throw new ErrorHttp(409, "carrito_cambio", c.problemas[0]!.mensaje, { problemas: c.problemas });
+    }
+    // El cupón que escribió ya no sirve (se agotó, venció…): el total no es el que vio, mejor avisar que cobrar otro.
+    if (c.cuponInvalido) throw new ErrorHttp(409, "cupon", c.avisoCupon ?? "Ese cupón no se puede usar.", { cupon: normalizarCodigo(datos.cupon ?? "") });
+
+    /*
+     * ── El envío (etapa 4) ──
+     * Se vuelve a cotizar la opción elegida con el transporte: el precio lo
+     * pone la tienda. A sucursal, la sucursal tiene que estar en la lista del
+     * transporte para ese código postal.
+     */
+    let opcion: OpcionEnvio | null = null;
+    let sucursal: { id: string; nombre: string; direccion: string } | null = null;
+    let paqueteEnvio: Paquete | null = null;
+    let corteEnElDia: Date | null = null;
+    if (entrega.tipo === "envio" && deps.cotizador) {
+      const cp = CP.safeParse(entrega.direccion.cp);
+      const destino = { cp: cp.success ? cp.data : entrega.direccion.cp, provincia: entrega.direccion.provincia, localidad: entrega.direccion.localidad };
+      const carrito = { lineas: c.lineas, filas: c.filas, neto: c.neto };
+      if (!entrega.opcion && deps.cotizador.hayTransportes) throw new ErrorHttp(400, "validacion", "Elegí cómo te lo mandamos.");
+      opcion = await deps.cotizador.elegir({ destino, carrito, medioPago, id: entrega.opcion ?? "estandar:domicilio" });
+      if (opcion.soloMercadoPago && medioPago !== "mercadopago") throw new ErrorHttp(400, "validacion", "Mercado Envíos es sólo pagando con Mercado Pago.");
+      if (opcion.requiereSucursal) {
+        if (!entrega.sucursal) throw new ErrorHttp(400, "validacion", "Elegí la sucursal donde lo vas a retirar.");
+        const lista = await deps.cotizador.sucursales(opcion.transporte as never, destino.cp, destino.provincia).catch(() => []);
+        const s = lista.find((x) => x.id === entrega.sucursal);
+        if (!s) throw new ErrorHttp(400, "validacion", "Esa sucursal no está disponible. Elegí otra de la lista.");
+        sucursal = { id: s.id, nombre: s.nombre, direccion: [s.direccion, s.localidad].filter(Boolean).join(", ") };
+      }
+      const cfg = await deps.cotizador.config();
+      paqueteEnvio = deps.cotizador.paquete(carrito, cfg);
+      if (opcion.llegaHoy) corteEnElDia = new Date(hoyA(cfg.enElDia.horaCorte).getTime() + 3 * 3600_000);
+      // Mercado Envíos lo cobra Mercado Pago: no suma al total de la tienda. Con cupón de envío gratis, $0.
+      conEnvio(c, opcion.precio, { soloMercadoPago: opcion.soloMercadoPago });
     }
     const stocker = await stockerOError();
 
@@ -124,21 +174,48 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     let p: FilaPedido;
     try {
       await cli.query("BEGIN");
+      /*
+       * El cupón se bloquea PRIMERO (antes de insertar el pedido, que lo
+       * referencia): dos compras a la vez con el último uso no pueden pasar
+       * las dos, y sin bloqueos cruzados. Se vuelven a mirar vigencia y topes
+       * con el dato fresco.
+       */
+      if (c.aplicado) {
+        const cu = (await cli.query<{ activo: boolean; desde: Date | null; hasta: Date | null; usos: number; usos_max: number | null; usos_por_cliente: number | null }>(
+          "SELECT activo, desde, hasta, usos, usos_max, usos_por_cliente FROM tienda.cupones WHERE id = $1 FOR UPDATE", [c.aplicado.cupon.id])).rows[0];
+        const motivo = !cu ? "Ese cupón ya no existe." : motivoNoVigente({ ...c.aplicado.cupon, activo: cu.activo, desde: cu.desde, hasta: cu.hasta, usos: cu.usos, usosMax: cu.usos_max });
+        if (motivo) throw new ErrorHttp(409, "cupon", motivo, { cupon: c.aplicado.cupon.codigo });
+        if (cu!.usos_por_cliente !== null) {
+          const n = (await cli.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM tienda.cupon_usos WHERE cupon_id = $1 AND lower(email) = lower($2) AND vigente", [c.aplicado.cupon.id, contacto.email])).rows[0]!.n;
+          if (n >= cu!.usos_por_cliente) throw new ErrorHttp(409, "cupon", "Ya usaste este cupón.", { cupon: c.aplicado.cupon.codigo });
+        }
+      }
       p = (await cli.query<FilaPedido>(
         `INSERT INTO tienda.pedidos (acceso_hash, cliente_id, email, nombre, apellido, telefono, dni, entrega, direccion, local_retiro,
-                                     medio_pago, subtotal, descuento, envio, total, estado, notas, ip)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'reservando',$16,$17) RETURNING *`,
+                                     medio_pago, subtotal, descuento, envio, total, estado, notas, ip,
+                                     transporte, servicio_envio, sucursal_envio, avisos_whatsapp, paquete_envio,
+                                     cupon_id, cupon_codigo, cupon_nombre, descuento_cupon, envio_bonificado)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'reservando',$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING *`,
         [sha256(acceso), clienteId, contacto.email, contacto.nombre, contacto.apellido, contacto.telefono, contacto.dni,
           entrega.tipo, entrega.tipo === "envio" ? JSON.stringify(entrega.direccion) : null, entrega.tipo === "retiro" ? entrega.local : null,
-          medioPago, c.subtotal, c.descuento, c.envio, c.total, datos.notas ?? null, ctx.ip],
+          medioPago, c.subtotal, c.descuento, c.envio, c.total, datos.notas ?? null, ctx.ip,
+          entrega.tipo === "envio" ? (opcion?.transporte ?? "estandar") : null, entrega.tipo === "envio" ? (opcion?.servicio ?? "domicilio") : null,
+          sucursal ? JSON.stringify(sucursal) : null, datos.avisosWhatsapp ?? false, paqueteEnvio ? JSON.stringify(paqueteEnvio) : null,
+          c.aplicado?.cupon.id ?? null, c.aplicado?.cupon.codigo ?? null, c.aplicado?.cupon.nombre ?? null, c.descuentoCupon ?? 0, c.envioBonificado],
       )).rows[0]!;
       for (const l of c.lineas) {
         await cli.query(
-          "INSERT INTO tienda.pedido_items (pedido_id, sku, producto_id, nombre, color, talle, precio, precio_lista, cantidad) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-          [p.id, l.sku, c.filas.get(l.sku)?.producto_id ?? null, l.nombre, l.color, l.talle, l.precio, l.precioLista, l.cantidad],
+          "INSERT INTO tienda.pedido_items (pedido_id, sku, producto_id, nombre, color, talle, precio, precio_lista, cantidad, precio_cobrado) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+          [p.id, l.sku, c.filas.get(l.sku)?.producto_id ?? null, l.nombre, l.color, l.talle, l.precio, l.precioLista, l.cantidad, c.cobrado.get(l.sku) ?? l.precio],
         );
       }
-      await evento(cli, p.id, "reservando", "tienda", `${NOMBRE_MEDIO[medioPago]} · ${formatearPesos(c.total)}`);
+      if (c.aplicado) {
+        await cli.query("UPDATE tienda.cupones SET usos = usos + 1 WHERE id = $1", [c.aplicado.cupon.id]);
+        await cli.query("INSERT INTO tienda.cupon_usos (cupon_id, pedido_id, email, descuento) VALUES ($1,$2,$3,$4)",
+          [c.aplicado.cupon.id, p.id, contacto.email, (c.descuentoCupon ?? 0) + c.envioBonificado]);
+      }
+      await evento(cli, p.id, "reservando", "tienda", `${NOMBRE_MEDIO[medioPago]} · ${formatearPesos(c.total)}${c.aplicado ? ` · ${conCupon(c.aplicado.cupon)}` : ""}`);
       await cli.query("COMMIT");
     } catch (e) {
       await cli.query("ROLLBACK").catch(() => {});
@@ -154,11 +231,16 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     try {
       r = await stocker.crearPedido({
         pedido: p.numero,
-        items: c.lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad, precioUnitario: pesos(l.precio) })),
+        // El precio que se cobró de verdad (con el cupón repartido), para que la venta en Stocker cierre.
+        items: c.lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad, precioUnitario: pesos(c.cobrado.get(l.sku) ?? l.precio) })),
         comprador: { nombre: `${contacto.nombre} ${contacto.apellido}`, email: contacto.email, documento: contacto.dni },
         total: pesos(c.total),
         pagoPendiente: true,
-        pagoDetalle: `${NOMBRE_MEDIO[medioPago]} · vence ${vence(venceEn)}`,
+        pagoDetalle: `${NOMBRE_MEDIO[medioPago]}${c.aplicado ? ` · ${conCupon(c.aplicado.cupon)}` : ""} · vence ${vence(venceEn)}`,
+        // Para Envíos del día: con qué sale (y el corte si es en el día).
+        envio: entrega.tipo === "retiro"
+          ? { tipo: "retiro" }
+          : { tipo: !opcion || opcion.transporte === "estandar" ? "envio" : opcion.transporte, ...(corteEnElDia ? { despacharAntesDe: corteEnElDia.toISOString() } : {}) },
       });
     } catch (e) {
       // No se sabe si Stocker llegó a apartar: el vencimiento lo cancela del otro lado (es idempotente).
@@ -204,7 +286,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     const items = (await pool.query("SELECT nombre, color, talle, precio, cantidad FROM tienda.pedido_items WHERE pedido_id = $1 ORDER BY id", [p.id])).rows;
     return {
       numero: p.numero, nombre: p.nombre, estado: p.estado, medioPago: p.medio_pago, total: p.total, subtotal: p.subtotal,
-      descuento: p.descuento, envio: p.envio, entrega: p.entrega, local: p.local_retiro, direccion: p.direccion,
+      descuento: p.descuento, envio: p.envio, descuentoCupon: p.descuento_cupon, cupon: p.cupon_nombre ? conCupon({ codigo: p.cupon_codigo, nombre: p.cupon_nombre }) : null, entrega: p.entrega, local: p.local_retiro, direccion: p.direccion,
       venceEn: p.vence_en?.toISOString() ?? null, items,
       enlace: acceso ? urlPedido(p.numero, acceso) : `${deps.sitio.replace(/\/+$/, "")}/cuenta`,
       transferencia: p.medio_pago === "transferencia" ? ajustes.datosTransferencia : null,
@@ -232,6 +314,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       pagadoEn: p.pagado_en?.toISOString() ?? null, medioPago: p.medio_pago, entrega: p.entrega, direccion: p.direccion,
       local: p.local_retiro, contacto: { email: p.email, nombre: p.nombre, apellido: p.apellido, telefono: p.telefono },
       items: items.rows, subtotal: p.subtotal, descuento: p.descuento, envio: p.envio, total: p.total,
+      cupon: p.cupon_nombre ? { codigo: p.cupon_codigo, nombre: p.cupon_nombre } : null, descuentoCupon: p.descuento_cupon,
+      envioDetalle: deps.transportes ? await envioPublico(pool, deps.transportes, p) : null,
       pago: {
         url: null,
         transferencia: p.medio_pago === "transferencia" && ESTADOS_PENDIENTES.includes(p.estado as never) ? a.datosTransferencia : null,
@@ -285,8 +369,12 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       cli.release();
     }
     if (cambio) {
+      // Mercado Envíos: el envío lo creó Mercado Pago con el pago; el worker lo trae.
+      if (p.transporte === "mercado_envios" && pago.proveedor === "mercadopago") {
+        await deps.colas.envios("mercado-envios", { numero: p.numero, pagoId: pago.externo }, `me-${p.numero}`);
+      }
       // Que Stocker levante la marca "sin pagar" (con reintentos: sin esto el depósito no lo despacha).
-      await deps.colas.stocker("pagado", { numero: p.numero, detalle: `Pagado · ${NOMBRE_MEDIO[p.medio_pago]}` }, `pagado-${p.numero}`);
+      await deps.colas.stocker("pagado", { numero: p.numero, detalle: `Pagado · ${NOMBRE_MEDIO[p.medio_pago]}${p.cupon_nombre ? ` · ${conCupon({ codigo: p.cupon_codigo, nombre: p.cupon_nombre })}` : ""}` }, `pagado-${p.numero}`);
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
     }
     return { numero: p.numero, estado: p.estado, repetido: false, insuficiente: false };

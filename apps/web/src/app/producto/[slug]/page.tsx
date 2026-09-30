@@ -50,7 +50,7 @@ export default async function Producto({ params }: { params: Promise<{ slug: str
         description: p.descripcion ?? undefined,
         image: imagenes.length ? imagenes : undefined,
         brand: { "@type": "Brand", name: SITIO.nombre },
-        color: p.colores.filter((c) => c.clave !== "unico").map((c) => c.nombre).join(", ") || undefined,
+        color: p.colores.filter((c) => c.nombre !== "Único").map((c) => c.nombre).join(", ") || undefined,
         size: [...new Set(p.variantes.map((v) => v.talle).filter(Boolean))].join(", ") || undefined,
         offers: {
           "@type": "AggregateOffer",

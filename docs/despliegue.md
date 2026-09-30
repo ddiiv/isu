@@ -17,6 +17,9 @@
 | api (etapa 2) | `SITIO_URL=https://www.<dominio>` · `API_PUBLICA_URL=https://api.<dominio>` · `MP_ACCESS_TOKEN` · `MP_WEBHOOK_SECRET` · `PAGOS_TOKEN` · `R2_CUENTA` `R2_BUCKET_PRIVADO` `R2_ACCESS_KEY_ID` `R2_SECRET_ACCESS_KEY` (comprobantes) |
 | web (etapa 2) | `PROXIES_DE_CONFIANZA=2` (para frenar abusos por IP real) |
 | worker (etapa 2) | `API_URL` (igual que la web) · `INTERNO_TOKEN` · `SMTP_URL` · `CORREO_DE` · `CORREO_RESPONDER` |
+| api y worker (etapa 4) | Las credenciales de cada transporte que se use (`CORREO_AR_*`, `ANDREANI_*`, `OCA_*`, `MERCADO_ENVIOS_ACTIVO=true`, `CABIFY_*`; ver `.env.example`) **en los dos servicios**: la API cotiza y genera etiquetas; el worker sigue los envíos. **Nunca** `TRANSPORTES_SIMULADOR` |
+| worker (etapa 4) | `SITIO_URL=https://www.<dominio>` (enlace de seguimiento de los avisos) · `WHATSAPP_META_TOKEN` · `WHATSAPP_META_PHONE_NUMBER_ID` (y opcionales `WHATSAPP_META_API_VERSION`, `WHATSAPP_IDIOMA`) · `MP_ACCESS_TOKEN` si se usa Mercado Envíos |
+| api (etapa 5) | Opcional: `ANTHROPIC_API_KEY` (respuestas con IA del asistente; además hay que prenderlo en Ajustes) y `CHATBOT_MODELO` |
 | worker | `DATABASE_URL` (igual que la API) · `REDIS_URL=${{Redis.REDIS_URL}}` · `STOCKER_API_URL=http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` (sin `/api`) · `STOCKER_TOKEN` · `WEB_INTERNAL_URL=http://${{tienda-web.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` · `REVALIDAR_TOKEN` (el mismo que la web) · `R2_*` si se importan fotos desde el servidor |
 
 Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno distinto para cada uno.
@@ -31,7 +34,9 @@ Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno 
 7. **Mercado Pago.** En *Tus integraciones* → tu aplicación → *Credenciales de producción*: el **Access token** va en `MP_ACCESS_TOKEN`. En *Webhooks*: URL `https://api.<dominio>/v1/pagos/mercadopago/aviso`, evento **Pagos**, y la **clave secreta** va en `MP_WEBHOOK_SECRET`. Las cuotas sin interés se configuran en la cuenta de Mercado Pago (promociones); la tienda sólo las anuncia.
 8. **Transferencias.** Cargar titular, CUIT, banco, CBU y alias (ajuste `datosTransferencia`; en la etapa 3, desde el backoffice). Sin CBU ni alias el checkout no ofrece transferencia. Para confirmar una transferencia: `POST https://api.<dominio>/v1/pagos/registrar` con `Authorization: Bearer <PAGOS_TOKEN>` y `{ pedido, medio: "transferencia"|"local", monto (centavos), referencia, quien }`.
 9. **Mails.** Un SMTP transaccional (Gmail Workspace con contraseña de aplicación, Brevo, Amazon SES…): `SMTP_URL=smtp://usuario:clave@host:587`. Configurar SPF y DKIM del dominio para que no caigan en spam.
-10. **Healthchecks**: la API usa `/healthz` (proceso vivo; no se reinicia si la base parpadea). `/readyz` dice si base y Redis responden.
+10. **Envíos (etapa 4).** Aplicar el patch de Stocker de la etapa 4 (backend y frontend). Cargar las credenciales de cada transporte (arriba) y **homologar** uno por uno: cotizar, preparar un envío real, imprimir la etiqueta, despacharlo en Envíos del día y ver que el seguimiento avance. Aprobar en Meta las 5 plantillas de WhatsApp (textos en `pendientes-produccion.md`). En Backoffice → Ajustes: transportes a ofrecer, remitente, paquete y envíos en el día. Las etiquetas se guardan en el bucket privado (`R2_BUCKET_PRIVADO`, el de los comprobantes).
+11. **Asistente (etapa 5).** Nada que configurar para las preguntas frecuentes (se siembran con la migración 0009): revisarlas en Backoffice → Asistente. Para la IA, `ANTHROPIC_API_KEY` en la api y prenderla en Ajustes con un tope diario.
+12. **Healthchecks**: la API usa `/healthz` (proceso vivo; no se reinicia si la base parpadea). `/readyz` dice si base y Redis responden.
 
 ## Cloudflare
 

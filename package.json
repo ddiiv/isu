@@ -14,16 +14,18 @@
     "test": "pnpm -r --workspace-concurrency=1 test",
     "db:migrar": "pnpm paquetes && pnpm --filter @isu/db migrar",
     "e2e": "pnpm --filter @isu/api exec node --env-file-if-exists=../../.env scripts/limpiar-frenos.mjs && playwright test -c tests/e2e/playwright.config.ts",
-    "seguridad": "node tests/seguridad/auditoria.mjs",
+    "seguridad": "node --env-file-if-exists=.env tests/seguridad/auditoria.mjs",
     "verificar": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "paquetes": "pnpm --filter @isu/shared --filter @isu/db --filter @isu/almacen --filter @isu/stocker build",
+    "paquetes": "pnpm --filter @isu/shared --filter @isu/db --filter @isu/almacen --filter @isu/stocker --filter @isu/envios build",
     "postinstall": "pnpm paquetes",
     "fotos:importar": "pnpm --filter @isu/worker build && pnpm --filter @isu/worker fotos:importar",
+    "mayorista:importar": "pnpm --filter @isu/worker build && pnpm --filter @isu/worker mayorista:importar",
     "demo:stocker": "node --env-file-if-exists=.env scripts/demo/stocker-simulado.mjs",
     "demo:fotos": "node --env-file-if-exists=.env scripts/demo/ajustes-demo.mjs && node scripts/demo/fotos-demo.mjs demo/fotos && pnpm fotos:importar ../../demo/fotos --reemplazar",
     "demo:mercadopago": "node --env-file-if-exists=.env scripts/demo/mercadopago-simulado.mjs",
     "admin:crear": "pnpm --filter @isu/api build && node --env-file-if-exists=.env apps/api/dist/cli/crear-admin.js",
-    "demo:backoffice": "pnpm --filter @isu/worker build && node --env-file-if-exists=.env scripts/demo/backoffice-demo.mjs"
+    "demo:backoffice": "pnpm --filter @isu/worker build && node --env-file-if-exists=.env scripts/demo/backoffice-demo.mjs",
+    "demo:transportes": "pnpm --filter @isu/envios build && node --env-file-if-exists=.env scripts/demo/transportes-simulado.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

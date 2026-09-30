@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { useCarrito } from "./Carrito";
-import { BarraEnvioGratis, LineasCarrito, Totales } from "./LineasCarrito";
+import { BarraEnvioGratis, CampoCupon, LineasCarrito, Totales } from "./LineasCarrito";
 
 export function PaginaCarrito({ descuento }: { descuento: number }) {
   const { lineas, cotizacion, cotizar, unidades } = useCarrito();
@@ -22,6 +22,7 @@ export function PaginaCarrito({ descuento }: { descuento: number }) {
           <LineasCarrito />
           <aside className="space-y-4 self-start rounded-[var(--radius-foto)] border border-linea p-5 lg:sticky lg:top-28">
             <BarraEnvioGratis c={cotizacion} />
+            <CampoCupon />
             <Totales c={cotizacion} descuento={descuento} />
             {cotizacion?.problemas.filter((p) => p.tipo === "minimo").map((p) => <p key={p.mensaje} className="text-sm font-bold text-oferta">{p.mensaje}</p>)}
             <Link href="/checkout" aria-disabled={bloqueado} onClick={(e) => bloqueado && e.preventDefault()}

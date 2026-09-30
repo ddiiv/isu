@@ -217,10 +217,13 @@ async function aplicarProducto(
        SELECT $1, x.clave, x.nombre, x.hex, x.orden, true
          FROM unnest($2::text[], $3::text[], $4::text[], $5::int[]) AS x(clave, nombre, hex, orden)
      ON CONFLICT (producto_id, clave) DO UPDATE SET
-         nombre = EXCLUDED.nombre, orden = EXCLUDED.orden, activo = true,
+         -- el nombre puesto a mano ("Único" → "Negro") se respeta
+         nombre = CASE WHEN pc.nombre_fijo THEN pc.nombre ELSE EXCLUDED.nombre END,
+         orden = EXCLUDED.orden, activo = true,
          -- el hex lo puede corregir el backoffice: sólo se completa si falta
          hex = COALESCE(pc.hex, EXCLUDED.hex)
-       WHERE (pc.nombre, pc.orden, pc.activo, pc.hex) IS DISTINCT FROM (EXCLUDED.nombre, EXCLUDED.orden, true, COALESCE(pc.hex, EXCLUDED.hex))
+       WHERE (pc.nombre, pc.orden, pc.activo, pc.hex)
+         IS DISTINCT FROM (CASE WHEN pc.nombre_fijo THEN pc.nombre ELSE EXCLUDED.nombre END, EXCLUDED.orden, true, COALESCE(pc.hex, EXCLUDED.hex))
      RETURNING id, clave, true AS cambiado`,
     [productoId, claves, claves.map((k) => colores.get(k)!.nombre), claves.map((k) => (k === COLOR_UNICO.clave ? null : hexDeColor(colores.get(k)!.nombre))), claves.map((k) => colores.get(k)!.orden)],
   );
@@ -260,14 +263,15 @@ async function aplicarProducto(
               AS x(sid, sku, color, talle, precio, stock, orden)
      ON CONFLICT (stocker_id) DO UPDATE SET
          producto_id = EXCLUDED.producto_id, sku = EXCLUDED.sku, color_id = EXCLUDED.color_id,
-         talle = EXCLUDED.talle, precio = EXCLUDED.precio, orden = EXCLUDED.orden, activo = true,
+         -- un talle oculto en la tienda sigue inactivo aunque Stocker lo tenga
+         talle = EXCLUDED.talle, precio = EXCLUDED.precio, orden = EXCLUDED.orden, activo = NOT v.oculta,
          stock    = CASE WHEN v.stock_en <= EXCLUDED.stock_en THEN EXCLUDED.stock ELSE v.stock END,
          stock_en = GREATEST(v.stock_en, EXCLUDED.stock_en),
          actualizado_en = now()
        WHERE (v.producto_id, v.sku, v.color_id, v.talle, v.precio, v.orden, v.activo,
               CASE WHEN v.stock_en <= EXCLUDED.stock_en THEN EXCLUDED.stock ELSE v.stock END)
          IS DISTINCT FROM
-             (EXCLUDED.producto_id, EXCLUDED.sku, EXCLUDED.color_id, EXCLUDED.talle, EXCLUDED.precio, EXCLUDED.orden, true, v.stock)`,
+             (EXCLUDED.producto_id, EXCLUDED.sku, EXCLUDED.color_id, EXCLUDED.talle, EXCLUDED.precio, EXCLUDED.orden, NOT v.oculta, v.stock)`,
     [
       productoId,
       vs.map((v) => v.stockerId), vs.map((v) => v.sku), vs.map((v) => v.colorId), vs.map((v) => v.talle),

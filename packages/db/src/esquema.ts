@@ -68,6 +68,7 @@ export const variantes = tienda.table("variantes", {
   stockEn: timestamp("stock_en", { withTimezone: true }).notNull(),
   orden: integer("orden").notNull().default(0),
   activo: boolean("activo").notNull().default(true),
+  oculta: boolean("oculta").notNull().default(false),
   actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -90,6 +91,7 @@ export const productoColores = tienda.table("producto_colores", {
   hex: char("hex", { length: 7 }),
   orden: integer("orden").notNull().default(0),
   activo: boolean("activo").notNull().default(true),
+  nombreFijo: boolean("nombre_fijo").notNull().default(false),
 });
 
 export const fotos = tienda.table("fotos", {
@@ -102,6 +104,7 @@ export const fotos = tienda.table("fotos", {
   ancho: integer("ancho"),
   alto: integer("alto"),
   alt: varchar("alt", { length: 160 }),
+  origen: varchar("origen", { length: 120 }),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 });
 

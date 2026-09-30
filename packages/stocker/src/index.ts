@@ -70,6 +70,9 @@ export const PedidoStocker = z.object({
   pedido: z.string(),
   estado: z.string(),
   pagoPendiente: z.boolean(),
+  // Etapa 4 (opcionales: un Stocker sin el parche de envíos no los manda).
+  envioTipo: z.string().nullable().optional(),
+  envioId: z.string().nullable().optional(),
   estadoEnvio: z.string().nullable(),
   despachadoEn: z.string().nullable(),
   canceladoEn: z.string().nullable(),
@@ -86,7 +89,12 @@ export interface NuevoPedidoStocker {
   total: number;           // en pesos (como lo guarda Stocker)
   pagoPendiente: boolean;
   pagoDetalle?: string;
+  /** Con qué sale (lo ve el depósito); `despacharAntesDe`: corte de los envíos en el día. */
+  envio?: DatosEnvioStocker;
 }
+
+/** correo_argentino · andreani · oca · mercado_envios · cabify · retiro · envio */
+export interface DatosEnvioStocker { tipo: string; seguimiento?: string; despacharAntesDe?: string }
 
 export interface ClienteStocker {
   catalogo(): Promise<CatalogoStocker>;
@@ -96,6 +104,8 @@ export interface ClienteStocker {
   marcarPagado(numero: string, detalle: string): Promise<PedidoStocker>;
   cancelarPedido(numero: string, motivo: string): Promise<PedidoStocker | null>;
   guardarCliente(c: { email: string; nombre?: string; apellido?: string; telefono?: string; dni?: string; direccion?: string }): Promise<{ id: number; nuevo: boolean }>;
+  /** La etiqueta ya existe: transporte y número de seguimiento para Envíos del día. */
+  cargarEnvio(numero: string, envio: DatosEnvioStocker): Promise<PedidoStocker>;
 }
 
 export function crearClienteStocker({ url, token }: { url: string; token: string }): ClienteStocker {
@@ -161,6 +171,9 @@ export function crearClienteStocker({ url, token }: { url: string; token: string
         if (e instanceof ErrorStocker && e.status === 404) return null;
         throw e;
       }
+    },
+    async cargarEnvio(numero, envio) {
+      return pedido(await pedir(`/pedidos/${num(numero)}/envio`, 10_000, "POST", envio));
     },
     async guardarCliente(c) {
       const r = z.object({ id: z.number().int(), nuevo: z.boolean() }).safeParse(await pedir("/clientes", 10_000, "PUT", c));
