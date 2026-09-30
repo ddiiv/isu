@@ -21,8 +21,23 @@ simuladores), pero no se puede abrir al público hasta completarlos.
 | Dirección del botón Mayorista | `MAYORISTA_URL` (web) — hoy `https://www.isuwaya.com` | Confirmar |
 | Guías de talles con las medidas reales de cada molde | Backoffice → Guías de talles (y asociarlas a los productos) | Pendiente (las de muestra son de ejemplo) |
 | Destacados y Nuevos iniciales | Backoffice → Productos (casillas) | Pendiente |
-| Fotos reales de productos | `pnpm fotos:importar` o Backoffice → Productos → Fotos | Pendiente |
-| Costo de envío fijo y "envío gratis desde" (hasta la etapa 4) | Backoffice → Ajustes | Revisar |
+| Fotos reales de productos | `pnpm mayorista:importar --aplicar` (trae las del sitio mayorista, ver `salida-produccion.md` § 2), `pnpm fotos:importar` o Backoffice → Productos → Fotos | Pendiente (correr la importación en producción) |
+| Fotos de los 13 productos que el mayorista no tiene (SOFT, MONTAN, Cruze, Cloe, Sasha, Sidney, Berlin, Visa, Zara, Garo, Letra, Maev, Mara) | Backoffice → Productos → Fotos, y después tildar **Visible** | Pendiente (quedan ocultos) |
+| Medidas de Cloe en su guía de talles (se vende en talle Único) | Backoffice → Guías de talles | Pendiente |
+| Cupones y promociones de lanzamiento | Backoffice → Cupones (los de muestra `BIENVENIDA10` / `ENVIOGRATIS` son sólo del entorno local) | Decidir |
+| Costo de envío estándar (si no hay transportes o no responde ninguno) y "envío gratis desde" | Backoffice → Ajustes | Revisar |
+| **Correo Argentino**: alta en MiCorreo (usuario, clave, n.º de cliente) y **homologación** | `CORREO_AR_*` (api y worker). La etiqueta se imprime desde el portal MiCorreo | Pendiente |
+| **Andreani**: contrato, usuario, clave, n.º de cliente, contratos de domicilio y sucursal, y **homologación** | `ANDREANI_*` (api y worker) | Pendiente |
+| **OCA e-Pak**: usuario, clave, CUIT, cuenta, operativas de domicilio y sucursal, y **homologación** | `OCA_*` (api y worker) | Pendiente |
+| **Mercado Envíos**: activarlo en la cuenta de Mercado Pago / Mercado Libre y probar un envío real | `MERCADO_ENVIOS_ACTIVO=true` (usa `MP_ACCESS_TOKEN`) | Pendiente |
+| **Cabify Logistics**: cuenta de empresa, credenciales y **confirmar el contrato de la API** (los campos se armaron con la documentación pública; revisarlos con Cabify antes de salir) | `CABIFY_*` (api y worker) | Pendiente |
+| **WhatsApp**: número en Meta Cloud API (el de Stocker u otro) y **aprobar las 5 plantillas** en español (Argentina): `pedido_en_camino` ({{1}} nombre, {{2}} pedido, {{3}} transporte, {{4}} enlace), `pedido_en_sucursal` ({{1}}, {{2}}, {{3}} sucursal, {{4}} enlace), `pedido_llega_hoy` ({{1}}, {{2}}, {{3}} enlace), `pedido_entregado` ({{1}}, {{2}}), `pedido_no_entregado` ({{1}}, {{2}}, {{3}} transporte, {{4}} enlace) | `WHATSAPP_META_*` (worker) | Pendiente |
+| Remitente (dirección del depósito, CUIT, teléfono) y medidas reales de las cajas | Backoffice → Ajustes → Remitente y Paquete | Revisar |
+| Peso de las prendas pesadas (camperas, jeans) | Backoffice → Productos → Peso para el envío | Pendiente |
+| Códigos postales, días y hora de corte de los envíos en el día | Backoffice → Ajustes → Envíos en el día | Revisar |
+| **Asistente**: revisar las preguntas frecuentes de arranque (textos, plazos reales) con alguien de atención | Backoffice → Asistente | Pendiente |
+| **Asistente con IA** (opcional): cuenta en console.anthropic.com, clave y tope diario. Costo aproximado con el modelo por defecto (`claude-opus-5-5`, US$4 / US$20 por millón de tokens de entrada/salida): 1 a 2 centavos de dólar por consulta con IA (sólo las que no cubren las preguntas frecuentes); con el tope de 300 por día, como mucho unos US$5 diarios. Se puede usar otro modelo con `CHATBOT_MODELO` | `ANTHROPIC_API_KEY` (api) + Backoffice → Ajustes | Decidir |
+| Variables de transportes y WhatsApp también en el **worker** (sigue los envíos y manda los avisos) | Railway → worker | Al desplegar |
 
 Cuando estén, se cargan en Railway (variables) y en el backoffice (ajustes);
 no hace falta tocar código.

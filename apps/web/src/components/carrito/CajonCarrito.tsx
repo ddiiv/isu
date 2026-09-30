@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useCarrito } from "./Carrito";
-import { BarraEnvioGratis, LineasCarrito, Totales } from "./LineasCarrito";
+import { BarraEnvioGratis, CampoCupon, LineasCarrito, Totales } from "./LineasCarrito";
 import { IconoBolsa, IconoCerrar } from "../iconos";
 
 /*
@@ -52,6 +52,7 @@ export function CajonCarrito({ descuento, montoMinimo }: { descuento: number; mo
               <LineasCarrito alNavegar={cerrar} />
             </div>
             <div className="space-y-3 border-t border-linea p-5">
+              <CampoCupon />
               <Totales c={cotizacion} descuento={descuento} />
               {faltaMinimo && <p className="text-sm font-bold text-oferta">{faltaMinimo.mensaje}</p>}
               <Link href="/checkout" onClick={(e) => { if (bloqueado) e.preventDefault(); else cerrar(); }} aria-disabled={bloqueado}

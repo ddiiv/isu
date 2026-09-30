@@ -3,7 +3,9 @@
  *   · guías de talles (adulto y niños) asociadas a los productos del catálogo
  *     de muestra que coinciden por tipo de prenda y talles,
  *   · algunos Destacados y Nuevos,
- *   · un descuento del 20 % en calzas.
+ *   · un descuento del 20 % en calzas,
+ *   · dos cupones: BIENVENIDA10 (10 %, una vez por cliente) y ENVIOGRATIS
+ *     (envío gratis desde $30.000).
  * En producción todo esto se hace desde el backoffice.
  *
  *   node --env-file=.env scripts/demo/backoffice-demo.mjs
@@ -59,6 +61,10 @@ console.warn(`Nuevos: ${await porNombre("nuevo", ["Top Deportivo Ribb", "Buzo Cr
 await pool.query("DELETE FROM tienda.descuentos WHERE creado_por = 'demo'");
 await pool.query(`INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, producto_ids, creado_por)
   SELECT 'Calzas 20% (demo)', 20, 'productos', array_agg(id), 'demo' FROM tienda.productos WHERE lower(stocker_categoria) LIKE 'calza%' HAVING count(*) > 0`);
+await pool.query(`INSERT INTO tienda.cupones (codigo, nombre, tipo, valor, minimo, usos_por_cliente, creado_por) VALUES
+  ('BIENVENIDA10', '10% OFF de bienvenida', 'porcentaje', 10, 0, 1, 'demo'),
+  ('ENVIOGRATIS', 'Envío gratis desde $30.000', 'envio_gratis', 0, 3000000, NULL, 'demo')
+  ON CONFLICT (codigo) WHERE codigo IS NOT NULL DO NOTHING`);
 await pool.end();
 
 const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });

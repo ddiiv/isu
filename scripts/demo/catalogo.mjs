@@ -53,3 +53,31 @@ export function catalogoDemo() {
     }))),
   }));
 }
+
+/*
+ * Para probar la importación del mayorista en local: el mismo catálogo del
+ * sitio mayorista (GET /api/catalogo guardado en un archivo) con forma de
+ * Stocker. Los SKU son los de las combinaciones (como en Stocker); el
+ * precio minorista es de mentira (el doble del mayorista).
+ */
+export function catalogoDesdeMayorista(m) {
+  let vid = 1;
+  return m.productos.map((p, i) => ({
+    id: 7000 + i,
+    sku: p.sku,
+    titulo: p.titulo,
+    descripcion: null,
+    categoria: m.categorias.find((c) => c.id === p.categoriaId)?.nombre ?? null,
+    genero: p.genero ?? null,
+    modelo: p.modelo ?? null,
+    precio: p.precio * 2,
+    variantes: p.combinaciones.map((c, k) => ({
+      id: 200000 + vid++,
+      sku: c.sku,
+      color: c.color ?? null,
+      talle: c.talle ?? null,
+      precio: (c.precio ?? p.precio) * 2,
+      cantidad: stockDe(i, k % 7, k),
+    })),
+  }));
+}

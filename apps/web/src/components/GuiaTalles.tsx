@@ -36,6 +36,15 @@ export function BotonGuiaTalles({ guia, disponibles, coloresCon, onElegir }: {
     setBorrador(Object.fromEntries(Object.entries(medidas).map(([k, v]) => [k, String(v)])));
   }, [medidas]);
 
+  // El asistente la abre ("Guía de talles de esta prenda"): con el aviso, o entrando con #guia-talles.
+  useEffect(() => {
+    const abrir = () => { setPestana(cuerpo.length ? "mi-talle" : "tabla"); if (!dialogo.current?.open) dialogo.current?.showModal(); };
+    if (window.location.hash === "#guia-talles") abrir();
+    window.addEventListener("isu:abrir-guia", abrir);
+    return () => window.removeEventListener("isu:abrir-guia", abrir);
+    // Sólo al montar: cuerpo sale de la guía, que no cambia en la ficha
+  }, []);
+
   const leidas: MedidasCliente = Object.fromEntries(
     Object.entries(borrador).map(([k, v]) => [k, Number(v.replace(",", "."))]).filter(([, v]) => Number.isFinite(v) && (v as number) > 0 && (v as number) < 300),
   );
@@ -44,7 +53,7 @@ export function BotonGuiaTalles({ guia, disponibles, coloresCon, onElegir }: {
 
   return (
     <>
-      <button type="button" onClick={() => { setPestana(cuerpo.length && Object.keys(medidas).length ? "mi-talle" : "tabla"); dialogo.current?.showModal(); }}
+      <button id="guia-talles" type="button" onClick={() => { setPestana(cuerpo.length && Object.keys(medidas).length ? "mi-talle" : "tabla"); dialogo.current?.showModal(); }}
         className="text-sm font-bold text-marca underline underline-offset-2 hover:text-marca-fuerte">
         Guía de talles
       </button>

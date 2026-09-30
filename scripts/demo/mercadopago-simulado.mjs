@@ -45,13 +45,13 @@ http.createServer(async (req, res) => {
     if (u.pathname === "/checkout" && req.method === "GET") {
       const pref = preferencias.get(u.searchParams.get("pref"));
       if (!pref) { res.writeHead(404); return res.end("Preferencia inexistente"); }
-      const total = pref.items.reduce((a, i) => a + i.unit_price * i.quantity, 0);
+      const total = pref.items.reduce((a, i) => a + i.unit_price * i.quantity, 0) + (pref.shipments?.mode === "me2" ? 4500 : 0);
       const efectivo = pref.payment_methods?.excluded_payment_types?.some((t) => t.id === "credit_card");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' http: https:" });
       return res.end(`<!doctype html><html lang="es"><meta name="viewport" content="width=device-width"><title>Mercado Pago (simulado)</title>
 <body style="font-family:Arial;background:#eee;margin:0"><div style="max-width:420px;margin:40px auto;background:#fff;border-radius:12px;padding:24px">
 <p style="color:#009ee3;font-weight:bold">Mercado Pago · SIMULADO</p><h1 style="font-size:20px">Pagar pedido ${esc(pref.external_reference)}</h1>
-<ul>${pref.items.map((i) => `<li>${esc(i.quantity)} × ${esc(i.title)} — $ ${esc(i.unit_price)}</li>`).join("")}</ul>
+<ul>${pref.items.map((i) => `<li>${esc(i.quantity)} × ${esc(i.title)} — $ ${esc(i.unit_price)}</li>`).join("")}${pref.shipments?.mode === "me2" ? "<li>Envío con Mercado Envíos — $ 4500</li>" : ""}</ul>
 <p style="font-size:22px"><b>Total: $ ${esc(total)}</b></p><p>${efectivo ? "Pago en efectivo (Pago Fácil / Rapipago)" : "Tarjeta de crédito o débito"}</p>
 <form method="post" action="/pagar"><input type="hidden" name="pref" value="${esc(pref.id)}">
 <button name="r" value="approved" style="display:block;width:100%;padding:14px;margin:8px 0;background:#009ee3;color:#fff;border:0;border-radius:8px;font-size:16px">Aprobar pago</button>
@@ -70,6 +70,12 @@ http.createServer(async (req, res) => {
         transaction_amount: pref.items.reduce((a, i) => a + i.unit_price * i.quantity, 0),
         payment_type_id: "credit_card", payment_method_id: "visa", installments: 1, date_approved: estado === "approved" ? new Date().toISOString() : null,
       };
+      // Mercado Envíos (etapa 4): la preferencia trae shipments → el pago queda con una orden y el envío.
+      if (pref.shipments?.mode === "me2") {
+        pago.order = { id: pago.id, type: "mercadopago" };
+        pago.shipping_amount = 4500;
+        pago.transaction_amount += 4500;
+      }
       pagos.set(String(pago.id), pago);
       await avisar(pref, pago);
       const vuelta = new URL(pref.back_urls[estado === "approved" ? "success" : estado === "pending" ? "pending" : "failure"]);
@@ -90,6 +96,13 @@ http.createServer(async (req, res) => {
     }
     const m = u.pathname.match(/^\/v1\/payments\/(\d+)$/);
     if (m && req.method === "GET") return pagos.has(m[1]) ? json(res, 200, pagos.get(m[1])) : json(res, 404, { message: "not_found" });
+    const mo = u.pathname.match(/^\/merchant_orders\/(\d+)$/);
+    if (mo && req.method === "GET") {
+      const pago = pagos.get(mo[1]);
+      if (!pago?.order) return json(res, 404, { message: "not_found" });
+      // El id del envío lo sigue el simulador de transportes (/meli/shipments/:id).
+      return json(res, 200, { id: pago.order.id, shipments: pago.status === "approved" ? [{ id: 40_000_000 + (pago.id % 10_000_000) }] : [], shipping_cost: 4500 });
+    }
     if (u.pathname === "/v1/payments/search") {
       const ref = u.searchParams.get("external_reference");
       return json(res, 200, { results: [...pagos.values()].filter((p) => p.external_reference === ref).reverse() });

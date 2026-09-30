@@ -40,6 +40,8 @@ export const ConfigPublica = z.object({
   mediosPago: z.array(z.enum(["mercadopago", "pagofacil", "transferencia", "local"])),
   costoEnvio: z.number().int().nonnegative(), // centavos
   locales: z.array(Local),
+  // Etapa 5: asistente de la tienda (burbuja de chat).
+  chatbot: z.object({ activo: z.boolean(), saludo: z.string().max(200) }).default({ activo: false, saludo: "" }),
 });
 export type ConfigPublica = z.infer<typeof ConfigPublica>;
 

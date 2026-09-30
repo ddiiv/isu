@@ -4,7 +4,7 @@ import path from "node:path";
 import type pg from "pg";
 import { aSlug, FOTOS_POR_COLOR } from "@isu/shared";
 import type { Almacen } from "./almacen.js";
-import { FotoInvalida, MAX_BYTES, procesarFoto } from "./procesar.js";
+import { FotoInvalida, MAX_BYTES, procesarFoto, type FotoProcesada } from "./procesar.js";
 
 /*
  * Importa fotos desde una carpeta con esta forma:
@@ -16,11 +16,9 @@ import { FotoInvalida, MAX_BYTES, procesarFoto } from "./procesar.js";
  * El color se busca por nombre ("Verde Militar", "verde-militar" y "verde
  * militar" son el mismo). Los archivos entran en orden alfabético.
  *
- * Cada foto entra en su propia transacción: la fila se inserta ANTES de
- * subir el archivo (así el trigger de la base aplica los topes de 5 por
- * color y 5 × colores por producto) y se confirma DESPUÉS de subirlo. Si la
- * subida falla, la fila no queda; si la fila no entra por el tope, no se
- * sube nada.
+ * Cada foto entra en su propia transacción (ver guardarFoto): si la subida
+ * falla, la fila no queda; si la fila no entra por el tope (5 por color y
+ * 5 × colores por producto), no se sube nada.
  */
 const EXTENSIONES = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif"]);
 
@@ -41,6 +39,47 @@ async function imagenes(dir: string) {
     .filter((d) => d.isFile() && EXTENSIONES.has(path.extname(d.name).toLowerCase()))
     .map((d) => d.name)
     .sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+}
+
+export interface NuevaFoto {
+  productoId: number;
+  tipo: "color" | "exhibicion";
+  colorId: number | null;
+  alt: string;
+  /** de dónde salió ("mayorista:<id>"), para no importarla dos veces */
+  origen?: string | null;
+}
+
+/*
+ * Guarda una foto ya procesada: la fila se inserta ANTES de subir el archivo
+ * (así el trigger de la base aplica los topes) y se confirma DESPUÉS de
+ * subirlo. Va al final de su grupo (mismo tipo y color). Devuelve null si
+ * entró o el motivo si no.
+ */
+export async function guardarFoto(pool: pg.Pool, almacen: Almacen, f: NuevaFoto, proc: FotoProcesada): Promise<string | null> {
+  const clave = `p/${f.productoId}/${randomBytes(8).toString("hex")}`;
+  const cli = await pool.connect();
+  try {
+    await cli.query("BEGIN");
+    const orden = await cli.query<{ n: number }>(
+      "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3",
+      [f.productoId, f.tipo, f.colorId],
+    );
+    await cli.query(
+      "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt, origen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [f.productoId, f.tipo, f.colorId, orden.rows[0]!.n, clave, proc.ancho, proc.alto, f.alt.slice(0, 160), f.origen ?? null],
+    );
+    for (const t of proc.tamanos) await almacen.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
+    await cli.query("COMMIT");
+    return null;
+  } catch (e) {
+    await cli.query("ROLLBACK").catch(() => {});
+    const pg = e as { code?: string; message: string };
+    for (const w of [400, 800, 1200]) await almacen.borrar(`${clave}-${w}.webp`).catch(() => {});
+    return pg.code === "23514" ? pg.message : pg.code === "23505" ? "ya estaba importada" : `falló: ${pg.message}`;
+  } finally {
+    cli.release();
+  }
 }
 
 export async function importarCarpeta(
@@ -113,30 +152,9 @@ export async function importarCarpeta(
           omitir(`${nombre}/${a}`, e instanceof FotoInvalida ? e.message : "no se pudo procesar");
           continue;
         }
-        const clave = `p/${producto.id}/${randomBytes(8).toString("hex")}`;
-        const cli = await pool.connect();
-        try {
-          await cli.query("BEGIN");
-          const orden = await cli.query<{ n: number }>(
-            "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3",
-            [producto.id, tipo, colorId],
-          );
-          await cli.query(
-            "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-            [producto.id, tipo, colorId, orden.rows[0]!.n, clave, proc.ancho, proc.alto, producto.nombre.slice(0, 160)],
-          );
-          for (const t of proc.tamanos) await almacen.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
-          await cli.query("COMMIT");
-          informe.subidas++;
-          log(`  ✓ ${nombre}/${a}`);
-        } catch (e) {
-          await cli.query("ROLLBACK").catch(() => {});
-          const pg = e as { code?: string; message: string };
-          omitir(`${nombre}/${a}`, pg.code === "23514" ? pg.message : `falló: ${pg.message}`);
-          for (const w of [400, 800, 1200]) await almacen.borrar(`${clave}-${w}.webp`).catch(() => {});
-        } finally {
-          cli.release();
-        }
+        const error = await guardarFoto(pool, almacen, { productoId: producto.id, tipo, colorId, alt: producto.nombre }, proc);
+        if (error) omitir(`${nombre}/${a}`, error);
+        else { informe.subidas++; log(`  ✓ ${nombre}/${a}`); }
       }
     }
   }

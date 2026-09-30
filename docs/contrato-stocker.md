@@ -39,9 +39,20 @@ precio y el stock; la tienda guarda una copia para no preguntarle en cada visita
 
 - Plataforma `tienda` en `colaVentasOnlineService.PLATAFORMAS`.
 - `plataforma_pedidos.pagoPendiente` / `pagoDetalle` (se agregan solas al arrancar, `ensureColumns`). Un pedido con `pagoPendiente` se ve en **Envíos del día** con la marca **SIN PAGAR** y `despachar` lo rechaza (409 `SIN_PAGAR`). ML y Jumpseller quedan en `false`.
-- `POST /api/integraciones/tienda/pedidos` `{ pedido: "ISU-1234", items: [{ sku, cantidad, precioUnitario }], comprador, total, pagoPendiente, pagoDetalle }` → entra por `encolarYProcesar`. **Todo o nada**: si queda `parcial`, se cancela en el acto y se devuelve `faltantes: [{ sku, pedido, hay }]`. Idempotente por número (`repetido: true`).
+- `POST /api/integraciones/tienda/pedidos` `{ pedido: "ISU-1234", items: [{ sku, cantidad, precioUnitario }], comprador, total, pagoPendiente, pagoDetalle }` (etapa 6: `precioUnitario` es lo que se cobró por unidad, con la rebaja y el cupón ya repartidos; el descuento por transferencia sólo baja `total`. Si hubo cupón, `pagoDetalle` lo dice: "Transferencia · cupón VERANO10 (10% OFF) · vence 02/10 14:00") → entra por `encolarYProcesar`. **Todo o nada**: si queda `parcial`, se cancela en el acto y se devuelve `faltantes: [{ sku, pedido, hay }]`. Idempotente por número (`repetido: true`).
 - `GET /api/integraciones/tienda/pedidos/:pedido` → estado.
 - `POST …/pedidos/:pedido/pagado` `{ detalle }` → levanta la marca (idempotente; 409 si el pedido ya se canceló).
 - `POST …/pedidos/:pedido/cancelar` `{ motivo }` → `cancelarPorPlataforma` (devuelve lo apartado; idempotente).
 - `PUT /api/integraciones/tienda/clientes` `{ email, nombre, apellido, telefono, dni }` → cliente minorista por email (sin distinguir mayúsculas); lo vacío no pisa lo que Stocker ya tenía; no se pueden tocar tipo, cuenta corriente ni límite.
 - Pruebas: `scripts/test-tienda-pedidos.cjs` (45 chequeos).
+
+## Etapa 4 (hecho · patch en `backend` y `frontend`)
+
+La tienda elige el transporte, cotiza y genera la etiqueta con la API de cada correo; **el despacho sigue siendo de Stocker** (Envíos del día), porque ahí la reserva se convierte en egreso de stock.
+
+- `POST /api/integraciones/tienda/pedidos` acepta `envio: { tipo, seguimiento?, despacharAntesDe? }`. `tipo`: `correo_argentino` · `andreani` · `oca` · `mercado_envios` · `cabify` · `retiro` · `envio` (estándar). `despacharAntesDe` (ISO) marca el corte de los envíos en el día (Cabify).
+- `POST …/pedidos/:pedido/envio` `{ tipo, seguimiento }` → carga el número de seguimiento cuando la tienda genera la etiqueta. Idempotente; **409 `YA_DESPACHADO`** si ya salió con otro número. `seguimiento`: `^[A-Za-z0-9-]{4,60}$`.
+- El resumen del pedido suma `envioTipo` y `envioId`.
+- Al despachar (y al marcar faltante) en Envíos del día, Stocker avisa con `pg_notify('stocker_tienda_envios', {"b": negocio, "p": "ISU-…", "e": "despachado" | "faltante"})`. Sólo para pedidos de la plataforma `tienda`. La tienda además repasa cada 15 minutos (`GET …/pedidos/:pedido`, `despachadoEn`) por si se perdió un aviso.
+- Frontend: en **Envíos del día** los paquetes de la tienda dicen "Tienda online · ISU-… · Andreani · 3600…" (transporte y número de seguimiento a la vista para armar la caja).
+- Pruebas: `scripts/test-tienda-envios.cjs` (17 chequeos). Regresión: tienda-pedidos 45, tienda-online 39, cola 40, envíos del día 107, Jumpseller 64.

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useId, useState } from "react";
 import { conDescuento, centavos, formatearPesos, type Cotizacion } from "@isu/shared";
 import { Foto } from "../Foto";
 import { useCarrito } from "./Carrito";
@@ -60,13 +61,72 @@ export function BarraEnvioGratis({ c }: { c: Cotizacion | null }) {
 
 export function Totales({ c, descuento }: { c: Cotizacion | null; descuento: number }) {
   if (!c) return null;
+  const trasCupon = c.subtotal - (c.descuentoCupon ?? 0);
   return (
     <div className="space-y-1 text-[15px]">
       <div className="flex justify-between"><span>Subtotal</span><b>{formatearPesos(c.subtotal)}</b></div>
-      {descuento > 0 && c.subtotal > 0 && (
-        <div className="flex justify-between text-ahorro"><span>Con transferencia</span><b>{formatearPesos(conDescuento(centavos(c.subtotal), descuento))}</b></div>
+      <LineaCupon c={c} />
+      {descuento > 0 && trasCupon > 0 && (
+        <div className="flex justify-between text-ahorro"><span>Con transferencia</span><b>{formatearPesos(conDescuento(centavos(trasCupon), descuento))}</b></div>
+      )}
+      {c.promoCerca && (
+        <p className="text-sm text-tinta-suave">Te faltan <b>{formatearPesos(c.promoCerca.falta)}</b> para <b className="text-ahorro">{c.promoCerca.nombre}</b>.</p>
       )}
       <p className="text-xs text-tinta-tenue">El envío se calcula en el siguiente paso.</p>
+    </div>
+  );
+}
+
+/* "Cupón VERANO10 −$2.000" o "Promo 10% superando $80.000 −$…" (o envío gratis). */
+export function LineaCupon({ c, Etiqueta = "span" }: { c: Pick<Cotizacion, "cupon" | "descuentoCupon">; Etiqueta?: "span" | "dt" }) {
+  if (!c.cupon) return null;
+  const Valor = Etiqueta === "dt" ? "dd" : "b";
+  return (
+    <div className="flex justify-between gap-3 text-ahorro">
+      <Etiqueta>{c.cupon.codigo ? <>Cupón <b>{c.cupon.codigo}</b></> : <>Promo: {c.cupon.nombre}</>}</Etiqueta>
+      <Valor className="shrink-0">{c.descuentoCupon ? `−${formatearPesos(c.descuentoCupon)}` : c.cupon.envioGratis ? "Envío gratis" : ""}</Valor>
+    </div>
+  );
+}
+
+/*
+ * "¿Tenés un cupón?": se escribe y se aplica. Sin <form> propio: en el
+ * checkout vive adentro del formulario de la compra (Enter aplica el cupón,
+ * no confirma la compra).
+ */
+export function CampoCupon() {
+  const { cupon, ponerCupon, cotizacion, avisoCupon, cotizando } = useCarrito();
+  const [abierto, setAbierto] = useState(false);
+  const [texto, setTexto] = useState("");
+  const id = useId();
+  const aplicado = cotizacion?.cupon?.codigo ? cotizacion.cupon : null;
+  const aplicar = () => { if (texto.trim()) ponerCupon(texto); };
+  // "La promoción X te descuenta más…" es informativo; el resto, un error.
+  const informativo = avisoCupon?.startsWith("La promoción");
+
+  if (aplicado) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-ahorro-claro px-3 py-2 text-sm">
+        <span>Cupón <b>{aplicado.codigo}</b> aplicado{aplicado.nombre ? <span className="block text-xs text-tinta-suave">{aplicado.nombre}</span> : null}</span>
+        <button type="button" onClick={() => { ponerCupon(null); setTexto(""); }} aria-label={`Quitar el cupón ${aplicado.codigo}`} className="shrink-0 font-bold underline">Quitar</button>
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm">
+      {!abierto && !avisoCupon && !cupon ? (
+        <button type="button" onClick={() => setAbierto(true)} className="underline">¿Tenés un cupón de descuento?</button>
+      ) : (
+        <div className="flex gap-2">
+          <label htmlFor={`${id}-cupon`} className="sr-only">Código del cupón</label>
+          <input id={`${id}-cupon`} value={texto} onChange={(e) => setTexto(e.target.value)} maxLength={40} autoComplete="off" autoCapitalize="characters" spellCheck={false}
+            placeholder="Código del cupón" aria-describedby={avisoCupon ? `${id}-aviso` : undefined} aria-invalid={!!avisoCupon && !informativo}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); aplicar(); } }}
+            className="min-w-0 flex-1 rounded-xl border border-linea bg-white px-3 py-2.5 text-base uppercase outline-none placeholder:normal-case focus:border-tinta aria-[invalid=true]:border-oferta" />
+          <button type="button" onClick={aplicar} disabled={cotizando || !texto.trim()} className="boton-borde shrink-0 px-4 py-2.5 disabled:opacity-50">Aplicar</button>
+        </div>
+      )}
+      {avisoCupon && <p id={`${id}-aviso`} role={informativo ? "status" : "alert"} className={`mt-1.5 ${informativo ? "text-tinta-suave" : "font-bold text-oferta"}`}>{avisoCupon}</p>}
     </div>
   );
 }

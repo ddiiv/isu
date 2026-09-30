@@ -8,6 +8,7 @@ import { AwsClient } from "aws4fetch";
  *
  *   fotos         públicas: R2 con dominio público (CDN_IMAGENES); en desarrollo, disco
  *   comprobantes  PRIVADOS: otro bucket, sin dominio público; sólo los lee el backoffice
+ *   etiquetas     PRIVADAS (nombre y dirección del cliente): el mismo bucket privado, en e/
  *
  * Cada almacén tiene un patrón de nombre de archivo: nada que no calce entra
  * a una ruta o a una URL. Así ni un error de programación ni un pedido
@@ -21,6 +22,7 @@ export interface Almacen {
 
 export const PATRON_FOTOS = /^p\/\d{1,9}\/[a-z0-9]{8,40}-(400|800|1200)\.webp$/;
 export const PATRON_COMPROBANTES = /^c\/\d{1,9}\/[a-z0-9]{16,40}\.(webp|pdf)$/;
+export const PATRON_ETIQUETAS = /^e\/\d{1,9}\/[a-z0-9]{16,40}\.pdf$/;
 
 /* Una ruta relativa se toma desde la raíz del monorepo (donde está el .env), no desde la carpeta de cada app. */
 export function desdeLaRaiz(dir: string): string {
@@ -108,3 +110,12 @@ export function almacenDeComprobantes(env: NodeJS.ProcessEnv = process.env): Alm
   return null;
 }
 export * from "./procesar.js";
+
+/** Etiquetas de envío: el mismo lugar privado que los comprobantes (otra carpeta, otro patrón). */
+export function almacenDeEtiquetas(env: NodeJS.ProcessEnv = process.env): Almacen | null {
+  if (env.R2_CUENTA && env.R2_BUCKET_PRIVADO && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
+    return almacenR2({ cuenta: env.R2_CUENTA, bucket: env.R2_BUCKET_PRIVADO, id: env.R2_ACCESS_KEY_ID, secreto: env.R2_SECRET_ACCESS_KEY }, PATRON_ETIQUETAS);
+  }
+  if (env.COMPROBANTES_DIR) return almacenEnDisco(env.COMPROBANTES_DIR, PATRON_ETIQUETAS);
+  return null;
+}

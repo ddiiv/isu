@@ -51,6 +51,9 @@ describe("categorías", () => {
   it("sin género en Stocker, lo busca en el título", () => {
     expect(generosDe(null, "Calza deportiva mujer")).toEqual(["mujer"]);
     expect(proponerCategorias(null, null, "Short de baño niño")).toEqual([["ninos", "shorts"]]);
+    // Como vienen del mayorista: "Nena" / "Nene" también son de niños.
+    expect(proponerCategorias("Shorts", "Nena", "Mara Short Nena")).toEqual([["ninos", "shorts"]]);
+    expect(proponerCategorias(null, null, "Letra Short nene con letra")).toEqual([["ninos", "shorts"]]);
   });
   it("sin tipo reconocible queda en la categoría de arriba", () => {
     expect(proponerCategorias("Accesorios", "Hombre", "Gorra")).toEqual([["hombre", null]]);

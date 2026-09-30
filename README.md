@@ -41,7 +41,8 @@ pnpm demo:fotos       # genera fotos de muestra y las importa
 
 Backoffice (http://localhost:3001): `pnpm admin:crear vos@mail.com "Tu Nombre"`
 imprime una contraseña provisoria; al entrar pide el doble factor (QR). Guías de
-talles, Destacados/Nuevos y un descuento de muestra: `pnpm demo:backoffice`.
+talles, Destacados/Nuevos, un descuento y dos cupones de muestra (`BIENVENIDA10`,
+`ENVIOGRATIS`): `pnpm demo:backoffice`.
 
 Para probar compras sin credenciales: `pnpm demo:mercadopago` (Mercado Pago
 simulado en :3910, con botones Aprobar / Rechazar / Pendiente). Los mails se
@@ -52,6 +53,19 @@ curl -XPOST localhost:4000/v1/pagos/registrar -H 'content-type: application/json
   -H 'authorization: Bearer solo-desarrollo-pagos-cambiar-en-produccion' \
   -d '{"pedido":"ISU-1001","medio":"transferencia","monto":1519200,"referencia":"OP-1","quien":"Caja"}'
 ```
+
+Envíos (etapa 4): `pnpm demo:transportes` simula Correo Argentino, Andreani,
+OCA, Mercado Envíos, Cabify y WhatsApp en :3920 (ahí se avanzan los envíos y se
+ven los WhatsApp); el Stocker simulado tiene su "Envíos del día" con
+**Despachar** en http://127.0.0.1:3900. El asistente (etapa 5) funciona sin nada
+más; con `ANTHROPIC_API_KEY` y el ajuste prendido, también responde con IA.
+
+Catálogo del sitio mayorista (etapa 6): `pnpm mayorista:importar` muestra qué
+traería (fotos por color, foto principal, categorías) y `pnpm mayorista:importar
+--aplicar` lo hace; engancha por SKU con lo que ya sincronizó de Stocker. Para
+probarlo en local con los 71 productos del mayorista: guardar su
+`/api/catalogo` en un archivo y levantar el Stocker simulado con
+`DEMO_MAYORISTA=<archivo>` (mejor en una base aparte).
 
 Para simular una venta en el local (la tienda la ve al instante):
 `curl -XPOST localhost:3900/__vender -d '{"sku":"ISU-4002-NEG0-M"}'`.
@@ -67,6 +81,7 @@ falta hacer nada: es un acelerador opcional de BullMQ.
 
 ```bash
 pnpm verificar                       # lint + tipos + tests + build
+bash scripts/ci/levantar-e2e.sh      # todo levantado con simuladores y datos de muestra (lo que usa CI)
 pnpm e2e                             # navegador real, escritorio y celular
 pnpm seguridad                       # auditoría "hacker" contra los servicios levantados
 node tests/seguridad/aislamiento-db.mjs   # la tienda no puede tocar tablas de Stocker
@@ -74,4 +89,5 @@ node tests/carga/carga.mjs           # carga básica
 ```
 
 Detalle en [`docs/`](docs/): arquitectura, etapas y resultados, seguridad,
-despliegue en Railway + Cloudflare y el contrato con Stocker.
+despliegue en Railway + Cloudflare, el contrato con Stocker y la guía de
+[salida a producción](docs/salida-produccion.md).

@@ -24,9 +24,18 @@ import { crearServicioPedidos } from "./modulos/pedidos/servicio.js";
 import { crearColas, type Colas } from "./lib/colas.js";
 import { crearMercadoPago } from "./lib/mercadopago.js";
 import { crearClienteStocker } from "@isu/stocker";
-import { almacenDeComprobantes, almacenDeFotos, type Almacen } from "@isu/almacen";
+import { almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, type Almacen } from "@isu/almacen";
+import { rutasEnviosAdmin } from "./modulos/admin/envios.js";
+import { crearAsistente } from "./modulos/chat/motor.js";
+import { crearIa, type Ia } from "./modulos/chat/ia.js";
+import { rutasChat } from "./modulos/chat/rutas.js";
+import { rutasChatAdmin } from "./modulos/admin/chat.js";
+import { rutasCuponesAdmin } from "./modulos/admin/cupones.js";
 import { rutasIngresoAdmin } from "./modulos/admin/ingreso.js";
 import { rutasAdmin } from "./modulos/admin/rutas.js";
+import { crearTransportes, type Transportes } from "@isu/envios";
+import { crearCotizadorEnvios } from "./modulos/envios/cotizador.js";
+import { rutasEnvios } from "./modulos/envios/rutas.js";
 
 export interface Dependencias {
   env: Entorno;
@@ -34,13 +43,18 @@ export interface Dependencias {
   redis: Redis;
   /** Para las pruebas: colas de mentira (sin Redis/BullMQ). */
   colas?: Colas;
+  /** Para las pruebas: transportes contra el simulador. Por defecto, los del entorno. */
+  transportes?: Transportes;
+  /** Para las pruebas: una IA de mentira (null = sin IA). Por defecto, Claude si hay ANTHROPIC_API_KEY. */
+  ia?: Ia | null;
 }
 
 /*
  * Arma la aplicación sin escuchar en ningún puerto: la usan el servidor y
  * los tests (app.inject), así que lo que se prueba es exactamente lo que corre.
  */
-export async function construirApp({ env, pool, redis, colas: colasDadas }: Dependencias) {
+export async function construirApp(deps: Dependencias) {
+  const { env, pool, redis, colas: colasDadas } = deps;
   const app = Fastify({
     logger: env.LOG_LEVEL === "silent" ? false : {
       level: env.LOG_LEVEL,
@@ -106,16 +120,32 @@ export async function construirApp({ env, pool, redis, colas: colasDadas }: Depe
   if (!colasDadas) app.addHook("onClose", async () => { await colas.cerrar(); });
   const stocker = env.STOCKER_API_URL && env.STOCKER_TOKEN ? crearClienteStocker({ url: env.STOCKER_API_URL, token: env.STOCKER_TOKEN }) : null;
   const mp = env.MP_ACCESS_TOKEN ? crearMercadoPago({ url: env.MP_API_URL, token: env.MP_ACCESS_TOKEN }) : null;
-  const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos });
+  // ── Etapa 4: envíos (cada transporte se prende con sus credenciales) ──
+  const transportes = deps.transportes ?? crearTransportes(process.env);
+  const cotizador = crearCotizadorEnvios({ pool, redis, transportes, log: app.log });
+  const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador });
   await rutasCuentas(app, { pool, redis, env, colas });
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
-  await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos });
+  await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
+  await rutasEnvios(app, { pool, redis, env, cotizador, transportes, descuentos });
 
   // ── Etapa 3: backoffice ──
   // Sin FOTOS_DIR ni R2 el backoffice funciona igual, pero no deja subir fotos.
   const fotos: Almacen | null = (() => { try { return almacenDeFotos({ ...process.env, FOTOS_DIR: env.FOTOS_DIR }); } catch { return null; } })();
   await rutasIngresoAdmin(app, { pool, redis, env });
   await rutasAdmin(app, { pool, redis, env, colas, cache, servicio, fotos, comprobantes, canalInvalidar: CANAL_INVALIDAR });
+
+  // ── Etapa 4: backoffice de envíos ──
+  const etiquetas = almacenDeEtiquetas({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
+  await rutasEnviosAdmin(app, { pool, redis, env, colas, transportes, cotizador, etiquetas });
+
+  // ── Etapa 5: asistente de la tienda (la IA es opcional: sin ANTHROPIC_API_KEY responde con las preguntas frecuentes) ──
+  const ia = env.ANTHROPIC_API_KEY ? crearIa({ apiKey: env.ANTHROPIC_API_KEY, modelo: env.CHATBOT_MODELO, log: app.log }) : null;
+  const asistente = crearAsistente({ pool, redis, cache, cotizador, transportes, descuentos, ia: deps.ia === undefined ? ia : deps.ia, secreto: env.INTERNO_TOKEN, log: app.log });
+  await rutasChat(app, { redis, env, asistente });
+  app.addHook("onClose", async () => { await asistente.cerrar(); });
+  await rutasCuponesAdmin(app, { pool, env });
+  await rutasChatAdmin(app, { pool, redis, env, cache, canalInvalidar: CANAL_INVALIDAR, asistente, iaDisponible: !!(deps.ia ?? ia) });
 
   return app;
 }

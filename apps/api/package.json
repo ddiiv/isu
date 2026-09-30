@@ -12,12 +12,14 @@
     "admin:crear": "node --env-file-if-exists=../../.env dist/cli/crear-admin.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/under-pressure": "^9.2.0",
     "@isu/almacen": "workspace:*",
     "@isu/db": "workspace:*",
+    "@isu/envios": "workspace:*",
     "@isu/shared": "workspace:*",
     "@isu/stocker": "workspace:*",
     "@node-rs/argon2": "^2.2.1",
@@ -26,6 +28,7 @@
     "fastify": "^5.12.5",
     "fastify-type-provider-zod": "^7.0.0",
     "ioredis": "^5.11.1",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.23.0",
     "sharp": "^0.35.5",
     "zod": "^4.6.5"

@@ -9,3 +9,6 @@ export * from "./catalogo.js";
 export * from "./checkout.js";
 export * from "./talles.js";
 export * from "./outfits.js";
+export * from "./envios.js";
+export * from "./chat.js";
+export * from "./cupones.js";

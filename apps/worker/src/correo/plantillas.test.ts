@@ -29,6 +29,12 @@ describe("mails", () => {
     expect(m.html).toMatch(/\$\s?16\.000/);
     expect(m.texto).toContain("ISU-1001");
   });
+  it("con cupón: la línea del descuento (escapada) antes de la de transferencia", () => {
+    const m = armar("pedido_recibido", pedido({ cupon: "cupón QA10 (<b>10%</b> OFF)", descuentoCupon: 200_000, subtotal: 2_000_000, descuento: 360_000, total: 1_440_000 }));
+    expect(m.html).toContain("Cupón QA10 (&lt;b&gt;10%&lt;/b&gt; OFF)");
+    expect(m.html.indexOf("Cupón QA10")).toBeLessThan(m.html.indexOf("Descuento por transferencia"));
+    expect(m.html).toMatch(/−\$\s?2\.000/);
+  });
   it("todas las plantillas tienen versión en texto", () => {
     for (const p of ["bienvenida", "restablecer", "pedido_recibido", "pago_confirmado", "pedido_vencido", "arrepentimiento", "transferencia_informada"] as const) {
       const m = armar(p, { ...pedido(), codigo: "ARR-ABC123", resultado: "cancelado", modo: "crear", enlace: "https://x.test" });

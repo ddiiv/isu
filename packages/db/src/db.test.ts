@@ -36,7 +36,7 @@ afterAll(async () => {
   await pool.query("DELETE FROM tienda.descuentos WHERE creado_por = 'qa'").catch(() => {});
   await pool.query("DELETE FROM tienda.admins WHERE email LIKE 'qa-db%'").catch(() => {});
   await pool.query("DELETE FROM tienda.productos WHERE stocker_padre LIKE 'QA-%'").catch(() => {});
-  await pool.query("DELETE FROM tienda.pedidos WHERE email IN ('a@b.c', 'qa-db@test.com')").catch(() => {});
+  await pool.query("DELETE FROM tienda.pedidos WHERE email IN ('a@b.c', 'qa-db@test.com', 'qa-db-envio@test.com')").catch(() => {});
   await pool.end();
 });
 
@@ -280,5 +280,131 @@ describe("guías de talles y outfits (0007)", () => {
     const r = await pool.query("SELECT guia_talles_id FROM tienda.productos WHERE id = $1", [p.rows[0].id]);
     expect(r.rows[0].guia_talles_id).toBeNull();
     await expect(pool.query("UPDATE tienda.productos SET parte_outfit = 'zapatos' WHERE id = $1", [p.rows[0].id])).rejects.toThrow(/check/);
+  });
+});
+
+describe("envíos (0008)", () => {
+  const pedido = async (extra: Record<string, unknown> = {}) => {
+    const b = { acceso_hash: "d".repeat(64), email: "qa-db-envio@test.com", nombre: "A", apellido: "B", telefono: "1", dni: "2", entrega: "envio",
+      direccion: JSON.stringify({ calle: "x", numero: "1", cp: "1406", localidad: "CABA", provincia: "CABA" }), medio_pago: "transferencia",
+      subtotal: 1000, total: 1000, estado: "pagado", transporte: "andreani", servicio_envio: "domicilio", ...extra };
+    const k = Object.keys(b);
+    return (await pool.query(`INSERT INTO tienda.pedidos (${k.join(",")}) VALUES (${k.map((_, i) => `$${i + 1}`).join(",")}) RETURNING id`, Object.values(b))).rows[0].id as number;
+  };
+  it("un envío a domicilio necesita transporte; a sucursal, la sucursal", async () => {
+    await expect(pedido({ transporte: null })).rejects.toThrow(/check/);
+    await expect(pedido({ servicio_envio: "sucursal" })).rejects.toThrow(/check/);
+    await expect(pedido({ entrega: "retiro", local_retiro: "Flores", direccion: null })).rejects.toThrow(/check/);
+    await expect(pedido({ transporte: "dron" })).rejects.toThrow(/check/);
+    await pedido({ servicio_envio: "sucursal", sucursal_envio: JSON.stringify({ id: "X1", nombre: "Suc" }) });
+  });
+  it("un solo envío vigente por pedido; el número de seguimiento sin caracteres raros y único por transporte", async () => {
+    const id = await pedido();
+    const envio = (seg: string, activo = true) => pool.query("INSERT INTO tienda.envios (pedido_id, transporte, servicio, seguimiento, activo) VALUES ($1,'andreani','domicilio',$2,$3)", [id, seg, activo]);
+    await envio("360000000001");
+    await expect(envio("360000000002")).rejects.toThrow(/duplicate key/);
+    await envio("360000000003", false);
+    await expect(envio("36000'; DROP")).rejects.toThrow(/check/);
+    const otro = await pedido();
+    await expect(pool.query("INSERT INTO tienda.envios (pedido_id, transporte, servicio, seguimiento) VALUES ($1,'andreani','domicilio','360000000001')", [otro])).rejects.toThrow(/duplicate key/);
+  });
+  it("eventos y avisos no se repiten", async () => {
+    const id = await pedido();
+    const e = (await pool.query("INSERT INTO tienda.envios (pedido_id, transporte, servicio, seguimiento) VALUES ($1,'oca','domicilio','OCA123456') RETURNING id", [id])).rows[0].id;
+    const ev = () => pool.query("INSERT INTO tienda.envio_eventos (envio_id, fecha, estado, descripcion) VALUES ($1,'2026-09-28T10:00:00Z','en_camino','En tránsito')", [e]);
+    await ev();
+    await expect(ev()).rejects.toThrow(/duplicate key/);
+    const av = () => pool.query("INSERT INTO tienda.avisos (pedido_id, tipo, canal) VALUES ($1,'en_camino','whatsapp')", [id]);
+    await av();
+    await expect(av()).rejects.toThrow(/duplicate key/);
+    await expect(pool.query("INSERT INTO tienda.avisos (pedido_id, tipo, canal) VALUES ($1,'en_camino','sms')", [id])).rejects.toThrow(/check/);
+  });
+  it("siembra los ajustes de envíos", async () => {
+    const r = await pool.query("SELECT clave FROM tienda.ajustes WHERE clave = ANY($1::text[]) ORDER BY clave", [["transportes", "origenEnvios", "paqueteEnvios", "enviosEnElDia", "avisosWhatsapp"]]);
+    expect(r.rows.map((x) => x.clave)).toEqual(["avisosWhatsapp", "enviosEnElDia", "origenEnvios", "paqueteEnvios", "transportes"]);
+  });
+});
+
+describe("asistente (0009)", () => {
+  const faq = (extra: Record<string, unknown> = {}) => {
+    const b = { pregunta: "QA db ¿pregunta?", respuesta: "Una respuesta.", tema: "general", ...extra };
+    const k = Object.keys(b);
+    return pool.query(`INSERT INTO tienda.faq (${k.join(",")}) VALUES (${k.map((_, i) => `$${i + 1}`).join(",")}) RETURNING id`, Object.values(b));
+  };
+  afterAll(async () => { await pool.query("DELETE FROM tienda.faq WHERE pregunta LIKE 'QA db%'"); });
+  it("siembra preguntas frecuentes y los ajustes del asistente", async () => {
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.faq WHERE activo")).rows[0].n).toBeGreaterThanOrEqual(15);
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.ajustes WHERE clave IN ('chatbot', 'chatbotIa')")).rows[0].n).toBe(2);
+  });
+  it("los enlaces son sólo de la tienda (ni otro sitio ni //otro.sitio)", async () => {
+    await faq({ enlace_texto: "Cambios", enlace_url: "/devoluciones" });
+    for (const url of ["https://evil.test", "//evil.test", "/\\evil.test", "javascript:alert(1)"]) {
+      await expect(faq({ enlace_texto: "x", enlace_url: url })).rejects.toThrow(/check/);
+    }
+    await expect(faq({ enlace_texto: "x" })).rejects.toThrow(/check/); // texto sin dirección
+  });
+  it("tema de la lista y textos no vacíos", async () => {
+    await expect(faq({ tema: "hackeo" })).rejects.toThrow(/check/);
+    await expect(faq({ respuesta: "   " })).rejects.toThrow(/check/);
+  });
+});
+
+describe("importación del mayorista (0010)", () => {
+  it("una foto no se importa dos veces del mismo origen en el mismo producto", async () => {
+    const p = (await pool.query("INSERT INTO tienda.productos (stocker_padre, nombre, slug) VALUES ('QA-DB-MAY','QA db mayorista','qa-db-mayorista') RETURNING id")).rows[0].id;
+    try {
+      await pool.query("INSERT INTO tienda.producto_colores (producto_id, clave, nombre) VALUES ($1,'negro','Negro')", [p]);
+      await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, clave, origen) VALUES ($1,'exhibicion','p/1/qadbmay00001','mayorista:abc')", [p]);
+      await expect(pool.query("INSERT INTO tienda.fotos (producto_id, tipo, clave, origen) VALUES ($1,'exhibicion','p/1/qadbmay00002','mayorista:abc')", [p])).rejects.toThrow(/fotos_origen/);
+      // Sin origen (subidas a mano), las que sean.
+      await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, clave) VALUES ($1,'exhibicion','p/1/qadbmay00003'), ($1,'exhibicion','p/1/qadbmay00004')", [p]);
+    } finally {
+      await pool.query("DELETE FROM tienda.productos WHERE id = $1", [p]);
+    }
+  });
+});
+
+describe("cupones (0011)", () => {
+  const cupon = (extra: Record<string, unknown> = {}) => {
+    const b = { codigo: "QADB10", nombre: "QA db cupón", tipo: "porcentaje", valor: 10, creado_por: "qa", ...extra };
+    const k = Object.keys(b);
+    return pool.query(`INSERT INTO tienda.cupones (${k.join(",")}) VALUES (${k.map((_, i) => `$${i + 1}`).join(",")}) RETURNING id`, Object.values(b));
+  };
+  afterAll(async () => {
+    await pool.query("DELETE FROM tienda.pedidos WHERE email = 'qa-db-cupon@test.com'");
+    await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA db%'");
+  });
+  it("código en mayúsculas y único; promo sin código; valores en rango", async () => {
+    await cupon();
+    await expect(cupon()).rejects.toThrow(/cupones_codigo/);
+    for (const mal of [{ codigo: "qadb" }, { codigo: "QA DB" }, { codigo: "Q" }, { codigo: null }, { automatico: true },
+      { codigo: "QADB2", valor: 95 }, { codigo: "QADB3", tipo: "monto", valor: 50 }, { codigo: "QADB4", tipo: "envio_gratis", valor: 5 },
+      { codigo: "QADB5", alcance: "productos" }, { codigo: "QADB6", usos_max: 0 }]) {
+      await expect(cupon(mal), JSON.stringify(mal)).rejects.toThrow(/check|violates/);
+    }
+    await cupon({ codigo: null, automatico: true, minimo: 1000 });
+  });
+  it("el total del pedido cierra con el cupón; si el pedido se cae, el uso se libera solo (y vuelve si se paga tarde)", async () => {
+    const c = (await pool.query("SELECT id FROM tienda.cupones WHERE codigo = 'QADB10'")).rows[0].id;
+    const ins = (total: number) => pool.query(
+      `INSERT INTO tienda.pedidos (acceso_hash, email, nombre, apellido, telefono, dni, entrega, local_retiro, medio_pago, subtotal, descuento_cupon, descuento, envio, total, estado, cupon_id)
+       VALUES ('x','qa-db-cupon@test.com','A','B','1','1','retiro','L','local',1000000,100000,0,0,$1,'a_pagar_en_local',$2) RETURNING id`, [total, c]);
+    await expect(ins(1_000_000)).rejects.toThrow(/pedidos_total_cuadra/);
+    const p = (await ins(900_000)).rows[0].id;
+    await pool.query("UPDATE tienda.cupones SET usos = 1 WHERE id = $1", [c]);
+    await pool.query("INSERT INTO tienda.cupon_usos (cupon_id, pedido_id, email, descuento) VALUES ($1,$2,'qa-db-cupon@test.com',100000)", [c, p]);
+    const usos = async () => (await pool.query("SELECT usos FROM tienda.cupones WHERE id = $1", [c])).rows[0].usos;
+    await pool.query("UPDATE tienda.pedidos SET estado = 'vencido' WHERE id = $1", [p]);
+    expect(await usos()).toBe(0);
+    await pool.query("UPDATE tienda.pedidos SET estado = 'cancelado' WHERE id = $1", [p]); // de caído a caído: nada
+    expect(await usos()).toBe(0);
+    await pool.query("UPDATE tienda.pedidos SET estado = 'pagado_tarde' WHERE id = $1", [p]);
+    expect(await usos()).toBe(1);
+  });
+  it("el precio cobrado no puede ser mayor al de la prenda", async () => {
+    const p = (await pool.query(
+      `INSERT INTO tienda.pedidos (acceso_hash, email, nombre, apellido, telefono, dni, entrega, local_retiro, medio_pago, subtotal, descuento, envio, total, estado)
+       VALUES ('x','qa-db-cupon@test.com','A','B','1','1','retiro','L','local',1000,0,0,1000,'pagado') RETURNING id`)).rows[0].id;
+    await expect(pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, nombre, precio, cantidad, precio_cobrado) VALUES ($1,'X','X',1000,1,1500)", [p])).rejects.toThrow(/check/);
   });
 });

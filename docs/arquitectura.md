@@ -48,3 +48,19 @@ En todos los casos el stock se aparta en Stocker al confirmar el pedido (cola de
 ## Sincronización con Stocker (etapa 1)
 
 Ver [contrato-stocker.md](contrato-stocker.md).
+
+## Envíos (etapa 4)
+
+- `packages/envios`: un adaptador por transporte (Correo Argentino, Andreani, OCA, Mercado Envíos, Cabify) con la misma forma — cotizar, sucursales, crear envío, etiqueta, seguimiento, enlace público — más WhatsApp (Meta Cloud API) y un simulador de todos para desarrollo y pruebas. Cada uno se prende con sus credenciales (`crearTransportes(env)`).
+- **API**: `POST /v1/envios/opciones` (cotiza con todos a la vez, con caché de 30 min y 6 s de tope por transporte), `GET /v1/envios/sucursales`, `GET /v1/seguimiento/:numero?t=` (público, firmado). Al crear el pedido se vuelve a cotizar la opción elegida y se guardan transporte, servicio, sucursal y paquete. Backoffice: `/v1/admin/envios` (vistas, preparar, etiquetas en un PDF con pdf-lib, descartar, actualizar).
+- **Stocker** sigue siendo quien despacha (Envíos del día): la tienda le pasa el transporte y el número de seguimiento, y Stocker avisa por `NOTIFY stocker_tienda_envios` cuando la caja sale.
+- **Worker** (cola `envios`): `despachado` (del NOTIFY; y un repaso cada 15 min por si se perdió), `seguimiento` cada 10 min (reserva los envíos con `proximo_chequeo` para que dos réplicas no pregunten lo mismo), `mercado-envios` (trae el envío que creó Mercado Pago), y los avisos por mail y WhatsApp (cola `notificaciones`), deduplicados en `tienda.avisos`.
+- Tablas: `tienda.envios` (un envío vigente por pedido; los descartados quedan como historia), `tienda.envio_eventos`, `tienda.avisos`; columnas nuevas en `tienda.pedidos` y `peso_gramos` en productos (migración `0008`).
+
+## Asistente (etapa 5)
+
+- **API** `modulos/chat`: `texto.ts` (normalizar, raíces, puntaje con pesos por rareza de la palabra, tachar datos personales), `motor.ts` (intenciones con datos de verdad → preguntas frecuentes → productos → IA opcional → sin respuesta), `ia.ts` (Claude con `@anthropic-ai/sdk`, esfuerzo bajo, instrucciones + información de la tienda cacheadas, `fallbacks` del lado del servidor), `rutas.ts` (`/v1/chat`, `/v1/chat/pedido`, `/v1/chat/voto`). Backoffice en `modulos/admin/chat.ts`.
+- Las preguntas frecuentes se comparan en memoria (son decenas): sin extensiones de Postgres. Caché corta por réplica, que el backoffice limpia en todas al editar (Redis pub/sub).
+- Contadores (temas por día, usos de cada pregunta) en memoria, guardados cada 10 s y al apagar: nada de escribir en la misma fila en cada consulta.
+- **Tienda**: `components/chat/Asistente.tsx` (panel no modal, `role="log"` para lectores de pantalla, charla en `sessionStorage`), puente `/api/t/chat*`.
+- Tablas: `tienda.faq`, `tienda.chat_sin_respuesta`, `tienda.chat_temas`; ajustes `chatbot` y `chatbotIa` (migración `0009`).

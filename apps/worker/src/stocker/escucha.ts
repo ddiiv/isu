@@ -13,6 +13,9 @@ import { z } from "zod";
  * completo, y además la conciliación periódica lo cubre igual.
  */
 export const CANAL = "stocker_stock";
+/* Etapa 4: Stocker despachó un pedido de la tienda (o le falta mercadería). */
+export const CANAL_ENVIOS = "stocker_tienda_envios";
+const AvisoEnvio = z.object({ b: z.number().int().positive(), p: z.string().regex(/^ISU-\d{4,10}$/), e: z.enum(["despachado", "faltante"]) });
 
 const Aviso = z.object({ b: z.number().int().positive(), s: z.array(z.string().min(1).max(100)).max(2000) });
 
@@ -23,6 +26,8 @@ export interface OpcionesEscucha {
   negocio: () => Promise<number | null>;
   alCambiar: (skus: string[]) => Promise<void> | void;
   alReconectar: () => Promise<void> | void;
+  /** Aviso de despacho de un pedido de la tienda. */
+  alEnvio?: (numero: string, evento: "despachado" | "faltante") => Promise<void> | void;
   /** espera para juntar avisos seguidos (una venta de 5 artículos = 1 pedido) */
   esperaMs?: number;
   log?: Pick<Console, "warn" | "error">;
@@ -59,6 +64,14 @@ export function escucharStocker(o: OpcionesEscucha) {
       keepAlive: true,
     });
     c.on("notification", async (n) => {
+      if (n.channel === CANAL_ENVIOS && n.payload && o.alEnvio) {
+        let a: z.infer<typeof AvisoEnvio>;
+        try { a = AvisoEnvio.parse(JSON.parse(n.payload)); } catch { return; }
+        const mio = await o.negocio().catch(() => null);
+        if (mio !== null && a.b !== mio) return;
+        try { await o.alEnvio(a.p, a.e); } catch (e) { log.error("[escucha] no se pudo encolar el despacho:", (e as Error).message); }
+        return;
+      }
       if (n.channel !== CANAL || !n.payload) return;
       let aviso: z.infer<typeof Aviso>;
       try { aviso = Aviso.parse(JSON.parse(n.payload)); } catch { return; }
@@ -85,6 +98,7 @@ export function escucharStocker(o: OpcionesEscucha) {
     try {
       await c.connect();
       await c.query(`LISTEN ${CANAL}`);
+      if (o.alEnvio) await c.query(`LISTEN ${CANAL_ENVIOS}`);
       escuchando = true;
       intentos = 0;
       if (!primera) await o.alReconectar();

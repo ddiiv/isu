@@ -9,7 +9,9 @@ import { SinProductos } from "@/components/SinProductos";
 export const revalidate = 300;
 
 export async function generateStaticParams() {
-  return (await obtenerCategorias()).map((c) => ({ categoria: c.slug }));
+  // Sin API (build de CI o la API caída) quedan las de respaldo (id negativo): no se generan en el
+  // build y se arman en el primer pedido. Si no, el build falla al no poder traer los productos.
+  return (await obtenerCategorias()).filter((c) => c.id > 0).map((c) => ({ categoria: c.slug }));
 }
 
 async function buscar(slug: string) {

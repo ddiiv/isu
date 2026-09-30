@@ -12,6 +12,7 @@ import { construirApp } from "../src/app.js";
 import { leerEntorno } from "../src/entorno.js";
 import type { Colas } from "../src/lib/colas.js";
 import { firmaValida } from "../src/lib/mercadopago.js";
+import { formatearPesos } from "@isu/shared";
 
 /*
  * Etapa 2 de punta a punta en la API: cuentas, carrito, pedido, pagos.
@@ -35,13 +36,14 @@ const enviados: Array<{ tipo: string; nombre: string; datos: Record<string, unkn
 const colas: Colas = {
   async email(plantilla, para, datos) { enviados.push({ tipo: "email", nombre: plantilla, datos: { ...datos, para } }); },
   async stocker(nombre, datos) { enviados.push({ tipo: "stocker", nombre, datos }); },
+  async envios(nombre, datos) { enviados.push({ tipo: "envios", nombre, datos }); },
   async cerrar() {},
 };
 const mails = (plantilla: string) => enviados.filter((e) => e.tipo === "email" && e.nombre === plantilla);
 
 // ── Stocker simulado ──
 const stocker = {
-  pedidos: new Map<string, { estado: string; pagoPendiente: boolean; items: Array<{ sku: string; cantidad: number }> }>(),
+  pedidos: new Map<string, { estado: string; pagoPendiente: boolean; items: Array<{ sku: string; cantidad: number; precioUnitario?: number }>; pagoDetalle?: string; total?: number }>(),
   stock: new Map<string, number>(),
   caido: false,
 };
@@ -75,6 +77,8 @@ async function cargarCatalogo() {
   stocker.stock = new Map([["QA-C-M", 5], ["QA-C-L", 1], ["QA-C-XL", 0]]);
 }
 const limpiarPedidos = async () => {
+  await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
+  await pool.query("DELETE FROM tienda.descuentos WHERE nombre LIKE 'QA %'");
   await pool.query("DELETE FROM tienda.arrepentimientos WHERE email LIKE 'qa-compra%'");
   await pool.query("DELETE FROM tienda.pedidos WHERE email LIKE 'qa-compra%'");
   await pool.query("DELETE FROM tienda.clientes WHERE email LIKE 'qa-compra%'");
@@ -101,7 +105,7 @@ beforeAll(async () => {
           faltantes: faltan.map((i: { sku: string; cantidad: number }) => ({ sku: i.sku, pedido: i.cantidad, hay: stocker.stock.get(i.sku) ?? 0 })) });
       }
       for (const i of b.items) stocker.stock.set(i.sku, stocker.stock.get(i.sku)! - i.cantidad);
-      stocker.pedidos.set(b.pedido, { estado: "aceptado", pagoPendiente: b.pagoPendiente, items: b.items });
+      stocker.pedidos.set(b.pedido, { estado: "aceptado", pagoPendiente: b.pagoPendiente, items: b.items, pagoDetalle: b.pagoDetalle, total: b.total });
       return json(res, 200, { ...resumen(b.pedido), repetido: false });
     }
     const p = stocker.pedidos.get(numero!);
@@ -495,5 +499,177 @@ describe("botón de arrepentimiento", () => {
     expect(a.json().mensaje).not.toMatch(/cancelado/);
     expect(stocker.pedidos.get(r.numero)?.estado).toBe("aceptado");
     expect(mails("arrepentimiento")).toHaveLength(0);
+  });
+});
+
+describe("cupones", () => {
+  const cupon = async (c: Record<string, unknown>) => {
+    const d = { codigo: null, automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoria_ids: [], producto_ids: [], sobre_rebajas: true,
+      minimo: 0, desde: null, hasta: null, usos_max: null, usos_por_cliente: null, activo: true, ...c };
+    const { rows } = await pool.query(
+      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, sobre_rebajas, minimo, desde, hasta, usos_max, usos_por_cliente, activo, creado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'qa') RETURNING id`,
+      [d.codigo, `QA ${d.codigo ?? "promo"}`, d.automatico, d.tipo, d.valor, d.alcance, d.categoria_ids, d.producto_ids, d.sobre_rebajas, d.minimo, d.desde, d.hasta, d.usos_max, d.usos_por_cliente, d.activo]);
+    return rows[0].id as number;
+  };
+  const carrito = async (extra: Record<string, unknown>) => (await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 2 }], medioPago: "mercadopago", ...extra })).json();
+  const usos = async (id: number) => (await pool.query("SELECT usos FROM tienda.cupones WHERE id = $1", [id])).rows[0].usos;
+
+  beforeEach(async () => {
+    await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
+    await pool.query("DELETE FROM tienda.descuentos WHERE nombre LIKE 'QA %'");
+    await cargarCatalogo();
+  });
+
+  it("porcentaje: se aplica sobre el precio (mayúsculas y espacios no importan); uno que no existe avisa y no cambia nada", async () => {
+    await cupon({ codigo: "QA10" });
+    const c = await carrito({ cupon: " qa10 " });
+    expect([c.subtotal, c.descuentoCupon, c.total, c.cupon]).toEqual([2_000_000, 200_000, 1_800_000, { codigo: "QA10", nombre: "QA QA10", envioGratis: false }]);
+    const x = await carrito({ cupon: "NOEXISTE" });
+    expect([x.descuentoCupon, x.total, x.cupon, x.avisoCupon]).toEqual([0, 2_000_000, null, "Ese cupón no existe. Revisá que esté bien escrito."]);
+  });
+
+  it("compra mínima, vencido, todavía no vigente y pausado: avisa por qué", async () => {
+    await cupon({ codigo: "QAMIN", minimo: 3_000_000 });
+    await cupon({ codigo: "QAVIEJO", hasta: new Date(Date.now() - 1000), desde: new Date(Date.now() - 86_400_000) });
+    await cupon({ codigo: "QAFUTURO", desde: new Date(Date.now() + 86_400_000) });
+    await cupon({ codigo: "QAPAUSA", activo: false });
+    expect((await carrito({ cupon: "QAMIN" })).avisoCupon).toBe(`Este cupón es para compras desde ${formatearPesos(3_000_000)} (te faltan ${formatearPesos(1_000_000)}).`);
+    expect((await carrito({ cupon: "QAVIEJO" })).avisoCupon).toBe("Ese cupón venció.");
+    expect((await carrito({ cupon: "QAFUTURO" })).avisoCupon).toBe("Ese cupón todavía no está vigente.");
+    expect((await carrito({ cupon: "QAPAUSA" })).avisoCupon).toBe("Ese cupón ya no está vigente.");
+  });
+
+  it("monto fijo: se reparte por unidad (al peso) y nunca pasa del monto", async () => {
+    await cupon({ codigo: "QA5000", tipo: "monto", valor: 500_000 });
+    const c = await carrito({ cupon: "QA5000", items: [{ sku: "QA-C-M", cantidad: 2 }, { sku: "QA-C-L", cantidad: 1 }] });
+    expect(c.subtotal).toBe(3_200_000);
+    expect(c.descuentoCupon).toBeLessThanOrEqual(500_000);
+    expect(c.descuentoCupon).toBeGreaterThan(499_000);
+    expect(c.descuentoCupon % 100).toBe(0);
+    // Un monto mayor que la compra la deja en $0, no en negativo.
+    await cupon({ codigo: "QAMUCHO", tipo: "monto", valor: 99_000_000 });
+    const m = await carrito({ cupon: "QAMUCHO" });
+    expect([m.descuentoCupon, m.total]).toEqual([2_000_000, 0]);
+  });
+
+  it("orden: rebaja de la prenda → cupón → transferencia", async () => {
+    await cupon({ codigo: "QA10" });
+    const t = await carrito({ cupon: "QA10", medioPago: "transferencia" });
+    // $20.000 − 10% = $18.000; − 20% transferencia = $14.400
+    expect([t.descuentoCupon, t.descuento, t.total]).toEqual([200_000, 360_000, 1_440_000]);
+  });
+
+  it("no suma sobre prendas en oferta si así se configuró", async () => {
+    await pool.query("INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, creado_por) VALUES ('QA rebaja', 10, 'todo', 'qa')");
+    await cupon({ codigo: "QASINOFERTA", sobre_rebajas: false });
+    await cupon({ codigo: "QACONOFERTA" });
+    const no = await carrito({ cupon: "QASINOFERTA" });
+    expect([no.subtotal, no.descuentoCupon, no.avisoCupon]).toEqual([1_800_000, 0, "Este cupón no aplica a prendas que ya están en oferta."]);
+    const si = await carrito({ cupon: "QACONOFERTA" });
+    expect([si.subtotal, si.descuentoCupon]).toEqual([1_800_000, 180_000]);
+  });
+
+  it("sólo ciertas prendas o categorías", async () => {
+    const pid = (await pool.query("SELECT id FROM tienda.productos WHERE stocker_id = $1", [BASE + 1])).rows[0].id;
+    await cupon({ codigo: "QAOTRA", alcance: "productos", producto_ids: [pid + 999_999] });
+    await cupon({ codigo: "QAESTA", alcance: "productos", producto_ids: [pid] });
+    expect((await carrito({ cupon: "QAOTRA" })).avisoCupon).toBe("Este cupón no aplica a los productos de tu carrito.");
+    expect((await carrito({ cupon: "QAESTA" })).descuentoCupon).toBe(200_000);
+    const hombre = (await pool.query("SELECT id FROM tienda.categorias WHERE slug = 'hombre' AND padre_id IS NULL")).rows[0].id;
+    const remeras = (await pool.query("SELECT c.id FROM tienda.categorias c JOIN tienda.categorias p ON p.id = c.padre_id WHERE p.slug = 'hombre' AND c.slug = 'remeras'")).rows[0].id;
+    await pool.query("INSERT INTO tienda.producto_categorias VALUES ($1, $2)", [pid, remeras]);
+    // Elegir "Hombre" incluye sus subcategorías.
+    await cupon({ codigo: "QAHOMBRE", alcance: "categorias", categoria_ids: [hombre] });
+    expect((await carrito({ cupon: "QAHOMBRE" })).descuentoCupon).toBe(200_000);
+  });
+
+  it("envío gratis: el envío queda en $0 (y la cotización lo dice)", async () => {
+    await cupon({ codigo: "QAENVIO", tipo: "envio_gratis", valor: 0 });
+    const sin = await carrito({ items: [{ sku: "QA-C-M", cantidad: 1 }], entrega: "envio" });
+    const con = await carrito({ items: [{ sku: "QA-C-M", cantidad: 1 }], entrega: "envio", cupon: "QAENVIO" });
+    expect([sin.envio, con.envio, con.total, con.cupon.envioGratis]).toEqual([790_000, 0, 1_000_000, true]);
+  });
+
+  it("promoción automática por monto: se aplica sola; si escribe un cupón que da menos, gana la promo (no se suman); avisa cuánto falta", async () => {
+    await cupon({ automatico: true, valor: 15, minimo: 1_500_000 });
+    await cupon({ codigo: "QA10" });
+    const sola = await carrito({});
+    expect([sola.descuentoCupon, sola.cupon.codigo, sola.cupon.nombre]).toEqual([300_000, null, "QA promo"]);
+    const ambas = await carrito({ cupon: "QA10" });
+    expect([ambas.descuentoCupon, ambas.cupon.codigo]).toEqual([300_000, null]);
+    expect(ambas.avisoCupon).toMatch(/te descuenta más que el cupón/);
+    const poca = await carrito({ items: [{ sku: "QA-C-M", cantidad: 1 }] });
+    expect([poca.descuentoCupon, poca.promoCerca]).toEqual([0, { nombre: "QA promo", falta: 500_000 }]);
+    // Una promo no se puede "escribir" como código.
+    expect((await carrito({ cupon: "QA promo" })).avisoCupon).toMatch(/no existe/);
+  });
+
+  it("pedido con cupón: queda en el pedido; a Mercado Pago y a Stocker va el precio cobrado de verdad; cuenta el uso", async () => {
+    const id = await cupon({ codigo: "QA10" });
+    const r = await post("/v1/pedidos", pedido("cup1", { medioPago: "mercadopago", cupon: "qa10" }));
+    expect(r.statusCode).toBe(201);
+    const { numero, acceso } = r.json();
+    const pref = mp.preferencias.at(-1)! as { items: Array<{ unit_price: number; quantity: number }> };
+    expect(pref.items).toEqual([expect.objectContaining({ id: "QA-C-M", quantity: 2, unit_price: 9000 })]);
+    const s = stocker.pedidos.get(numero)!;
+    expect([s.items[0]!.precioUnitario, s.total]).toEqual([9000, 18000]);
+    expect(s.pagoDetalle).toMatch(/^Mercado Pago · cupón QA10 \(QA QA10\) · vence/);
+    const v = (await get(`/v1/pedidos/${numero}`, { "x-isu-acceso": acceso })).json();
+    expect([v.subtotal, v.descuentoCupon, v.total, v.cupon]).toEqual([2_000_000, 200_000, 1_800_000, { codigo: "QA10", nombre: "QA QA10" }]);
+    expect(await usos(id)).toBe(1);
+    expect(mails("pedido_recibido").at(-1)?.datos).toMatchObject({ descuentoCupon: 200_000, cupon: "cupón QA10 (QA QA10)" });
+  });
+
+  it("topes: usos totales y por cliente (con el email del pedido)", async () => {
+    await cupon({ codigo: "QAUNAVEZ", usos_por_cliente: 1 });
+    expect((await post("/v1/pedidos", pedido("cup2", { cupon: "QAUNAVEZ" }))).statusCode).toBe(201);
+    const otra = await post("/v1/pedidos", pedido("cup2", { cupon: "QAUNAVEZ" }));
+    expect([otra.statusCode, otra.json().error, otra.json().mensaje]).toEqual([409, "cupon", "Ya usaste este cupón."]);
+    // En el carrito, con el email, ya se avisa.
+    expect((await carrito({ cupon: "QAUNAVEZ", email: "qa-compra-cup2@test.com" })).avisoCupon).toBe("Ya usaste este cupón.");
+    expect((await post("/v1/pedidos", pedido("cup3", { cupon: "QAUNAVEZ" }))).statusCode).toBe(201);
+
+    await cargarCatalogo(); // repone el stock simulado
+    const id = await cupon({ codigo: "QAUNO", usos_max: 1 });
+    expect((await post("/v1/pedidos", pedido("cup4", { cupon: "QAUNO" }))).statusCode).toBe(201);
+    const agotado = await post("/v1/pedidos", pedido("cup5", { cupon: "QAUNO" }));
+    expect([agotado.statusCode, agotado.json().mensaje]).toEqual([409, "Ese cupón ya se usó el máximo de veces."]);
+    expect(await usos(id)).toBe(1);
+  });
+
+  it("dos compras a la vez con el último uso: entra una sola", async () => {
+    const id = await cupon({ codigo: "QAULTIMO", usos_max: 1 });
+    const rs = await Promise.all([post("/v1/pedidos", pedido("carrera1", { cupon: "QAULTIMO" })), post("/v1/pedidos", pedido("carrera2", { cupon: "QAULTIMO" }))]);
+    expect(rs.map((r) => r.statusCode).sort()).toEqual([201, 409]);
+    expect(await usos(id)).toBe(1);
+  });
+
+  it("si el pedido vence sin pagar, el uso se libera (y se vuelve a contar si igual lo pagan tarde)", async () => {
+    const id = await cupon({ codigo: "QALIBERA", usos_max: 1 });
+    const r = (await post("/v1/pedidos", pedido("cup6", { cupon: "QALIBERA" }))).json();
+    expect(await usos(id)).toBe(1);
+    await pool.query("UPDATE tienda.pedidos SET vence_en = now() - interval '1 minute' WHERE numero = $1", [r.numero]);
+    await post("/v1/interno/vencer", {}, { "x-isu-interno": INTERNO });
+    expect(await usos(id)).toBe(0);
+    expect((await pool.query("SELECT vigente FROM tienda.cupon_usos WHERE cupon_id = $1", [id])).rows).toEqual([{ vigente: false }]);
+    await post("/v1/pagos/registrar", { pedido: r.numero, medio: "transferencia", monto: 1_440_000, referencia: "OP-CUPON-TARDE", quien: "Caja" }, { authorization: `Bearer ${PAGOS}` });
+    expect(await usos(id)).toBe(1);
+  });
+
+  it("sin stock en Stocker: el uso no queda contado", async () => {
+    const id = await cupon({ codigo: "QASTOCK", usos_max: 5 });
+    stocker.stock.set("QA-C-L", 0);
+    const r = await post("/v1/pedidos", pedido("cup7", { cupon: "QASTOCK", items: [{ sku: "QA-C-L", cantidad: 1 }] }));
+    expect(r.statusCode).toBe(409);
+    expect(await usos(id)).toBe(0);
+  });
+
+  it("probar códigos a ciegas tiene freno por IP", async () => {
+    let ultimo = 200;
+    for (let i = 0; i < 42; i++) ultimo = (await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }], cupon: `ADIVINO${i}` })).statusCode;
+    expect(ultimo).toBe(429);
+    // Sin cupón, el carrito sigue andando.
+    expect((await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }] })).statusCode).toBe(200);
   });
 });

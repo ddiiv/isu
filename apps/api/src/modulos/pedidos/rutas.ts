@@ -15,13 +15,15 @@ import { iguales, tokenNuevo } from "../../lib/cripto.js";
 import { firmaValida, type MercadoPago } from "../../lib/mercadopago.js";
 import type { Colas } from "../../lib/colas.js";
 import { sesionDe } from "../cuentas/rutas.js";
-import { cotizar } from "./cotizar.js";
+import { conEnvio, cotizar } from "./cotizar.js";
 import type { Descuentos } from "../../lib/descuentos.js";
 import type { ServicioPedidos } from "./servicio.js";
+import type { CotizadorEnvios } from "../envios/cotizador.js";
+import { CP } from "@isu/shared";
 
 export interface DepsRutasPedidos {
   pool: pg.Pool; redis: Redis; env: Entorno; servicio: ServicioPedidos; mp: MercadoPago | null;
-  comprobantes: Almacen | null; colas: Colas; descuentos: Descuentos;
+  comprobantes: Almacen | null; colas: Colas; descuentos: Descuentos; cotizador?: CotizadorEnvios;
 }
 
 const NUMERO = z.string().regex(/^ISU-\d{4,10}$/);
@@ -40,9 +42,25 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
 
   // ── Carrito: cotización (precios, stock, envío y descuento de verdad) ──
   api.post("/v1/carrito", { schema: { body: PedidoCotizar, response: { 200: Cotizacion } } }, async (req, reply) => {
-    const { filas: _f, ...c } = await cotizar(deps.pool, req.body.items, { entrega: req.body.entrega, medioPago: req.body.medioPago, descuentos: deps.descuentos });
+    // Probar códigos es gratis para quien adivina: con tope por IP (sólo cuenta si escribió uno).
+    if (req.body.cupon?.trim()) await frenar(deps.redis, "cupon-ip", ip(req), 40, 600);
+    const c = await cotizar(deps.pool, req.body.items, {
+      entrega: req.body.entrega, medioPago: req.body.medioPago, descuentos: deps.descuentos, cupon: req.body.cupon, email: req.body.email,
+    });
     reply.headers(sinCache);
-    return c;
+    // Con la opción de envío elegida en el checkout, el total la incluye. Si ya no está, sin opción (la tienda vuelve a pedir las opciones).
+    const e = req.body.envio;
+    let opcionEnvio;
+    if (e && deps.cotizador && req.body.entrega === "envio") {
+      const cp = CP.safeParse(e.cp);
+      const o = cp.success
+        ? await deps.cotizador.elegir({ destino: { cp: cp.data, provincia: e.provincia, localidad: e.localidad }, carrito: { lineas: c.lineas, filas: c.filas, neto: c.neto }, medioPago: req.body.medioPago, id: e.opcion }).catch(() => null)
+        : null;
+      conEnvio(c, o?.precio ?? 0, { soloMercadoPago: o?.soloMercadoPago });
+      opcionEnvio = o;
+    }
+    const { filas: _f, cobrado: _c, aplicado: _a, neto: _n, envioBonificado: _e, cuponInvalido: _i, ...publica } = c;
+    return opcionEnvio === undefined ? publica : { ...publica, opcionEnvio };
   });
 
   // ── Crear pedido ──

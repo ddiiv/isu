@@ -9,19 +9,21 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "fotos:importar": "node --env-file-if-exists=../../.env dist/fotos/cli.js"
+    "fotos:importar": "node --env-file-if-exists=../../.env dist/fotos/cli.js",
+    "mayorista:importar": "node --env-file-if-exists=../../.env dist/mayorista/cli.js"
   },
   "dependencies": {
     "@isu/almacen": "workspace:*",
     "@isu/db": "workspace:*",
+    "@isu/envios": "workspace:*",
     "@isu/shared": "workspace:*",
+    "@isu/stocker": "workspace:*",
     "bullmq": "^6.3.9",
     "ioredis": "^5.11.1",
     "nodemailer": "^10.0.12",
     "pg": "^8.23.0",
     "sharp": "^0.35.5",
-    "zod": "^4.6.5",
-    "@isu/stocker": "workspace:*"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.2",

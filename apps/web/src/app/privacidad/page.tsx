@@ -12,6 +12,7 @@ export default function Privacidad() {
       <ul>
         <li><strong>Datos del pedido:</strong> nombre, DNI o CUIT, email, teléfono, dirección de entrega y los productos que compraste.</li>
         <li><strong>Datos de pago:</strong> los procesa Mercado Pago. Nosotros no vemos ni guardamos los números de tu tarjeta.</li>
+        <li><strong>Consultas al asistente de la tienda:</strong> la conversación no se guarda (queda sólo en tu navegador mientras la pestaña está abierta). Las preguntas que no supo responder se guardan sin datos personales (se borran emails, teléfonos y números) hasta 90 días, para mejorar las respuestas. Para ver un pedido desde el asistente se usan el número de pedido y el email, y no se guardan.</li>
         <li><strong>Datos de navegación:</strong> dirección IP, tipo de navegador y páginas visitadas, mediante cookies y Google Analytics.</li>
       </ul>
 
@@ -24,7 +25,7 @@ export default function Privacidad() {
       </ul>
 
       <h2>Con quién los compartimos</h2>
-      <p>Sólo con quienes necesitamos para completar tu compra: Mercado Pago (pagos), Correo Argentino, Andreani y Mercado Envíos (entregas), el proveedor de mensajería de WhatsApp y de email (avisos) y Google Analytics (estadísticas). No vendemos tus datos.</p>
+      <p>Sólo con quienes necesitamos para completar tu compra: Mercado Pago (pagos), Correo Argentino, Andreani, OCA, Mercado Envíos y Cabify (entregas), el proveedor de mensajería de WhatsApp y de email (avisos), Google Analytics (estadísticas) y, si el asistente con inteligencia artificial está activo, Anthropic (sólo el texto de la consulta, para generar la respuesta). No vendemos tus datos.</p>
 
       <h2>Cuánto tiempo los guardamos</h2>
       <p>Mientras tengas una cuenta o mientras sean necesarios para cumplir obligaciones fiscales y de defensa del consumidor.</p>

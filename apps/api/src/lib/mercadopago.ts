@@ -50,6 +50,8 @@ export function crearMercadoPago(o: { url: string; token: string }) {
     async crearPreferencia(p: {
       numero: string; items: ItemMp[]; email: string; nombre: string; apellido: string;
       vuelta: string; aviso: string; vence: Date; soloEfectivo: boolean;
+      /** Mercado Envíos: `shipments` de la preferencia (modo me2). */
+      envio?: Record<string, unknown>;
     }): Promise<{ id: string; url: string }> {
       const cuerpo = {
         items: p.items,
@@ -59,6 +61,7 @@ export function crearMercadoPago(o: { url: string; token: string }) {
         back_urls: { success: p.vuelta, failure: p.vuelta, pending: p.vuelta },
         auto_return: "approved",
         statement_descriptor: "ISUWAYA",
+        ...(p.envio ? { shipments: p.envio } : {}),
         expires: true,
         expiration_date_to: p.vence.toISOString(),
         // Pago Fácil / Rapipago: vence cuando vence la reserva.

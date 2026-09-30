@@ -6,13 +6,18 @@
  *   POST /api/integraciones/tienda/pedidos (+ /:n, /:n/pagado, /:n/cancelar) y PUT …/clientes
  *   POST /__vender   {"sku":"…","cantidad":1}   simula una venta en el local
  *                    (baja el stock y avisa por NOTIFY, como el Stocker real)
+ *   GET  /           "Envíos del día" simulado: los pedidos pagados con su
+ *                    transporte y seguimiento, con un botón Despachar que avisa
+ *                    a la tienda por NOTIFY stocker_tienda_envios (etapa 4).
  *
  * Uso: STOCKER_TOKEN=… DATABASE_URL=… node scripts/demo/stocker-simulado.mjs
+ *      (con DEMO_MAYORISTA=<catalogo.json> sirve el catálogo del sitio mayorista)
  */
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import pg from "pg";
-import { catalogoDemo } from "./catalogo.mjs";
+import { readFileSync } from "node:fs";
+import { catalogoDemo, catalogoDesdeMayorista } from "./catalogo.mjs";
 
 const PUERTO = Number(process.env.STOCKER_SIMULADO_PUERTO ?? 3900);
 const TOKEN = process.env.STOCKER_TOKEN ?? "";
@@ -21,13 +26,19 @@ if (TOKEN.length < 20) {
   console.error("Falta STOCKER_TOKEN (20+ caracteres), el mismo que usa el worker.");
   process.exit(2);
 }
-const catalogo = catalogoDemo();
+// DEMO_MAYORISTA=<archivo.json>: el catálogo del sitio mayorista en vez del de muestra.
+const catalogo = process.env.DEMO_MAYORISTA ? catalogoDesdeMayorista(JSON.parse(readFileSync(process.env.DEMO_MAYORISTA, "utf8"))) : catalogoDemo();
 const porSku = new Map(catalogo.flatMap((p) => p.variantes.map((v) => [v.sku, v])));
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 }) : null;
 const pedidos = new Map();
 const avisar = async (skus) => { if (pool) await pool.query("SELECT pg_notify('stocker_stock', $1)", [JSON.stringify({ b: NEGOCIO, s: skus })]); };
 const leerJson = async (req) => { let b = ""; for await (const c of req) { b += c; if (b.length > 100_000) break; } try { return JSON.parse(b || "{}"); } catch { return {}; } };
-const resumen = (p) => ({ id: p.id, pedido: p.pedido, estado: p.estado, pagoPendiente: p.pagoPendiente, estadoEnvio: null, despachadoEn: null, canceladoEn: p.canceladoEn ?? null, motivo: p.motivo ?? null });
+const resumen = (p) => ({
+  id: p.id, pedido: p.pedido, estado: p.estado, pagoPendiente: p.pagoPendiente, envioTipo: p.envio?.tipo ?? null, envioId: p.envio?.seguimiento ?? null,
+  estadoEnvio: p.despachadoEn ? "despachado" : null, despachadoEn: p.despachadoEn ?? null, canceladoEn: p.canceladoEn ?? null, motivo: p.motivo ?? null,
+});
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const local = (req) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress ?? "");
 
 const autorizado = (req) => {
   const h = String(req.headers.authorization ?? "");
@@ -53,6 +64,21 @@ http.createServer(async (req, res) => {
     if (pool) await pool.query("SELECT pg_notify('stocker_stock', $1)", [JSON.stringify({ b: NEGOCIO, s: [sku] })]);
     return json(res, 200, { sku, cantidad: v.cantidad });
   }
+  // ── Envíos del día (simulado, sólo desde la misma máquina) ──
+  if (url.pathname === "/" && req.method === "GET" && local(req)) {
+    const filas = [...pedidos.values()].filter((p) => p.estado === "aceptado").reverse().map((p) => `<tr><td>${esc(p.pedido)}</td><td>${p.pagoPendiente ? "sin pagar" : "pagado"}</td><td>${esc(p.envio?.tipo ?? "—")}</td><td><code>${esc(p.envio?.seguimiento ?? "")}</code></td><td>${p.despachadoEn ? `despachado ${esc(p.despachadoEn.slice(11, 16))}` : p.pagoPendiente ? "" : `<form method="post" action="/__despachar?pedido=${encodeURIComponent(p.pedido)}"><button>Despachar</button></form> <form method="post" action="/__despachar?pedido=${encodeURIComponent(p.pedido)}&faltante=1"><button>Falta mercadería</button></form>`}</td></tr>`).join("");
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'" });
+    return res.end(`<!doctype html><meta charset="utf-8"><title>Stocker simulado · Envíos del día</title><style>body{font:14px system-ui;margin:24px}td,th{border:1px solid #ddd;padding:6px 8px}table{border-collapse:collapse}form{display:inline}</style><h1>Envíos del día (Stocker simulado)</h1><p>Despachar = el depósito entregó la caja al transporte: Stocker descuenta el stock y avisa a la tienda.</p><table><tr><th>Pedido</th><th>Pago</th><th>Transporte</th><th>Seguimiento</th><th></th></tr>${filas}</table>`);
+  }
+  if (url.pathname === "/__despachar" && req.method === "POST" && local(req)) {
+    const p = pedidos.get(url.searchParams.get("pedido") ?? "");
+    if (!p || p.estado !== "aceptado" || p.pagoPendiente) return json(res, 409, { message: "No se puede despachar (no existe, cancelado o sin pagar)." });
+    const e = url.searchParams.get("faltante") ? "faltante" : "despachado";
+    if (e === "despachado") p.despachadoEn = new Date().toISOString();
+    if (pool) await pool.query("SELECT pg_notify('stocker_tienda_envios', $1)", [JSON.stringify({ b: NEGOCIO, p: p.pedido, e })]);
+    res.writeHead(303, { location: "/" });
+    return res.end();
+  }
   if (!url.pathname.startsWith("/api/integraciones/tienda/")) return json(res, 404, { message: "No existe." });
   if (!autorizado(req)) return json(res, 401, { message: "Credencial inválida." });
   if (url.pathname.endsWith("/catalogo")) {
@@ -65,14 +91,14 @@ http.createServer(async (req, res) => {
   }
   // ── Pedidos de la tienda (como el parche de Stocker: aparta todo o nada) ──
   // eslint-disable-next-line security/detect-unsafe-regex -- herramienta de desarrollo; grupos distintos, sin retroceso
-  const mp = url.pathname.match(/^\/api\/integraciones\/tienda\/pedidos(?:\/([A-Z0-9-]+))?(?:\/(pagado|cancelar))?$/);
+  const mp = url.pathname.match(/^\/api\/integraciones\/tienda\/pedidos(?:\/([A-Z0-9-]+))?(?:\/(pagado|cancelar|envio))?$/);
   if (mp && req.method !== "GET" || (mp && mp[1])) {
     const [, numero, accion] = mp;
     if (!numero && req.method === "POST") {
       const b = await leerJson(req);
       if (pedidos.has(b.pedido)) return json(res, 200, { ...resumen(pedidos.get(b.pedido)), repetido: true });
       const faltan = (b.items ?? []).filter((i) => (porSku.get(i.sku)?.cantidad ?? 0) < i.cantidad);
-      const p = { id: pedidos.size + 1, pedido: b.pedido, items: b.items ?? [], pagoPendiente: !!b.pagoPendiente };
+      const p = { id: pedidos.size + 1, pedido: b.pedido, items: b.items ?? [], pagoPendiente: !!b.pagoPendiente, envio: b.envio ?? null };
       if (faltan.length) {
         p.estado = "rechazado"; p.motivo = "Sin stock";
         pedidos.set(b.pedido, p);
@@ -90,6 +116,12 @@ http.createServer(async (req, res) => {
       if (p.estado !== "aceptado") return json(res, 409, { message: `El pedido está ${p.estado}`, codigo: `PEDIDO_${p.estado.toUpperCase()}` });
       p.pagoPendiente = false;
       console.warn(`Stocker simulado: ${numero} PAGADO → ya se puede despachar`);
+    }
+    if (accion === "envio") {
+      const b = await leerJson(req);
+      if (p.despachadoEn && b.seguimiento && b.seguimiento !== p.envio?.seguimiento) return json(res, 409, { message: "Ya despachado con otro número", codigo: "YA_DESPACHADO" });
+      p.envio = { ...(p.envio ?? {}), tipo: b.tipo, seguimiento: b.seguimiento ?? p.envio?.seguimiento };
+      console.warn(`Stocker simulado: ${numero} sale con ${b.tipo} ${b.seguimiento ?? ""}`);
     }
     if (accion === "cancelar" && p.estado === "aceptado") {
       p.estado = "cancelado"; p.canceladoEn = new Date().toISOString();

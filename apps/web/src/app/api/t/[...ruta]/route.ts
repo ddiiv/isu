@@ -5,7 +5,11 @@ import { aLaApi, COOKIE_SESION, cookieSesion, mismoOrigen } from "@/lib/bff";
  * Puente navegador → API. Lista cerrada: método + ruta. Lo que no está acá
  * no existe para el navegador (404), aunque exista en la API.
  */
-type Regla = { metodo: string; patron: RegExp; api: (m: RegExpMatchArray) => string; sesion?: "crea" | "borra"; binario?: boolean };
+type Regla = {
+  metodo: string; patron: RegExp; api: (m: RegExpMatchArray) => string; sesion?: "crea" | "borra"; binario?: boolean;
+  /** Parámetros de la URL que pasan (los demás se descartan; la API los valida). */
+  consulta?: string[];
+};
 const NUM = "(ISU-\\d{4,10})";
 const REGLAS: Regla[] = [
   { metodo: "POST", patron: /^carrito$/, api: () => "/v1/carrito" },
@@ -23,6 +27,14 @@ const REGLAS: Regla[] = [
   { metodo: "POST", patron: /^cuenta\/contrasena$/, api: () => "/v1/cuenta/contrasena" },
   { metodo: "POST", patron: /^arrepentimiento$/, api: () => "/v1/arrepentimiento" },
   { metodo: "POST", patron: /^outfits$/, api: () => "/v1/outfits" },
+  // Etapa 4: envíos y seguimiento.
+  { metodo: "POST", patron: /^envios\/opciones$/, api: () => "/v1/envios/opciones" },
+  { metodo: "GET", patron: /^envios\/sucursales$/, api: () => "/v1/envios/sucursales", consulta: ["transporte", "cp", "provincia"] },
+  { metodo: "GET", patron: new RegExp(`^seguimiento/${NUM}$`), api: (m) => `/v1/seguimiento/${m[1]}`, consulta: ["t"] },
+  // Etapa 5: asistente.
+  { metodo: "POST", patron: /^chat$/, api: () => "/v1/chat" },
+  { metodo: "POST", patron: /^chat\/pedido$/, api: () => "/v1/chat/pedido" },
+  { metodo: "POST", patron: /^chat\/voto$/, api: () => "/v1/chat/voto" },
 ];
 const ACCESO = /^[A-Za-z0-9_-]{30,40}$/;
 const TIPOS_BINARIOS = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"]);
@@ -69,7 +81,13 @@ async function pasar(req: NextRequest, ctx: { params: Promise<{ ruta: string[] }
 
   let r: Response;
   try {
-    r = await aLaApi(req, regla.api(m), { metodo: req.method, cuerpo, tipo, extra });
+    let destino = regla.api(m);
+    if (regla.consulta) {
+      const q = new URLSearchParams();
+      for (const k of regla.consulta) { const v = req.nextUrl.searchParams.get(k); if (v !== null) q.set(k, v.slice(0, 120)); }
+      if (q.size) destino += `?${q}`;
+    }
+    r = await aLaApi(req, destino, { metodo: req.method, cuerpo, tipo, extra });
   } catch {
     return NextResponse.json({ error: "sin_api", mensaje: "No pudimos conectarnos. Probá de nuevo en unos segundos." }, { status: 503 });
   }

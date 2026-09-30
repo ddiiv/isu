@@ -8,6 +8,8 @@ import { crearClienteStocker, MAX_SKUS_POR_PEDIDO } from "./stocker/cliente.js";
 import { escucharStocker } from "./stocker/escucha.js";
 import { crearCorreo } from "./correo/enviar.js";
 import { crearInvalidador } from "./stocker/invalidar.js";
+import { crearTransportes } from "@isu/envios";
+import { crearEnvios } from "./envios/envios.js";
 
 /*
  * Worker: procesa las colas en segundo plano. Es un servicio aparte en
@@ -31,6 +33,8 @@ const env = z.object({
   SMTP_URL: z.string().min(8).optional(),
   CORREO_DE: z.string().min(3).default("Isuwaya <isu.isuwaya@gmail.com>"),
   CORREO_RESPONDER: z.string().email().optional(),
+  // Etapa 4: el enlace de seguimiento de los avisos (los transportes se configuran con sus propias variables).
+  SITIO_URL: z.string().url().optional(),
   // "CLAVE=" en el .env es lo mismo que no ponerla.
 }).parse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v !== "")));
 
@@ -60,9 +64,26 @@ const api = env.API_URL && env.INTERNO_TOKEN
     return r.json();
   }
   : undefined;
+// ── Etapa 4: envíos ──
+const transportes = crearTransportes(process.env);
+const colaNotificaciones = new Queue(COLAS.notificaciones, { connection: conexion, prefix: "isu", defaultJobOptions: OPCIONES_TRABAJO });
+const colaEnvios = new Queue(COLAS.envios, { connection: conexion, prefix: "isu", defaultJobOptions: { ...OPCIONES_TRABAJO, attempts: 8 } });
+const envios = crearEnvios({
+  pool,
+  transportes,
+  encolar: (nombre, datos, id) => colaNotificaciones.add(nombre, datos, { jobId: id }),
+  encolarStocker: (nombre, datos, id) => colaStocker.add(nombre, datos, { jobId: id, attempts: 12 }),
+  sitio: env.SITIO_URL,
+  secreto: env.INTERNO_TOKEN,
+  estadoEnStocker: deps ? (n) => deps!.stocker.estadoPedido(n) : undefined,
+});
+if (!env.SITIO_URL || !env.INTERNO_TOKEN) console.warn("Sin SITIO_URL / INTERNO_TOKEN: los avisos de envío van sin enlace de seguimiento.");
+
 const procesar = crearProcesar(deps, {
   correo: crearCorreo({ smtp: env.SMTP_URL, de: env.CORREO_DE, responder: env.CORREO_RESPONDER }),
   api,
+  envios,
+  whatsapp: transportes.whatsapp,
 });
 
 const workers = Object.values(COLAS).map((cola) =>
@@ -91,6 +112,10 @@ if (api) {
   console.warn("Sin API_URL / INTERNO_TOKEN: los pedidos sin pagar no vencen solos.");
 }
 
+// Seguimiento de los envíos y repaso de despachos (una sola programación aunque haya varias réplicas).
+await colaEnvios.upsertJobScheduler("seguimiento", { every: 10 * 60_000 }, { name: "seguimiento" });
+if (deps) await colaEnvios.upsertJobScheduler("revisar-despachos", { every: 15 * 60_000 }, { name: "revisar-despachos" });
+
 let escucha: ReturnType<typeof escucharStocker> | null = null;
 if (deps) {
   // Una sola programación aunque haya varias réplicas (el id la hace única). La primera corre ya.
@@ -109,7 +134,14 @@ if (deps) {
         await colaStocker.add("stock", { skus: skus.slice(i, i + MAX_SKUS_POR_PEDIDO) });
       }
     },
-    alReconectar: pedirCatalogo,
+    alReconectar: async () => {
+      await pedirCatalogo();
+      await colaEnvios.add("revisar-despachos", {}, { jobId: `despachos-reconexion-${Math.floor(Date.now() / 60_000)}` });
+    },
+    // El despacho del depósito: el pedido sale y se avisa al cliente.
+    alEnvio: async (numero, evento) => {
+      await colaEnvios.add("despachado", { numero, evento }, { jobId: `despachado-${numero}-${evento}` });
+    },
   });
 }
 
@@ -119,6 +151,8 @@ async function apagar() {
   await Promise.allSettled(workers.map((w) => w.close()));
   await colaStocker.close();
   await colaPagos.close();
+  await colaNotificaciones.close();
+  await colaEnvios.close();
   await pool.end();
   await conexion.quit();
   process.exit(0);

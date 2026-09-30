@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Local } from "@isu/shared";
 import { api, fecha, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, EntradaPesos, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
+import { AjustesEnvios, type ValoresEnvios } from "@/components/AjustesEnvios";
 
 /* Ajustes de la tienda (sólo el dueño). Cada campo se valida en la API; los cambios quedan en la auditoría. */
 type Valores = Record<string, unknown> & {
@@ -11,7 +12,9 @@ type Valores = Record<string, unknown> & {
   horasPagoOnline: number; horasPagoFacil: number; horasTransferencia: number; horasPagoLocal: number;
   datosTransferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string };
   locales: Local[];
-};
+  chatbot?: { activo: boolean; saludo: string };
+  chatbotIa?: { activo: boolean; topeDiario: number };
+} & ValoresEnvios;
 const HORAS: Array<[keyof Valores, string, number, number]> = [
   ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 240],
   ["horasTransferencia", "Transferencia", 2, 240], ["horasPagoLocal", "Pagar al retirar en el local", 24, 720],
@@ -53,7 +56,7 @@ export default function Ajustes() {
             <Campo etiqueta="% OFF con transferencia"><input type="number" min={0} max={100} className={claseEntrada} value={v.descuentoTransferencia} onChange={(e) => poner("descuentoTransferencia", Number(e.target.value) || 0)} /></Campo>
             <Campo etiqueta="Cuotas sin interés"><input type="number" min={1} max={24} className={claseEntrada} value={v.cuotasSinInteres} onChange={(e) => poner("cuotasSinInteres", Number(e.target.value) || 1)} /></Campo>
             <Campo etiqueta="Compra mínima"><EntradaPesos valor={v.montoMinimoCarrito} onChange={(c) => poner("montoMinimoCarrito", c ?? 0)} /></Campo>
-            <Campo etiqueta="Costo de envío"><EntradaPesos valor={v.costoEnvio} onChange={(c) => poner("costoEnvio", c ?? 0)} /></Campo>
+            <Campo etiqueta="Costo de envío estándar" ayuda="Si no hay transportes o ninguno responde."><EntradaPesos valor={v.costoEnvio} onChange={(c) => poner("costoEnvio", c ?? 0)} /></Campo>
             <Campo etiqueta="Envío gratis desde" ayuda="Vacío = nunca."><EntradaPesos valor={v.envioGratisDesde} onChange={(c) => poner("envioGratisDesde", c)} /></Campo>
           </div>
         </Tarjeta>
@@ -78,6 +81,21 @@ export default function Ajustes() {
             <Campo etiqueta={'Avisar "¡Últimas!" desde'}><input type="number" min={0} max={20} className={`${claseEntrada} w-28`} value={v.avisoUltimas} onChange={(e) => poner("avisoUltimas", Number(e.target.value) || 0)} /></Campo>
           </div>
         </Tarjeta>
+        <AjustesEnvios v={v} poner={(k, x) => setV({ ...v, [k]: x } as Valores)} />
+        {v.chatbot && (
+          <Tarjeta titulo="Asistente de la tienda">
+            <div className="space-y-3">
+              <Casilla etiqueta="Mostrar el asistente (burbuja de chat)" ayuda="Apagado, la burbuja es el botón de WhatsApp." marcada={v.chatbot.activo} onChange={(x) => poner("chatbot", { ...v.chatbot!, activo: x })} />
+              <Campo etiqueta="Saludo" ayuda="Lo primero que dice. Hasta 200 caracteres."><textarea className={claseEntrada} rows={2} maxLength={200} value={v.chatbot.saludo} onChange={(e) => poner("chatbot", { ...v.chatbot!, saludo: e.target.value })} /></Campo>
+              {v.chatbotIa && (
+                <>
+                  <Casilla etiqueta="Responder con IA lo que no está en las preguntas frecuentes" ayuda="Necesita ANTHROPIC_API_KEY en el servidor. Tiene costo por consulta: el tope lo limita." marcada={v.chatbotIa.activo} onChange={(x) => poner("chatbotIa", { ...v.chatbotIa!, activo: x })} />
+                  <Campo etiqueta="Tope de consultas con IA por día"><input type="number" min={0} max={20000} className={`${claseEntrada} w-32`} value={v.chatbotIa.topeDiario} onChange={(e) => poner("chatbotIa", { ...v.chatbotIa!, topeDiario: Number(e.target.value) || 0 })} /></Campo>
+                </>
+              )}
+            </div>
+          </Tarjeta>
+        )}
         <Tarjeta titulo="Locales" acciones={<Boton variante="borde" onClick={() => poner("locales", [...locales, { nombre: "", direccion: "", localidad: "", horario: "", mapa: null, retiro: true }])}>+ Local</Boton>}>
           <div className="space-y-4">
             {locales.map((l, i) => {

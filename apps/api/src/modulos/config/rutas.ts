@@ -25,6 +25,7 @@ const POR_DEFECTO: ConfigPublica = {
   mediosPago: ["local"],
   costoEnvio: 790_000,
   locales: [],
+  chatbot: { activo: false, saludo: "" },
 };
 
 export async function rutasConfig(app: FastifyInstance, deps: { db: Db; cache: CacheCorta; pagoOnline: boolean }) {

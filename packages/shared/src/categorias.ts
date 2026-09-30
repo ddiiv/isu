@@ -14,7 +14,7 @@ import { normalizar } from "./texto.js";
 
 const GENEROS: Array<[RegExp, string[]]> = [
   [/\b(unisex|ambos)\b/, ["hombre", "mujer"]],
-  [/\b(nin[oa]s?|kids?|infantil|chicos?|bebes?|junior)\b/, ["ninos"]],
+  [/\b(nin[oa]s?|nen[ea]s?|kids?|infantil|chicos?|bebes?|junior)\b/, ["ninos"]],
   [/\b(hombres?|masculino|caballeros?|varon|men)\b/, ["hombre"]],
   [/\b(mujer(es)?|femenino|damas?|women)\b/, ["mujer"]],
 ];

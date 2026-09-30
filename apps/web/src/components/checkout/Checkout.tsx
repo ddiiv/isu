@@ -4,8 +4,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { formatearPesos, PedidoNuevo, type ConfigPublica, type MedioPago } from "@isu/shared";
 import { useCarrito } from "../carrito/Carrito";
+import { CampoCupon, LineaCupon } from "../carrito/LineasCarrito";
 import { api, guardarAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
+import { OpcionesEnvio, type EleccionEnvio } from "./OpcionesEnvio";
 
 /*
  * Checkout en una sola página: contacto, entrega, pago y resumen. El total
@@ -25,7 +27,7 @@ const campo = "w-full rounded-xl border border-linea bg-white px-4 py-3 text-bas
 
 export function Checkout({ config }: { config: ConfigPublica }) {
   const router = useRouter();
-  const { lineas, cotizacion, cotizar, vaciar, unidades } = useCarrito();
+  const { lineas, cotizacion, cotizar, vaciar, unidades, cupon, ponerCupon } = useCarrito();
   const locales = config.locales.filter((l) => l.retiro);
   const [c, setC] = useState<Campos>({ email: "", nombre: "", apellido: "", telefono: "", dni: "", calle: "", numero: "", piso: "", cp: "", localidad: "", provincia: "CABA", indicaciones: "", notas: "" });
   const [entrega, setEntrega] = useState<"envio" | "retiro">("envio");
@@ -36,6 +38,10 @@ export function Checkout({ config }: { config: ConfigPublica }) {
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [general, setGeneral] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  // Etapa 4: la opción de envío (transporte + servicio), la sucursal y los avisos por WhatsApp.
+  const [envio, setEnvio] = useState<EleccionEnvio>({ opcion: null, sucursal: null });
+  const [recargarEnvio, setRecargarEnvio] = useState(0);
+  const [avisosWhatsapp, setAvisosWhatsapp] = useState(true);
   const cambiar = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setC((x) => ({ ...x, [k]: e.target.value }));
 
   // Con sesión: los datos de la cuenta ya completos.
@@ -53,30 +59,38 @@ export function Checkout({ config }: { config: ConfigPublica }) {
   useEffect(() => {
     if (Object.keys(errores).length) document.querySelector<HTMLElement>("[aria-invalid=true]")?.focus();
   }, [errores]);
-  // Dependencias a propósito: se recotiza al cambiar entrega, medio o cantidades
-  useEffect(() => { void cotizar({ entrega, medioPago: medio }); }, [entrega, medio, unidades]);
+  const opcionId = entrega === "envio" ? envio.opcion?.id ?? null : null;
+  const destino = { cp: c.cp ?? "", provincia: c.provincia ?? "", localidad: c.localidad ?? "" };
+  const datosEnvio = () => (opcionId ? { cp: destino.cp.trim(), provincia: destino.provincia, localidad: destino.localidad.trim(), opcion: opcionId } : undefined);
+  // Dependencias a propósito: se recotiza al cambiar entrega, medio, cantidades o la opción de envío
+  useEffect(() => { void cotizar({ entrega, medioPago: medio, envio: datosEnvio() }); }, [entrega, medio, unidades, opcionId]);
+  const items = useMemo(() => lineas.map(({ sku, cantidad }) => ({ sku, cantidad })), [lineas]);
 
   const cuerpo = useMemo(() => ({
     items: lineas.map(({ sku, cantidad }) => ({ sku, cantidad })),
     contacto: { email: c.email, nombre: c.nombre, apellido: c.apellido, telefono: c.telefono, dni: c.dni },
     entrega: entrega === "envio"
-      ? { tipo: "envio" as const, direccion: { calle: c.calle, numero: c.numero, piso: c.piso, cp: c.cp, localidad: c.localidad, provincia: c.provincia, indicaciones: c.indicaciones } }
+      ? {
+        tipo: "envio" as const, direccion: { calle: c.calle, numero: c.numero, piso: c.piso, cp: c.cp, localidad: c.localidad, provincia: c.provincia, indicaciones: c.indicaciones },
+        ...(envio.opcion ? { opcion: envio.opcion.id } : {}), ...(envio.opcion?.requiereSucursal && envio.sucursal ? { sucursal: envio.sucursal } : {}),
+      }
       : { tipo: "retiro" as const, local },
     medioPago: medio,
+    ...(cupon ? { cupon } : {}),
+    avisosWhatsapp: entrega === "envio" && avisosWhatsapp,
     ...((c.notas ?? "").trim() ? { notas: (c.notas ?? "").trim() } : {}),
     aceptaTerminos: acepta,
-  }), [lineas, c, entrega, local, medio, acepta]);
+  }), [lineas, c, entrega, local, medio, acepta, envio, avisosWhatsapp, cupon]);
 
   async function confirmar(e: React.FormEvent) {
     e.preventDefault();
     setGeneral(null);
     const v = PedidoNuevo.safeParse(cuerpo);
-    if (!v.success) {
-      const m: Record<string, string> = {};
-      for (const i of v.error.issues) m[String(i.path.at(-1))] ??= i.message;
-      setErrores(m);
-      return;
-    }
+    const m: Record<string, string> = {};
+    if (!v.success) for (const i of v.error.issues) m[String(i.path.at(-1))] ??= i.message;
+    if (entrega === "envio" && !envio.opcion) m.opcionEnvio = "Elegí cómo te lo mandamos.";
+    else if (entrega === "envio" && envio.opcion?.requiereSucursal && !envio.sucursal) m.opcionEnvio = "Elegí la sucursal donde lo vas a retirar.";
+    if (!v.success || Object.keys(m).length) { setErrores(m); return; }
     setErrores({});
     setEnviando(true);
     evento("add_payment_info", { currency: "ARS", value: pesos(cotizacion?.total ?? 0), payment_type: medio });
@@ -89,7 +103,11 @@ export function Checkout({ config }: { config: ConfigPublica }) {
     } catch (err) {
       const x = err as ErrorApi;
       setGeneral(x.message);
-      if (x.codigo === "sin_stock" || x.codigo === "carrito_cambio") await cotizar({ entrega, medioPago: medio });
+      if (x.codigo === "sin_stock" || x.codigo === "carrito_cambio") await cotizar({ entrega, medioPago: medio, envio: datosEnvio() });
+      // El cupón dejó de servir (se agotó, ya lo usó…): se saca y se muestra el total sin él.
+      if (x.codigo === "cupon") ponerCupon(null);
+      // La opción de envío ya no está (cambió la tarifa o el horario): se vuelven a pedir.
+      if (x.codigo === "envio_no_disponible") setRecargarEnvio((n) => n + 1);
       setEnviando(false);
     }
   }
@@ -130,7 +148,7 @@ export function Checkout({ config }: { config: ConfigPublica }) {
         <fieldset>
           <legend className="mb-4 font-display text-2xl">2. Entrega</legend>
           <div className="grid gap-3 sm:grid-cols-2">
-            {([["envio", "Envío a domicilio", "Todo el país. En CABA y GBA llega hoy o mañana."], ["retiro", "Retiro en el local", "Gratis. Te avisamos cuando esté listo."]] as const).map(([v, t, d]) => (
+            {([["envio", "Envío", "A domicilio o a sucursal, a todo el país. En CABA puede llegar hoy."], ["retiro", "Retiro en el local", "Gratis. Te avisamos cuando esté listo."]] as const).map(([v, t, d]) => (
               <label key={v} className={`cursor-pointer rounded-2xl border-2 p-4 ${entrega === v ? "border-tinta" : "border-linea"}`}>
                 <input type="radio" name="entrega" value={v} checked={entrega === v} onChange={() => setEntrega(v)} className="sr-only" />
                 <span className="block font-bold">{t}</span><span className="text-sm text-tinta-suave">{d}</span>
@@ -149,6 +167,14 @@ export function Checkout({ config }: { config: ConfigPublica }) {
                 <select value={c.provincia} onChange={cambiar("provincia")} className={campo} autoComplete="address-level1">{PROVINCIAS.map((p) => <option key={p}>{p}</option>)}</select>
               </label>
               <div className="sm:col-span-3">{inp("indicaciones", "Indicaciones (opcional)", { placeholder: "Timbre, entre calles…" })}</div>
+              <div className="sm:col-span-6">
+                <OpcionesEnvio items={items} destino={destino} medioPago={medio} cupon={cupon}
+                  valor={envio} alCambiar={setEnvio} error={errores.opcionEnvio} recargar={recargarEnvio} />
+              </div>
+              <label className="flex gap-2 text-sm sm:col-span-6">
+                <input type="checkbox" checked={avisosWhatsapp} onChange={(e) => setAvisosWhatsapp(e.target.checked)} className="mt-0.5 size-4 accent-tinta" />
+                <span>Avisame por WhatsApp cuando salga, cuando esté por llegar y cuando se entregue (al número de arriba).</span>
+              </label>
             </div>
           ) : (
             <div className="mt-4 space-y-2" role="radiogroup" aria-label="Local de retiro">
@@ -191,12 +217,20 @@ export function Checkout({ config }: { config: ConfigPublica }) {
         {cotizacion && (
           <dl className="mt-4 space-y-1 border-t border-linea pt-4 text-[15px]">
             <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatearPesos(cotizacion.subtotal)}</dd></div>
+            <LineaCupon c={cotizacion} Etiqueta="dt" />
             {cotizacion.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento transferencia</dt><dd>−{formatearPesos(cotizacion.descuento)}</dd></div>}
-            <div className="flex justify-between"><dt>Envío</dt><dd>{entrega === "retiro" ? "Gratis" : cotizacion.envio ? formatearPesos(cotizacion.envio) : "Gratis"}</dd></div>
+            <div className="flex justify-between gap-3">
+              <dt>Envío{entrega === "envio" && envio.opcion ? <span className="block text-xs text-tinta-suave">{envio.opcion.nombre}</span> : null}</dt>
+              <dd className="shrink-0 text-right">{entrega === "retiro" ? "Gratis"
+                : !envio.opcion ? "—"
+                : envio.opcion.soloMercadoPago ? <span className="text-sm">Se paga en Mercado Pago</span>
+                : cotizacion.envio ? formatearPesos(cotizacion.envio) : "Gratis"}</dd>
+            </div>
             <div className="flex justify-between pt-2 font-display text-2xl"><dt>Total</dt><dd>{formatearPesos(cotizacion.total)}</dd></div>
           </dl>
         )}
         {cotizacion?.problemas.map((p) => <p key={p.mensaje} className="mt-2 text-sm font-bold text-oferta" role="alert">{p.mensaje}</p>)}
+        <div className="mt-4"><CampoCupon /></div>
         <label className="mt-5 flex gap-2 text-sm">
           <input type="checkbox" checked={acepta} onChange={(e) => setAcepta(e.target.checked)} aria-invalid={!!errores.aceptaTerminos} className="mt-0.5 size-4 accent-tinta" />
           <span>Acepto los <Link href="/terminos" target="_blank" className="underline">términos y condiciones</Link> y la <Link href="/privacidad" target="_blank" className="underline">política de privacidad</Link>.</span>
