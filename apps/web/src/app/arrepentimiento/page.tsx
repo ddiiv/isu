@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PaginaLegal } from "@/components/PaginaLegal";
 import { obtenerConfig } from "@/lib/api";
+import { FormArrepentimiento } from "@/components/FormArrepentimiento";
 
 export const metadata: Metadata = { title: "Botón de arrepentimiento", alternates: { canonical: "/arrepentimiento" } };
 export const revalidate = 300;
@@ -8,8 +9,8 @@ export const revalidate = 300;
 /*
  * Botón de arrepentimiento (Res. SCI 424/2020): tiene que estar a la vista
  * desde el inicio y permitir revocar la compra sin registrarse ni dar motivos.
- * En la etapa 2 se suma el formulario que genera el código de trámite
- * automáticamente; hasta entonces el pedido se hace por WhatsApp.
+ * El formulario genera el código de trámite en el momento y, si el pedido
+ * todavía no salió, lo cancela solo.
  */
 export default async function Arrepentimiento() {
   const config = await obtenerConfig();
@@ -22,14 +23,16 @@ export default async function Arrepentimiento() {
       </p>
       <h2>Cómo pedirlo</h2>
       <ul>
-        <li>Mandanos tu número de pedido, nombre completo y el email con el que compraste.</li>
-        <li>Te respondemos con un <strong>código de trámite</strong> en menos de 24 horas y te indicamos cómo devolvernos la prenda.</li>
+        <li>Completá el formulario con tu número de pedido y el email con el que compraste.</li>
+        <li>Te damos el <strong>código de trámite</strong> en el momento. Si el pedido todavía no salió, queda cancelado ahí mismo; si ya lo recibiste, te indicamos cómo devolvernos la prenda.</li>
         <li>El envío de la devolución corre por nuestra cuenta.</li>
         <li>Te devolvemos el total que pagaste, incluido el envío, por el mismo medio de pago.</li>
       </ul>
-      <p className="mt-8">
-        <a href={`https://wa.me/${config.whatsapp}?text=${texto}`} target="_blank" rel="noopener noreferrer" className="boton-marca no-underline">
-          Quiero arrepentirme de mi compra
+      <FormArrepentimiento />
+      <p className="mt-6 text-sm">
+        ¿Preferís hacerlo por WhatsApp?{" "}
+        <a href={`https://wa.me/${config.whatsapp}?text=${texto}`} target="_blank" rel="noopener noreferrer" >
+          Escribinos
         </a>
       </p>
     </PaginaLegal>

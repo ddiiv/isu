@@ -27,4 +27,9 @@ export default tseslint.config(
     files: ["tests/**/*.mjs"],
     rules: { "no-console": "off" },
   },
+  {
+    // Pruebas y scripts de muestra trabajan con carpetas temporales que arman ellos mismos.
+    files: ["**/*.test.ts", "scripts/**/*.mjs"],
+    rules: { "security/detect-non-literal-fs-filename": "off" },
+  },
 );

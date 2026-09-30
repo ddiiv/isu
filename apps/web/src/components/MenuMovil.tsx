@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CategoriaNodo } from "@isu/shared";
 import { IconoCerrar, IconoMenu } from "./iconos";
+import { SITIO } from "@/lib/sitio";
 
 /*
  * Menú del celular: un cajón lateral. Es el único pedazo del header con JS;
@@ -42,6 +43,7 @@ export function MenuMovil({ categorias }: { categorias: CategoriaNodo[] }) {
                 <IconoCerrar />
               </button>
             </div>
+            <Link href="/nuevos" className="border-b border-linea py-3 font-display text-2xl text-marca" onClick={() => setAbierto(false)}>Nuevos</Link>
             {categorias.map((c) => (
               <div key={c.id} className="border-b border-linea py-3">
                 <Link href={`/${c.slug}`} className="font-display text-2xl" onClick={() => setAbierto(false)}>{c.nombre}</Link>
@@ -54,8 +56,9 @@ export function MenuMovil({ categorias }: { categorias: CategoriaNodo[] }) {
                 )}
               </div>
             ))}
+            <Link href="/outfits" className="pt-3 text-[15px] font-bold" onClick={() => setAbierto(false)}>Armá tu outfit</Link>
             <Link href="/locales" className="py-3 text-[15px]" onClick={() => setAbierto(false)}>Nuestros locales</Link>
-            <a href="https://www.isuwaya.com" className="py-1 text-[15px] text-tinta-suave">Comprar por mayor</a>
+            <a href={SITIO.mayorista} rel="nofollow" className="mt-2 inline-flex w-fit items-center gap-2 rounded-full border border-tinta px-4 py-2 text-[15px] font-bold">Pedido mayorista <span aria-hidden="true">↗</span></a>
           </nav>
         </div>,
         document.body,

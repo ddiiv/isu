@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { obtenerCategorias, obtenerConfig } from "@/lib/api";
+import { obtenerCategorias, obtenerColeccion, obtenerConfig, obtenerNuevos } from "@/lib/api";
+import { NuevosIngresos } from "@/components/NuevosIngresos";
 import { IconoBanco, IconoCamion, IconoFlecha, IconoLocal, IconoTarjeta } from "@/components/iconos";
 import { SITIO } from "@/lib/sitio";
 
@@ -8,7 +9,7 @@ export const revalidate = 300;
 const FONDOS = ["bg-marca", "bg-tinta", "bg-ahorro"];
 
 export default async function Inicio() {
-  const [config, categorias] = await Promise.all([obtenerConfig(), obtenerCategorias()]);
+  const [config, categorias, nuevos, destacados] = await Promise.all([obtenerConfig(), obtenerCategorias(), obtenerNuevos(8), obtenerColeccion("destacados", 8)]);
 
   const beneficios = [
     { icono: IconoCamion, titulo: "Envíos a todo el país", texto: "Y en el día en CABA y GBA" },
@@ -52,6 +53,20 @@ export default async function Inicio() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <NuevosIngresos productos={destacados.productos} titulo="Destacados" id="destacados" verTodo="/destacados" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} />
+
+      <NuevosIngresos productos={nuevos.productos} titulo="Lo nuevo" verTodo="/nuevos" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} />
+
+      <section className="bg-marca text-white">
+        <div className="contenedor flex flex-col items-start gap-5 py-14 sm:flex-row sm:items-center sm:justify-between lg:py-16">
+          <div>
+            <h2 className="text-[clamp(2rem,5vw,3.4rem)] leading-none">Armá tu outfit</h2>
+            <p className="mt-3 max-w-xl text-lg text-white/85">Decinos tu talle y cuánto querés gastar: te armamos conjuntos con lo que hay en stock.</p>
+          </div>
+          <Link href="/outfits" className="boton bg-white text-tinta hover:bg-marca-claro">Empezar <IconoFlecha /></Link>
+        </div>
       </section>
 
       <section className="contenedor py-16 lg:py-20" aria-labelledby="titulo-categorias">

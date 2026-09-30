@@ -62,3 +62,19 @@ export function puedeAgregarFoto(
   if (total >= fotosMaximasDelProducto(estado.cantidadDeColores)) return "producto_lleno";
   return null;
 }
+
+/*
+ * Tamaños que se generan de cada foto al subirla (webp). La tienda elige el
+ * que corresponde con srcset: nunca se redimensiona en el servidor web al
+ * vuelo, que en un pico es CPU que le falta a todo lo demás.
+ */
+export const ANCHOS_FOTO = [400, 800, 1200] as const;
+export type AnchoFoto = (typeof ANCHOS_FOTO)[number];
+
+/** clave "p/12/ab12cd34" → "<base>/p/12/ab12cd34-800.webp" */
+export function urlFoto(base: string, clave: string, ancho: AnchoFoto): string {
+  return `${base.replace(/\/+$/, "")}/${clave}-${ancho}.webp`;
+}
+
+/* Las claves las genera la tienda; igual se validan antes de armar una ruta con ellas. */
+export const CLAVE_FOTO = /^p\/\d{1,9}\/[a-z0-9]{8,40}$/;

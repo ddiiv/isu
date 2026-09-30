@@ -47,6 +47,13 @@ chk("no puede crear roles", (await falla("CREATE ROLE hacker LOGIN")) === "42501
 chk("no puede leer contraseñas de roles", (await falla("SELECT rolpassword FROM pg_authid")) === "42501");
 chk("no puede leer archivos del servidor", ["42501"].includes(await falla("SELECT pg_read_file('/etc/passwd')")));
 chk("no puede ejecutar comandos (COPY PROGRAM)", ["42501"].includes(await falla("COPY (SELECT 1) TO PROGRAM 'id'")));
+// Etapa 1: el worker escucha los avisos de Stocker con este mismo usuario, pero el stock lo lee por la API.
+chk("puede escuchar los avisos de Stocker (LISTEN stocker_stock)", (await falla("LISTEN stocker_stock")) === "permitido");
+for (const t of ["variant_stocks", "product_variants", "products", "integraciones_externas"]) {
+  const existe = (await admin.query("SELECT to_regclass($1) AS r", [`public.${t}`])).rows[0].r;
+  if (existe) chk(`no puede leer public.${t} (el stock va por la API)`, (await falla(`SELECT * FROM public.${t} LIMIT 1`)) === "42501");
+}
+chk("usa las tablas nuevas del catálogo", (await falla("SELECT count(*) FROM tienda.variantes")) === "permitido");
 const lenta = await falla("SELECT pg_sleep(12)");
 chk("una consulta colgada se corta sola (statement_timeout)", lenta === "57014", lenta);
 

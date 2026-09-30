@@ -31,7 +31,14 @@ beforeAll(async () => {
   publicAntes = await tablasDe("public");
   await pool.query("DROP SCHEMA IF EXISTS tienda CASCADE");
 });
-afterAll(async () => { await pool.end(); });
+afterAll(async () => {
+  // La base de pruebas es la misma del desarrollo local: no dejar nada que se vea en la tienda.
+  await pool.query("DELETE FROM tienda.descuentos WHERE creado_por = 'qa'").catch(() => {});
+  await pool.query("DELETE FROM tienda.admins WHERE email LIKE 'qa-db%'").catch(() => {});
+  await pool.query("DELETE FROM tienda.productos WHERE stocker_padre LIKE 'QA-%'").catch(() => {});
+  await pool.query("DELETE FROM tienda.pedidos WHERE email IN ('a@b.c', 'qa-db@test.com')").catch(() => {});
+  await pool.end();
+});
 
 describe("migraciones", () => {
   it("aplica todo la primera vez y nada la segunda", async () => {
@@ -56,7 +63,6 @@ describe("migraciones", () => {
   it("frena si alguien edita una migración ya aplicada", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "mig-"));
     await cp(MIGRACIONES, dir, { recursive: true });
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- carpeta temporal del test
     await writeFile(path.join(dir, "0001_base.sql"), "-- editada\n");
     await expect(migrar(pool, dir)).rejects.toThrow(/cambió después de aplicada/);
   });
@@ -149,5 +155,130 @@ describe("auditoría", () => {
     await pool.query("INSERT INTO tienda.auditoria (actor, accion, entidad) VALUES ('qa','prueba','test')");
     await expect(pool.query("UPDATE tienda.auditoria SET actor = 'otro'")).rejects.toThrow(/no se modifica/);
     await expect(pool.query("DELETE FROM tienda.auditoria")).rejects.toThrow(/no se modifica/);
+  });
+});
+
+describe("catálogo de Stocker (0004)", () => {
+  let producto: number;
+  beforeAll(async () => {
+    const p = await pool.query(
+      "INSERT INTO tienda.productos (stocker_padre, stocker_id, nombre, slug, stocker_categoria, stocker_genero) VALUES ('ISU-C1', 9001, 'Remera Básica Algodón', 'remera-basica-algodon', 'Remeras', 'Mujer') RETURNING id",
+    );
+    producto = p.rows[0].id;
+  });
+
+  it("el SKU padre se puede repetir; el id de Stocker no", async () => {
+    await pool.query("INSERT INTO tienda.productos (stocker_padre, stocker_id, nombre, slug) VALUES ('ISU-C1', 9002, 'Otra', 'otra-c1')");
+    await expect(
+      pool.query("INSERT INTO tienda.productos (stocker_padre, stocker_id, nombre, slug) VALUES ('X', 9001, 'Dup', 'dup-c1')"),
+    ).rejects.toThrow(/duplicate key/);
+  });
+
+  it("la búsqueda ignora tildes y mayúsculas", async () => {
+    const { rows } = await pool.query(
+      "SELECT id FROM tienda.productos WHERE busqueda @@ plainto_tsquery('simple', translate(lower('BASICA algodon'), 'áéíóúüñ', 'aeiouun'))",
+    );
+    expect(rows.map((r) => r.id)).toContain(producto);
+  });
+
+  it("una variante: precio y stock nunca negativos, SKU único", async () => {
+    const ins = (sku: string, sid: number, precio: number, stock: number) =>
+      pool.query("INSERT INTO tienda.variantes (producto_id, stocker_id, sku, precio, stock) VALUES ($1,$2,$3,$4,$5)", [producto, sid, sku, precio, stock]);
+    await ins("ISU-C1-M", 1, 1200000, 3);
+    await expect(ins("ISU-C1-L", 2, -1, 0)).rejects.toThrow(/check/);
+    await expect(ins("ISU-C1-L", 3, 100, -2)).rejects.toThrow(/check/);
+    await expect(ins("ISU-C1-M", 4, 100, 1)).rejects.toThrow(/duplicate key/);
+  });
+
+  it("borrar un color deja la variante sin color (no la borra)", async () => {
+    const c = await pool.query("INSERT INTO tienda.producto_colores (producto_id, clave, nombre) VALUES ($1,'negro','Negro') RETURNING id", [producto]);
+    await pool.query("UPDATE tienda.variantes SET color_id = $1 WHERE sku = 'ISU-C1-M'", [c.rows[0].id]);
+    await pool.query("DELETE FROM tienda.producto_colores WHERE id = $1", [c.rows[0].id]);
+    const { rows } = await pool.query("SELECT color_id FROM tienda.variantes WHERE sku = 'ISU-C1-M'");
+    expect(rows[0].color_id).toBeNull();
+  });
+
+  it("siembra los ajustes nuevos", async () => {
+    const { rows } = await pool.query("SELECT clave, valor FROM tienda.ajustes WHERE clave IN ('publicarNuevos','mostrarAgotados','avisoUltimas') ORDER BY clave");
+    expect(rows).toEqual([
+      { clave: "avisoUltimas", valor: 3 }, { clave: "mostrarAgotados", valor: true }, { clave: "publicarNuevos", valor: true },
+    ]);
+  });
+});
+
+describe("pedidos y pagos (0005)", () => {
+  const base = (extra: Record<string, unknown> = {}) => ({
+    acceso_hash: "a".repeat(64), email: "qa-db@test.com", nombre: "A", apellido: "B", telefono: "1", dni: "2",
+    entrega: "retiro", local_retiro: "Flores", medio_pago: "transferencia", subtotal: 1000, descuento: 200, envio: 0, total: 800, estado: "x", ...extra,
+  });
+  const insertar = (o: Record<string, unknown>) => {
+    const k = Object.keys(o);
+    return pool.query(`INSERT INTO tienda.pedidos (${k.join(",")}) VALUES (${k.map((_, i) => `$${i + 1}`).join(",")}) RETURNING id, numero`, Object.values(o));
+  };
+  it("el número sale solo y es único; el total tiene que cerrar", async () => {
+    const a = await insertar(base());
+    expect(a.rows[0].numero).toMatch(/^ISU-\d+$/);
+    await expect(insertar(base({ total: 1 }))).rejects.toThrow(/check/);
+  });
+  it("pagar en el local exige retiro; envío exige dirección", async () => {
+    await expect(insertar(base({ medio_pago: "local", entrega: "envio", local_retiro: null, direccion: JSON.stringify({ calle: "x" }) }))).rejects.toThrow(/check/);
+    await expect(insertar(base({ entrega: "envio", local_retiro: null }))).rejects.toThrow(/check/);
+  });
+  it("un pago no se registra dos veces (mismo proveedor y referencia)", async () => {
+    const p = await insertar(base());
+    const pago = () => pool.query("INSERT INTO tienda.pagos (pedido_id, proveedor, externo, estado, monto) VALUES ($1,'transferencia','OP-1','aprobado',800)", [p.rows[0].id]);
+    await pago();
+    await expect(pago()).rejects.toThrow(/duplicate key/);
+  });
+  it("el historial del pedido no se edita ni se borra (salvo borrando el pedido entero)", async () => {
+    const p = await insertar(base());
+    await pool.query("INSERT INTO tienda.pedido_eventos (pedido_id, estado, actor) VALUES ($1,'x','qa')", [p.rows[0].id]);
+    await expect(pool.query("UPDATE tienda.pedido_eventos SET actor = 'otro' WHERE pedido_id = $1", [p.rows[0].id])).rejects.toThrow(/no se modifica/);
+    await expect(pool.query("DELETE FROM tienda.pedido_eventos WHERE pedido_id = $1", [p.rows[0].id])).rejects.toThrow(/no se modifica/);
+    await pool.query("DELETE FROM tienda.pedidos WHERE id = $1", [p.rows[0].id]);
+  });
+  it("el email del cliente se guarda en minúsculas", async () => {
+    await expect(pool.query("INSERT INTO tienda.clientes (email, nombre) VALUES ('Mayus@Test.com','A')")).rejects.toThrow(/check/);
+  });
+});
+
+describe("backoffice (0006)", () => {
+  it("admins: email en minúsculas, rol válido, único", async () => {
+    await expect(pool.query("INSERT INTO tienda.admins (email, nombre, hash, rol) VALUES ('A@b.com','A','h','dueno')")).rejects.toThrow(/check/);
+    await expect(pool.query("INSERT INTO tienda.admins (email, nombre, hash, rol) VALUES ('a@b.com','A','h','root')")).rejects.toThrow(/check/);
+    await pool.query("INSERT INTO tienda.admins (email, nombre, hash, rol) VALUES ('qa-db@b.com','A','h','dueno')");
+    await expect(pool.query("INSERT INTO tienda.admins (email, nombre, hash, rol) VALUES ('qa-db@b.com','B','h','lectura')")).rejects.toThrow(/duplicate key/);
+    const r = await pool.query("SELECT debe_cambiar_clave, totp_activo FROM tienda.admins WHERE email = 'qa-db@b.com'");
+    expect(r.rows[0]).toEqual({ debe_cambiar_clave: true, totp_activo: false });
+  });
+  it("descuentos: entre 1 y 90 %, fechas en orden, alcance con algo elegido", async () => {
+    const ins = (pct: number, alcance = "todo", cats = "{}", desde: string | null = null, hasta: string | null = null) =>
+      pool.query("INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, categoria_ids, desde, hasta, creado_por) VALUES ('x',$1,$2,$3,$4,$5,'qa')", [pct, alcance, cats, desde, hasta]);
+    await expect(ins(0)).rejects.toThrow(/check/);
+    await expect(ins(91)).rejects.toThrow(/check/);
+    await expect(ins(10, "categorias")).rejects.toThrow(/check/);
+    await expect(ins(10, "todo", "{}", "2026-02-01", "2026-01-01")).rejects.toThrow(/check/);
+    await ins(10, "categorias", "{1}");
+  });
+  it("precio de lista del ítem nunca menor al cobrado", async () => {
+    const p = await pool.query("INSERT INTO tienda.pedidos (acceso_hash,email,nombre,apellido,telefono,dni,entrega,local_retiro,medio_pago,subtotal,total,estado) VALUES ($1,'a@b.c','A','B','1','2','retiro','F','local',100,100,'x') RETURNING id", ["b".repeat(64)]);
+    await expect(pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, nombre, precio, precio_lista, cantidad) VALUES ($1,'S','N',100,90,1)", [p.rows[0].id])).rejects.toThrow(/check/);
+    await pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, nombre, precio, precio_lista, cantidad) VALUES ($1,'S','N',90,100,1)", [p.rows[0].id]);
+  });
+});
+
+describe("guías de talles y outfits (0007)", () => {
+  it("una guía necesita medidas y filas; el nombre no se repite (sin importar mayúsculas)", async () => {
+    const ins = (nombre: string, medidas: string, filas: string) => pool.query("INSERT INTO tienda.guias_talles (nombre, tipo, medidas, filas) VALUES ($1,'adulto',$2,$3) RETURNING id", [nombre, medidas, filas]);
+    await expect(ins("Remera", "[]", '[{"talle":"M"}]')).rejects.toThrow(/check/);
+    await expect(ins("Remera", '["pecho"]', "{}")).rejects.toThrow(/check/);
+    const g = await ins("Remera", '["pecho"]', '[{"talle":"M","valores":[[90,95]]}]');
+    await expect(ins("REMERA", '["pecho"]', '[{"talle":"M","valores":[[90,95]]}]')).rejects.toThrow(/duplicate key/);
+    // Borrar la guía deja al producto sin guía (no lo borra).
+    const p = await pool.query("INSERT INTO tienda.productos (stocker_padre, nombre, slug, guia_talles_id, parte_outfit) VALUES ('QA-G','x','qa-guia',$1,'arriba') RETURNING id", [g.rows[0].id]);
+    await pool.query("DELETE FROM tienda.guias_talles WHERE id = $1", [g.rows[0].id]);
+    const r = await pool.query("SELECT guia_talles_id FROM tienda.productos WHERE id = $1", [p.rows[0].id]);
+    expect(r.rows[0].guia_talles_id).toBeNull();
+    await expect(pool.query("UPDATE tienda.productos SET parte_outfit = 'zapatos' WHERE id = $1", [p.rows[0].id])).rejects.toThrow(/check/);
   });
 });
