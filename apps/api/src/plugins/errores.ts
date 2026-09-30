@@ -19,7 +19,9 @@ export function errores(app: FastifyInstance) {
       });
     }
     if (err instanceof ErrorHttp) {
-      return reply.code(err.status).send({ error: err.codigo, mensaje: err.message });
+      const espera = (err as ErrorHttp & { reintentarEn?: number }).reintentarEn;
+      if (espera) reply.header("retry-after", String(espera));
+      return reply.code(err.status).send({ ...(err.datos ?? {}), error: err.codigo, mensaje: err.message });
     }
     const status = err.statusCode ?? 500;
     if (status === 429 || status === 503) return reply.code(status).send(err);

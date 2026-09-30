@@ -31,6 +31,34 @@ pnpm db:migrar
 pnpm dev                                               # web :3000, admin :3001, api :4000
 ```
 
+### Con el catálogo de muestra (sin Stocker)
+
+```bash
+pnpm demo:stocker     # Stocker simulado en :3900 (16 productos), en otra terminal
+pnpm dev              # el worker sincroniza el catálogo al arrancar
+pnpm demo:fotos       # genera fotos de muestra y las importa
+```
+
+Backoffice (http://localhost:3001): `pnpm admin:crear vos@mail.com "Tu Nombre"`
+imprime una contraseña provisoria; al entrar pide el doble factor (QR). Guías de
+talles, Destacados/Nuevos y un descuento de muestra: `pnpm demo:backoffice`.
+
+Para probar compras sin credenciales: `pnpm demo:mercadopago` (Mercado Pago
+simulado en :3910, con botones Aprobar / Rechazar / Pendiente). Los mails se
+ven en Mailpit (http://localhost:8025). Para confirmar una transferencia:
+
+```bash
+curl -XPOST localhost:4000/v1/pagos/registrar -H 'content-type: application/json' \
+  -H 'authorization: Bearer solo-desarrollo-pagos-cambiar-en-produccion' \
+  -d '{"pedido":"ISU-1001","medio":"transferencia","monto":1519200,"referencia":"OP-1","quien":"Caja"}'
+```
+
+Para simular una venta en el local (la tienda la ve al instante):
+`curl -XPOST localhost:3900/__vender -d '{"sku":"ISU-4002-NEG0-M"}'`.
+
+Contra el Stocker real: `STOCKER_API_URL` = el backend de Stocker (sin `/api`) y
+`STOCKER_TOKEN` = una credencial con origen «Tienda online minorista».
+
 El `.env` va en la raíz; la API, el worker y las migraciones lo leen de ahí.
 Si `pnpm install` avisa "Ignored build scripts: msgpackr-extract", no hace
 falta hacer nada: es un acelerador opcional de BullMQ.

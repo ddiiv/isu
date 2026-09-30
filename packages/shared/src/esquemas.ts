@@ -34,6 +34,11 @@ export const ConfigPublica = z.object({
   whatsapp: telefonoWhatsapp,
   email: z.string().email().nullable(),
   anuncio: z.string().max(160).nullable(),
+  avisoUltimas: z.number().int().min(0).max(20), // desde cuántas unidades se dice "¡Últimas!"
+  mostrarAgotados: z.boolean(),
+  // Los medios de pago que están configurados de verdad (el checkout sólo ofrece esos).
+  mediosPago: z.array(z.enum(["mercadopago", "pagofacil", "transferencia", "local"])),
+  costoEnvio: z.number().int().nonnegative(), // centavos
   locales: z.array(Local),
 });
 export type ConfigPublica = z.infer<typeof ConfigPublica>;

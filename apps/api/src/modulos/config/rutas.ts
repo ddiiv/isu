@@ -20,14 +20,25 @@ const POR_DEFECTO: ConfigPublica = {
   whatsapp: "5491168515444",
   email: "isu.isuwaya@gmail.com",
   anuncio: null,
+  avisoUltimas: 3,
+  mostrarAgotados: true,
+  mediosPago: ["local"],
+  costoEnvio: 790_000,
   locales: [],
 };
 
-export async function rutasConfig(app: FastifyInstance, deps: { db: Db; cache: CacheCorta }) {
+export async function rutasConfig(app: FastifyInstance, deps: { db: Db; cache: CacheCorta; pagoOnline: boolean }) {
   const cargar = async (): Promise<ConfigPublica> => {
     const filas = await deps.db.select({ clave: esquema.ajustes.clave, valor: esquema.ajustes.valor }).from(esquema.ajustes);
     const salida: Record<string, unknown> = { ...POR_DEFECTO };
     const forma = ConfigPublica.shape;
+    // Medios de pago: sólo los que funcionan. Transferencia, si hay CBU o alias; online, si hay Mercado Pago.
+    const t = filas.find((f) => f.clave === "datosTransferencia")?.valor as { cbu?: string; alias?: string } | undefined;
+    salida.mediosPago = [
+      ...(deps.pagoOnline ? ["mercadopago", "pagofacil"] : []),
+      ...(t?.cbu || t?.alias ? ["transferencia"] : []),
+      "local",
+    ];
     for (const { clave, valor } of filas) {
       if (!(clave in forma)) continue;
       const campo = forma[clave as keyof typeof forma];

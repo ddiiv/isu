@@ -38,11 +38,19 @@ async function correr(nombre, url, conexiones, extra = {}) {
 
 // El límite por IP frenaría la prueba (todo sale de 127.0.0.1): se prueba el origen sin ese freno
 // levantando la API con LIMITE_PEDIDOS_POR_MINUTO alto, y el freno en sí se prueba aparte.
+// Con INTERNO_TOKEN se prueba como la pide el servidor de la tienda (sin el freno por IP).
+const interno = process.env.INTERNO_TOKEN ? { headers: { "x-isu-interno": process.env.INTERNO_TOKEN } } : {};
+const unSlug = (await (await fetch(`${API}/v1/productos-slugs`, interno)).json())[0]?.slug;
 const filas = [];
-filas.push(await correr("API /v1/config", `${API}/v1/config`, 100));
-filas.push(await correr("API /v1/categorias/mujer", `${API}/v1/categorias/mujer`, 100));
+filas.push(await correr("API /v1/config", `${API}/v1/config`, 100, interno));
+filas.push(await correr("API /v1/categorias/mujer", `${API}/v1/categorias/mujer`, 100, interno));
+filas.push(await correr("API /v1/productos?categoria=mujer", `${API}/v1/productos?categoria=mujer`, 100, interno));
+if (unSlug) filas.push(await correr("API /v1/productos/:slug", `${API}/v1/productos/${unSlug}`, 100, interno));
+// La búsqueda no tiene caché de memoria: es la que más le pide a la base compartida.
+filas.push(await correr("API /v1/buscar?q=remera (sin caché)", `${API}/v1/buscar?q=remera`, 50, interno));
 filas.push(await correr("Tienda / (HTML)", `${WEB}/`, 50));
 filas.push(await correr("Tienda /mujer/remeras-y-tops", `${WEB}/mujer/remeras-y-tops`, 50));
+if (unSlug) filas.push(await correr("Tienda /producto/:slug", `${WEB}/producto/${unSlug}`, 50));
 clearInterval(vigia);
 await pool.end();
 

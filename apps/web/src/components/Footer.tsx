@@ -15,7 +15,7 @@ export function Footer({ config, categorias }: { config: ConfigPublica; categori
         <nav aria-label="Comprar por categoría" className="space-y-2 text-sm">
           <p className="font-bold">Comprar</p>
           {categorias.map((c) => <Link key={c.id} href={`/${c.slug}`} className="block text-tinta-suave hover:text-marca">{c.nombre}</Link>)}
-          <a href={SITIO.mayorista} className="block text-tinta-suave hover:text-marca">Comprar por mayor</a>
+          <a href={SITIO.mayorista} rel="nofollow" className="block text-tinta-suave hover:text-marca">Comprar por mayor</a>
         </nav>
         <nav aria-label="Información legal" className="space-y-2 text-sm">
           <p className="font-bold">Ayuda</p>

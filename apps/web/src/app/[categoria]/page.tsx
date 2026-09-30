@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { obtenerCategorias } from "@/lib/api";
+import { obtenerCategorias, obtenerConfig, obtenerProductos } from "@/lib/api";
+import { Grilla } from "@/components/Grilla";
 import { Migas } from "@/components/Migas";
 import { SinProductos } from "@/components/SinProductos";
 
@@ -28,18 +29,21 @@ export async function generateMetadata({ params }: { params: Promise<{ categoria
 export default async function Categoria({ params }: { params: Promise<{ categoria: string }> }) {
   const cat = await buscar((await params).categoria);
   if (!cat) notFound();
+  const [listado, config] = await Promise.all([obtenerProductos(cat.slug), obtenerConfig()]);
   return (
     <div className="contenedor pt-8">
       <Migas items={[{ nombre: cat.nombre, href: `/${cat.slug}` }]} />
       <h1 className="mt-4 text-[clamp(2.6rem,7vw,5.5rem)] leading-[0.95]">{cat.nombre}</h1>
       {cat.hijas.length > 0 && (
-        <ul className="mt-8 flex flex-wrap gap-2">
+        <ul className="mt-6 flex flex-wrap gap-2">
           {cat.hijas.map((h) => (
             <li key={h.id}><Link href={`/${cat.slug}/${h.slug}`} className="inline-block rounded-full border border-tinta px-4 py-2 text-[15px] font-bold hover:bg-tinta hover:text-white">{h.nombre}</Link></li>
           ))}
         </ul>
       )}
-      <SinProductos />
+      {listado?.productos.length
+        ? <div className="mt-8"><Grilla productos={listado.productos} lista={cat.nombre} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} /></div>
+        : <SinProductos />}
     </div>
   );
 }

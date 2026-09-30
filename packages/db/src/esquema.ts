@@ -1,4 +1,4 @@
-import { pgSchema, serial, integer, varchar, boolean, text, timestamp, jsonb, bigserial, char } from "drizzle-orm/pg-core";
+import { pgSchema, serial, integer, varchar, boolean, text, timestamp, jsonb, bigserial, char, primaryKey } from "drizzle-orm/pg-core";
 
 /* Espejo tipado de las migraciones SQL. Las migraciones mandan; esto sólo tipa las consultas. */
 export const tienda = pgSchema("tienda");
@@ -33,8 +33,53 @@ export const productos = tienda.table("productos", {
   descripcion: text("descripcion"),
   seoTitulo: varchar("seo_titulo", { length: 70 }),
   seoDescripcion: varchar("seo_descripcion", { length: 160 }),
+  stockerId: integer("stocker_id"),
+  stockerDescripcion: text("stocker_descripcion"),
+  stockerCategoria: varchar("stocker_categoria", { length: 80 }),
+  stockerGenero: varchar("stocker_genero", { length: 40 }),
+  enStocker: boolean("en_stocker").notNull().default(true),
+  nombreFijo: boolean("nombre_fijo").notNull().default(false),
+  categoriasFijas: boolean("categorias_fijas").notNull().default(false),
+  sincronizadoEn: timestamp("sincronizado_en", { withTimezone: true }),
+  destacado: boolean("destacado").notNull().default(false),
+  destacadoOrden: integer("destacado_orden").notNull().default(0),
+  nuevo: boolean("nuevo").notNull().default(false),
+  nuevoDesde: timestamp("nuevo_desde", { withTimezone: true }),
+  guiaTallesId: integer("guia_talles_id"),
+  parteOutfit: varchar("parte_outfit", { length: 10 }),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
   actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const productoCategorias = tienda.table("producto_categorias", {
+  productoId: integer("producto_id").notNull(),
+  categoriaId: integer("categoria_id").notNull(),
+}, (t) => [primaryKey({ columns: [t.productoId, t.categoriaId] })]);
+
+export const variantes = tienda.table("variantes", {
+  id: serial("id").primaryKey(),
+  productoId: integer("producto_id").notNull(),
+  colorId: integer("color_id"),
+  stockerId: integer("stocker_id").notNull(),
+  sku: varchar("sku", { length: 100 }).notNull(),
+  talle: varchar("talle", { length: 40 }),
+  precio: integer("precio").notNull(),
+  stock: integer("stock").notNull().default(0),
+  stockEn: timestamp("stock_en", { withTimezone: true }).notNull(),
+  orden: integer("orden").notNull().default(0),
+  activo: boolean("activo").notNull().default(true),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const sincronizaciones = tienda.table("sincronizaciones", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  tipo: varchar("tipo", { length: 20 }).notNull().$type<"catalogo" | "stock">(),
+  inicio: timestamp("inicio", { withTimezone: true }).notNull().defaultNow(),
+  fin: timestamp("fin", { withTimezone: true }),
+  productos: integer("productos"),
+  variantes: integer("variantes"),
+  cambios: integer("cambios"),
+  error: text("error"),
 });
 
 export const productoColores = tienda.table("producto_colores", {
@@ -44,6 +89,7 @@ export const productoColores = tienda.table("producto_colores", {
   nombre: varchar("nombre", { length: 60 }).notNull(),
   hex: char("hex", { length: 7 }),
   orden: integer("orden").notNull().default(0),
+  activo: boolean("activo").notNull().default(true),
 });
 
 export const fotos = tienda.table("fotos", {

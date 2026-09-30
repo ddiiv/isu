@@ -238,6 +238,27 @@ describe("límite de pedidos", () => {
     await lim.close();
   });
 
+  it("el servidor de la tienda (credencial interna) no cuenta; una credencial falsa sí", async () => {
+    await redis.flushdb();
+    const INTERNO = "i".repeat(40);
+    const lim = await construirApp({ env: env({ LIMITE_PEDIDOS_POR_MINUTO: "2", INTERNO_TOKEN: INTERNO }), pool, redis });
+    await lim.ready();
+    const pedir = (cabecera?: string) => lim.inject({ url: "/v1/config", remoteAddress: "10.3.0.1", headers: cabecera ? { "x-isu-interno": cabecera } : {} });
+    for (let i = 0; i < 10; i++) expect((await pedir(INTERNO)).statusCode).toBe(200);
+    await pedir("i".repeat(39) + "x"); await pedir("corta");
+    expect((await pedir("i".repeat(41))).statusCode).toBe(429);
+    await lim.close();
+  });
+
+  it("sin INTERNO_TOKEN configurado, nadie queda exento", async () => {
+    await redis.flushdb();
+    const lim = await construirApp({ env: env({ LIMITE_PEDIDOS_POR_MINUTO: "1" }), pool, redis });
+    await lim.ready();
+    await lim.inject({ url: "/v1/config", remoteAddress: "10.4.0.1", headers: { "x-isu-interno": "" } });
+    expect((await lim.inject({ url: "/v1/config", remoteAddress: "10.4.0.1", headers: { "x-isu-interno": "" } })).statusCode).toBe(429);
+    await lim.close();
+  });
+
   it("con 2 proxies de confianza toma la IP real del cliente", async () => {
     await redis.flushdb();
     const lim = await construirApp({ env: env({ LIMITE_PEDIDOS_POR_MINUTO: "2", PROXIES_DE_CONFIANZA: "2" }), pool, redis });

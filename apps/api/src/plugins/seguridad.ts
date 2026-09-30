@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import { timingSafeEqual } from "node:crypto";
 import underPressure from "@fastify/under-pressure";
 import type { Redis } from "ioredis";
 import type { Entorno } from "../entorno.js";
@@ -11,6 +12,12 @@ import type { Entorno } from "../entorno.js";
  * lógica. Van en un solo lugar para que una ruta nueva no pueda olvidarlas.
  */
 export async function seguridad(app: FastifyInstance, env: Entorno, redis: Redis) {
+  const interno = env.INTERNO_TOKEN ? Buffer.from(env.INTERNO_TOKEN) : null;
+  const esInterno = (h: string | string[] | undefined) => {
+    if (!interno || typeof h !== "string") return false;
+    const b = Buffer.from(h);
+    return b.length === interno.length && timingSafeEqual(b, interno);
+  };
   // Cabeceras. La API sólo devuelve JSON: no carga nada, no se embebe en nada.
   await app.register(helmet, {
     contentSecurityPolicy: {
@@ -49,7 +56,14 @@ export async function seguridad(app: FastifyInstance, env: Entorno, redis: Redis
     nameSpace: "isu:rl:",
     skipOnError: true,
     keyGenerator: (req) => req.ip,
-    allowList: (req) => req.url === "/healthz" || req.url === "/readyz",
+    /*
+     * Exentos: los chequeos de salud y el servidor de la tienda. La web arma
+     * sus páginas pidiéndole a la API desde UNA sola IP interna: con el
+     * límite por IP, en un pico la tienda se quedaría sin datos. Se identifica
+     * con una credencial propia (INTERNO_TOKEN); los visitantes siguen limitados.
+     */
+    // /fotos/* sólo existe en desarrollo (en producción las sirve R2): son archivos estáticos.
+    allowList: (req) => req.url === "/healthz" || req.url === "/readyz" || (!!env.FOTOS_DIR && req.url.startsWith("/fotos/")) || esInterno(req.headers["x-isu-interno"]),
     errorResponseBuilder: (_req, ctx) => ({
       statusCode: 429,
       error: "demasiados_pedidos",

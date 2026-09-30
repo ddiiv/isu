@@ -1,3 +1,19 @@
 @import "tailwindcss";
 @import "@isu/ui/tokens.css";
 @layer base { body { @apply bg-fondo-suave font-sans text-tinta antialiased; } h1, h2 { @apply font-display tracking-tight; } }
+
+/*
+ * Tablas del backoffice en el celular: cada fila pasa a ser una tarjeta y
+ * cada celda muestra su título (data-etiqueta). Así las casillas y montos
+ * quedan a la vista sin deslizar la tabla de costado.
+ */
+@media (max-width: 639px) {
+  .tabla-apilada { min-width: 0 !important; }
+  .tabla-apilada thead { display: none; }
+  .tabla-apilada, .tabla-apilada tbody, .tabla-apilada tr, .tabla-apilada td { display: block; width: 100%; }
+  .tabla-apilada tr { padding: 0.75rem 1rem; }
+  .tabla-apilada td { padding: 0.2rem 0 !important; text-align: left !important; }
+  .tabla-apilada td:empty { display: none; }
+  .tabla-apilada td[data-etiqueta]::before { content: attr(data-etiqueta) " "; margin-right: 0.35rem; font-size: 0.75rem; font-weight: 700; color: var(--color-tinta-tenue); }
+  .tabla-apilada .celdas-casillas { display: inline-block; width: auto; margin-right: 1.25rem; }
+}

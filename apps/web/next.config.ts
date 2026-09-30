@@ -1,6 +1,10 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 
+// El .env está en la raíz del monorepo (lo comparten api, worker y web); Next sólo
+// mira su propia carpeta. No pisa lo que ya venga del entorno (Railway).
+try { process.loadEnvFile(path.join(import.meta.dirname, "../../.env")); } catch { /* sin .env: variables del entorno */ }
+
 /*
  * Cabeceras de seguridad de la tienda.
  *
@@ -14,13 +18,15 @@ import type { NextConfig } from "next";
  */
 const GA = ["https://www.googletagmanager.com", "https://www.google-analytics.com", "https://*.google-analytics.com", "https://*.analytics.google.com"];
 const IMAGENES = (process.env.NEXT_PUBLIC_CDN_IMAGENES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// En CSP, una fuente con ruta y sin "/" final coincide SÓLO con esa ruta exacta: "…/fotos" no deja cargar "…/fotos/p/1.webp".
+const FUENTES_IMAGENES = IMAGENES.map((u) => (new URL(u).pathname.length > 1 && !u.endsWith("/") ? `${u}/` : u));
 const dev = process.env.NODE_ENV !== "production";
 
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline' ${dev ? "'unsafe-eval'" : ""} ${GA[0]}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: ${[...GA, ...IMAGENES].join(" ")}`,
+  `img-src 'self' data: blob: ${[...GA, ...FUENTES_IMAGENES].join(" ")}`,
   "font-src 'self'",
   `connect-src 'self' ${GA.join(" ")} ${process.env.NEXT_PUBLIC_API_URL ?? ""}`,
   "frame-src 'none'",
@@ -28,8 +34,8 @@ const csp = [
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
-  "upgrade-insecure-requests",
-].join("; ");
+  dev ? "" : "upgrade-insecure-requests",
+].filter(Boolean).join("; ");
 
 const config: NextConfig = {
   output: "standalone",
@@ -40,7 +46,7 @@ const config: NextConfig = {
   reactStrictMode: true,
   images: {
     formats: ["image/avif", "image/webp"],
-    remotePatterns: IMAGENES.map((u) => ({ protocol: "https" as const, hostname: new URL(u).hostname })),
+    remotePatterns: IMAGENES.filter((u) => u.startsWith("https:")).map((u) => ({ protocol: "https" as const, hostname: new URL(u).hostname })),
   },
   async headers() {
     return [

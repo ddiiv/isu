@@ -2,11 +2,15 @@ import Link from "next/link";
 import type { CategoriaNodo } from "@isu/shared";
 import { Logo } from "./Logo";
 import { MenuMovil } from "./MenuMovil";
-import { IconoBolsa, IconoBuscar, IconoCuenta } from "./iconos";
+import { IconoBuscar, IconoCuenta } from "./iconos";
+import { BotonCarrito } from "./carrito/CajonCarrito";
+import { SITIO } from "@/lib/sitio";
 
 /*
  * Header: logo a la izquierda, categorías al centro, acciones a la derecha.
- * En el celular, menú | logo | buscar + bolsa. Queda pegado arriba.
+ * "Armá tu outfit" y "Pedido mayorista" son botones y se ven SIEMPRE: en la
+ * compu a la derecha; en celular y tablet, en una segunda fila de accesos
+ * (que se desliza de costado si no entra). Queda pegado arriba.
  */
 export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
   return (
@@ -19,7 +23,8 @@ export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
 
         <Logo className="lg:hidden" />
         <nav aria-label="Categorías" className="hidden lg:block">
-          <ul className="flex items-center gap-8 text-[15px]">
+          <ul className="flex items-center gap-7 text-[15px]">
+            <li><Link href="/nuevos" className="py-7 font-bold text-marca hover:underline">Nuevos</Link></li>
             {categorias.map((c) => (
               <li key={c.id} className="group relative">
                 <Link href={`/${c.slug}`} className="py-7 font-bold hover:text-marca focus-visible:text-marca">{c.nombre}</Link>
@@ -33,16 +38,30 @@ export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
                 )}
               </li>
             ))}
-            <li><Link href="/locales" className="hover:text-marca">Locales</Link></li>
           </ul>
         </nav>
 
         <div className="flex items-center justify-end gap-1 sm:gap-3">
+          <Link href="/outfits" className="hidden whitespace-nowrap rounded-full bg-marca px-4 py-2 text-sm font-bold text-white hover:bg-marca-fuerte lg:inline-block">Armá tu outfit</Link>
+          {/* Tienda por mayor: el destino sale de MAYORISTA_URL (ver /mayorista). */}
+          <a href={SITIO.mayorista} rel="nofollow" className="hidden whitespace-nowrap rounded-full border border-tinta px-4 py-2 text-sm font-bold hover:bg-tinta hover:text-white lg:inline-block">Pedido mayorista</a>
           <Link href="/buscar" aria-label="Buscar" className="rounded-full p-2.5 hover:bg-fondo-suave"><IconoBuscar /></Link>
           <Link href="/cuenta" aria-label="Mi cuenta" className="hidden rounded-full p-2 hover:bg-fondo-suave sm:block"><IconoCuenta /></Link>
-          <Link href="/carrito" aria-label="Carrito, vacío" className="relative rounded-full p-2.5 hover:bg-fondo-suave"><IconoBolsa /></Link>
+          <BotonCarrito />
         </div>
       </div>
+
+      {/* Celular y tablet: los accesos principales a la vista, sin abrir el menú. */}
+      <nav aria-label="Accesos" className="border-t border-linea/70 lg:hidden">
+        <ul className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-4 py-2 text-sm [scrollbar-width:none] sm:px-6">
+          <li className="shrink-0"><Link href="/outfits" className="block whitespace-nowrap rounded-full bg-marca px-3.5 py-1.5 font-bold text-white">Armá tu outfit</Link></li>
+          <li className="shrink-0"><a href={SITIO.mayorista} rel="nofollow" className="block whitespace-nowrap rounded-full border border-tinta px-3.5 py-1.5 font-bold">Pedido mayorista</a></li>
+          <li className="shrink-0"><Link href="/nuevos" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-marca">Nuevos</Link></li>
+          {categorias.map((c) => (
+            <li key={c.id} className="shrink-0"><Link href={`/${c.slug}`} className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold">{c.nombre}</Link></li>
+          ))}
+        </ul>
+      </nav>
     </header>
   );
 }

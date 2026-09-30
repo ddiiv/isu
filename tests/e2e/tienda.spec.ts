@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./base";
 
 /* Junta los errores de consola y de página de cada prueba: ninguna pantalla puede tener. */
 function vigilar(page: Page) {
@@ -131,6 +131,8 @@ test.describe("cabeceras de seguridad", () => {
     const h = r.headers();
     expect(h["content-security-policy"]).toMatch(/frame-ancestors 'none'/);
     expect(h["content-security-policy"]).toMatch(/object-src 'none'/);
+    // Next en modo desarrollo necesita eval; en producción no puede estar.
+    test.skip(/unsafe-eval/.test(h["content-security-policy"] ?? "") && !process.env.CI, "modo desarrollo (pnpm dev): esta prueba es para el build de producción");
     expect(h["content-security-policy"]).not.toMatch(/unsafe-eval/);
     expect(h["x-frame-options"]).toBe("DENY");
     expect(h["x-content-type-options"]).toBe("nosniff");
