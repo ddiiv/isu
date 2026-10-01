@@ -122,7 +122,8 @@ test.describe("SEO", () => {
     await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /opengraph-image/);
     const bloques = await page.locator('script[type="application/ld+json"]').allTextContents();
     const tipos = bloques.map((b) => JSON.parse(b)["@type"]);
-    expect(tipos).toContain("ClothingStore");
+    // Los datos de la marca van en el inicio y los de cada local en /locales (etapa 7); acá, la lista de la categoría.
+    expect(tipos).toContain("CollectionPage");
     expect(tipos).toContain("BreadcrumbList");
   });
 });

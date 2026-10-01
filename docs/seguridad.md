@@ -79,3 +79,28 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
 - El uso de un cupón se libera por un trigger de la base cuando el pedido se cae (vencido, cancelado, sin stock, error de reserva): no depende de cada camino del código.
 - La base impone las reglas aunque falle la validación de la API: código en mayúsculas y único, porcentaje 1–90, monto ≥ $1, promo sin código, total del pedido que cierra (`total = subtotal − cupón − transferencia + envío`), precio cobrado nunca mayor al de la prenda.
 - Importador del mayorista: pide sólo rutas `/fotos/<id>.(jpg|png|webp)` del origen configurado, sin seguir redirecciones, con tope de 25 MB y 60 s, y exige `content-type` de imagen; el catálogo se valida con un esquema; las fotos pasan por el mismo procesado que las subidas (sin metadatos, tope de píxeles). No guarda textos del mayorista.
+
+## SEO: redirecciones, feed y sitemap
+
+- **Sin redirección abierta:** una redirección manda siempre a una página de esta tienda. Hay tres llaves:
+  - La base sólo acepta rutas propias (`CHECK`: empieza con `/`, sin `//` ni `\`, sin espacios).
+  - La API se queda sólo con la ruta aunque se pegue una dirección completa de otro sitio.
+  - El proxy de la tienda vuelve a comprobarlo.
+- **Dominio del `Location`:**
+  - Es el configurado (`NEXT_PUBLIC_SITE_URL`), nunca el `Host` o `X-Forwarded-Host` del visitante. Una redirección guardada en la caché de Cloudflare con un Host falso mandaría a todos a otro sitio.
+  - Sin dominio configurado, sólo se acepta el de Railway (`RAILWAY_PUBLIC_DOMAIN`), y esa respuesta va sin caché.
+- **Círculos y cadenas:**
+  - A → B → A se rechaza al guardar (409) y se descarta del mapa.
+  - Las cadenas se resuelven a un solo salto.
+  - La raíz, `/_next` y `/api` no se pueden redirigir.
+- **Si la API se cae:** el mapa es público (no hay nada secreto en a dónde lleva una dirección vieja) y lo cachean la API, Cloudflare y la tienda. La tienda sigue andando sin él.
+- **Feed de Google Shopping:**
+  - No publica stock exacto, costos ni identificadores internos.
+  - Todo el texto va escapado.
+  - Se sacan los caracteres de control, que harían rechazar el archivo entero.
+- **Texto de categoría:** se muestra como texto, nunca como HTML. Los datos estructurados escapan `<` (`components/JsonLd.tsx`).
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7e):
+  - `Host` y `X-Forwarded-Host` falsos.
+  - Rutas armadas para escaparse (`//evil.com`, `%2F%2F`, `\`, CRLF).
+  - Backoffice sin sesión.
+  - Mapa con rutas propias, feed sin datos internos y escapado, y robots.txt.

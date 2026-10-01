@@ -1,13 +1,20 @@
 import type { Metadata } from "next";
+import { horarioSchema } from "@isu/shared";
 import { obtenerConfig } from "@/lib/api";
+import { JsonLd } from "@/components/JsonLd";
+import { SITIO } from "@/lib/sitio";
 import { Migas } from "@/components/Migas";
 import { IconoLocal } from "@/components/iconos";
 
-export const metadata: Metadata = {
-  title: "Nuestros locales",
-  description: "Visitanos en Flores (Galería Vía Flores) y en La Salada. Retirá tus compras online gratis.",
-  alternates: { canonical: "/locales" },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locales } = await obtenerConfig();
+  const donde = [...new Set(locales.map((l) => l.localidad))].join(" y ");
+  return {
+    title: "Nuestros locales",
+    description: `Locales de ${SITIO.nombre}${donde ? ` en ${donde}` : ""}: probate las prendas y retirá gratis tus compras online.`.slice(0, 158),
+    alternates: { canonical: "/locales" },
+  };
+}
 export const revalidate = 300;
 
 export default async function Locales() {
@@ -29,6 +36,22 @@ export default async function Locales() {
           </li>
         ))}
       </ul>
+      {/* Cada local como comercio: dirección y horario en Google Maps y en la búsqueda "isuwaya flores". */}
+      <JsonLd datos={config.locales.map((l) => {
+        const horario = horarioSchema(l.horario);
+        return {
+          "@context": "https://schema.org",
+          "@type": "ClothingStore",
+          name: `${SITIO.nombre} ${l.nombre}`,
+          url: `${SITIO.url}/locales`,
+          image: `${SITIO.url}/icon.png`,
+          telephone: `+${config.whatsapp}`,
+          address: { "@type": "PostalAddress", streetAddress: l.direccion, addressLocality: l.localidad, addressCountry: "AR" },
+          ...(horario.length ? { openingHoursSpecification: horario } : {}),
+          ...(l.mapa ? { hasMap: l.mapa } : {}),
+          parentOrganization: { "@type": "Organization", name: SITIO.nombre, url: `${SITIO.url}/` },
+        };
+      })} />
     </div>
   );
 }

@@ -3,6 +3,9 @@ import { obtenerCategorias, obtenerColeccion, obtenerConfig, obtenerNuevos } fro
 import { NuevosIngresos } from "@/components/NuevosIngresos";
 import { IconoBanco, IconoCamion, IconoFlecha, IconoLocal, IconoTarjeta } from "@/components/iconos";
 import { SITIO } from "@/lib/sitio";
+import { JsonLd } from "@/components/JsonLd";
+import { contextoSeo } from "@/lib/seo";
+import { envioYDevolucion } from "@isu/shared";
 
 export const revalidate = 300;
 
@@ -86,6 +89,22 @@ export default async function Inicio() {
           ))}
         </div>
       </section>
+
+      {/* Para Google: el nombre del sitio en los resultados y los datos de la marca (logo, redes, contacto, políticas). */}
+      <JsonLd datos={[
+        { "@context": "https://schema.org", "@type": "WebSite", name: SITIO.nombre, alternateName: ["Isu", "Isuwaya Indumentaria"], url: `${SITIO.url}/`, inLanguage: "es-AR" },
+        {
+          "@context": "https://schema.org",
+          "@type": "OnlineStore",
+          name: SITIO.nombre,
+          url: `${SITIO.url}/`,
+          logo: `${SITIO.url}/icon.png`,
+          description: SITIO.descripcion,
+          sameAs: [SITIO.instagram],
+          contactPoint: [{ "@type": "ContactPoint", contactType: "customer service", telephone: `+${config.whatsapp}`, email: config.email, availableLanguage: "es", areaServed: "AR" }],
+          hasMerchantReturnPolicy: envioYDevolucion(contextoSeo(config)).hasMerchantReturnPolicy,
+        },
+      ]} />
 
       <section className="bg-fondo-suave">
         <div className="contenedor grid gap-10 py-16 lg:grid-cols-2 lg:py-20">

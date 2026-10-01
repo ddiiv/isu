@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "fotos:importar": "node --env-file-if-exists=../../.env dist/fotos/cli.js",
-    "mayorista:importar": "node --env-file-if-exists=../../.env dist/mayorista/cli.js"
+    "mayorista:importar": "node --env-file-if-exists=../../.env dist/mayorista/cli.js",
+    "seo:tienda-anterior": "node --env-file-if-exists=../../.env dist/seo/cli.js"
   },
   "dependencies": {
     "@isu/almacen": "workspace:*",

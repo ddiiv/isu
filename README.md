@@ -67,6 +67,13 @@ probarlo en local con los 71 productos del mayorista: guardar su
 `/api/catalogo` en un archivo y levantar el Stocker simulado con
 `DEMO_MAYORISTA=<archivo>` (mejor en una base aparte).
 
+SEO (etapa 7): `pnpm seo <tienda> [--viejas <tienda anterior o archivo>]`
+revisa desde afuera robots, sitemap, títulos, canónicas, datos estructurados,
+el feed de Google Shopping y que las direcciones de la tienda anterior
+redirijan. `pnpm seo:tienda-anterior <url> [--aplicar]` agrega las
+redirecciones que falten leyendo el sitemap de la tienda anterior. Guía:
+[`docs/seo.md`](docs/seo.md).
+
 Para simular una venta en el local (la tienda la ve al instante):
 `curl -XPOST localhost:3900/__vender -d '{"sku":"ISU-4002-NEG0-M"}'`.
 

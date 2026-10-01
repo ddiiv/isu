@@ -19,7 +19,7 @@ export default function Categorias() {
 
   async function guardar() {
     if (!editando) return;
-    const cuerpo = { nombre: editando.nombre ?? "", slug: editando.slug || aSlug(editando.nombre ?? ""), padreId: editando.padreId, orden: editando.orden ?? 0, visible: editando.visible ?? true, seoTitulo: editando.seoTitulo || null, seoDescripcion: editando.seoDescripcion || null };
+    const cuerpo = { nombre: editando.nombre ?? "", slug: editando.slug || aSlug(editando.nombre ?? ""), padreId: editando.padreId, orden: editando.orden ?? 0, visible: editando.visible ?? true, seoTitulo: editando.seoTitulo || null, seoDescripcion: editando.seoDescripcion || null, texto: editando.texto?.trim() || null };
     try {
       if (editando.id) await api(`categorias/${editando.id}`, { metodo: "PATCH", cuerpo });
       else await api("categorias", { cuerpo });
@@ -66,8 +66,18 @@ export default function Categorias() {
               </Campo>
               <Campo etiqueta="Orden" ayuda="Más chico = más a la izquierda en el menú."><input type="number" min={0} max={1000} className={`${claseEntrada} w-28`} value={editando.orden ?? 0} onChange={(e) => setEditando({ ...editando, orden: Number(e.target.value) || 0 })} /></Campo>
               <Casilla etiqueta="Visible" marcada={editando.visible ?? true} onChange={(v) => setEditando({ ...editando, visible: v })} />
-              <Campo etiqueta="Título para Google"><input maxLength={70} className={claseEntrada} value={editando.seoTitulo ?? ""} onChange={(e) => setEditando({ ...editando, seoTitulo: e.target.value })} /></Campo>
-              <Campo etiqueta="Descripción para Google"><input maxLength={160} className={claseEntrada} value={editando.seoDescripcion ?? ""} onChange={(e) => setEditando({ ...editando, seoDescripcion: e.target.value })} /></Campo>
+              <Campo etiqueta="Título para Google" ayuda={`${(editando.seoTitulo ?? "").length}/60 · vacío: «${editando.nombre || "Nombre"} · Isuwaya». Lo que la gente busca, por ejemplo «Remeras de hombre de algodón».`}><input maxLength={70} className={claseEntrada} value={editando.seoTitulo ?? ""} onChange={(e) => setEditando({ ...editando, seoTitulo: e.target.value })} /></Campo>
+              <Campo etiqueta="Descripción para Google" ayuda={`${(editando.seoDescripcion ?? "").length}/155 · la frase debajo del título en Google. Vacía: se arma sola con las prendas y el precio.`}><textarea rows={2} maxLength={160} className={claseEntrada} value={editando.seoDescripcion ?? ""} onChange={(e) => setEditando({ ...editando, seoDescripcion: e.target.value })} /></Campo>
+              <Campo etiqueta="Texto de la categoría" ayuda="Va abajo de las prendas. Dos o tres párrafos sobre qué hay, telas, talles y envíos ayudan a aparecer en Google. Separá los párrafos con una línea en blanco.">
+                <textarea rows={6} maxLength={3000} className={claseEntrada} value={editando.texto ?? ""} onChange={(e) => setEditando({ ...editando, texto: e.target.value })} />
+              </Campo>
+              {(editando.seoTitulo || editando.seoDescripcion || editando.nombre) && (
+                <div className="rounded-xl border border-linea p-3 text-sm" aria-label="Así se ve en Google">
+                  <p className="text-xs text-tinta-tenue">Así se ve en Google</p>
+                  <p className="truncate text-[#1a0dab]">{editando.seoTitulo || `${editando.nombre ?? ""} · Isuwaya`}</p>
+                  <p className="line-clamp-2 text-tinta-suave">{editando.seoDescripcion || "Se arma sola con las prendas, los talles y el precio desde."}</p>
+                </div>
+              )}
               <div className="flex gap-2"><Boton type="submit">Guardar</Boton><Boton variante="borde" onClick={() => setEditando(null)}>Cancelar</Boton></div>
             </form>
           </Tarjeta>

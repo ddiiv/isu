@@ -253,12 +253,15 @@ export function guiaDe(g: Record<string, unknown> | null): GuiaPublica | null {
 }
 
 export async function slugsPublicables(pool: pg.Pool) {
-  const { rows } = await pool.query<{ slug: string; actualizado_en: Date }>(
-    `SELECT p.slug, GREATEST(p.actualizado_en, max(v.actualizado_en)) AS actualizado_en
+  // Con hasta 5 fotos (la principal primero): el sitemap las declara y Google Imágenes las encuentra antes.
+  const { rows } = await pool.query<{ slug: string; nombre: string; actualizado_en: Date; fotos: string[] }>(
+    `SELECT p.slug, p.nombre, GREATEST(p.actualizado_en, max(v.actualizado_en)) AS actualizado_en,
+            COALESCE((SELECT array_agg(f.clave ORDER BY (f.tipo = 'exhibicion') DESC, f.orden, f.id)
+                        FROM (SELECT * FROM tienda.fotos f WHERE f.producto_id = p.id ORDER BY (f.tipo = 'exhibicion') DESC, f.orden, f.id LIMIT 5) f), '{}') AS fotos
        FROM tienda.productos p JOIN tienda.variantes v ON v.producto_id = p.id AND v.activo
       WHERE ${PUBLICABLE} GROUP BY p.id ORDER BY p.id LIMIT 45000`,
   );
-  return rows.map((r) => ({ slug: r.slug, actualizadoEn: r.actualizado_en.toISOString() }));
+  return rows.map((r) => ({ slug: r.slug, nombre: r.nombre, actualizadoEn: r.actualizado_en.toISOString(), fotos: r.fotos }));
 }
 
 export async function leerAjuste<T>(pool: pg.Pool, clave: string, porDefecto: T): Promise<T> {

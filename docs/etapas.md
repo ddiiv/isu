@@ -11,6 +11,66 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 4 | Envíos: Correo Argentino, Andreani, OCA, Mercado Envíos, Cabify Logistics (envíos en el día), envíos del día, seguimiento con avisos por email y WhatsApp | **Cerrada** (abajo) · transportes probados contra simuladores: falta homologar con credenciales reales |
 | 5 | Chatbot de preguntas frecuentes, ajustes finales, prueba de carga final, salida a producción | **Cerrada** (abajo) · la salida es con [`salida-produccion.md`](salida-produccion.md) |
 | 6 | Importación del catálogo del sitio mayorista (fotos por color, foto principal, categorías, colores) y cupones de descuento / promociones por monto | **Cerrada** (abajo) |
+| 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
+
+## Etapa 7 · resultados del cierre (01/10/2026)
+
+**Qué entró** (detalle y pasos con Google en [`seo.md`](seo.md))
+- **Redirecciones 301 desde la tienda anterior.**
+  - Las 70 direcciones de www.isuwaya.com (sitemap de Jumpseller) vienen en la migración 0012.
+  - Productos: por SKU a su ficha actual mientras esté publicada; si no, a su categoría (plan B), nunca a un 404.
+  - Lo demás: categorías, `/contact` → `/locales`, políticas → sus páginas.
+  - Las resuelve la API (`/v1/redirecciones`: cadenas a un solo salto, círculos descartados) y la tienda redirige antes de armar la página (`apps/web/src/proxy.ts`).
+  - El mapa se renueva cada 5 minutos o al toque cuando el catálogo cambia.
+  - **Backoffice → Redirecciones**: lista con el estado de cada una (a la ficha / plan B), alta, edición y baja.
+  - `pnpm seo:tienda-anterior <url> [--aplicar]` relee el sitemap de la tienda anterior y agrega lo que falte.
+- **Datos estructurados.**
+  - Ficha como **ProductGroup**, con una variante por talle y color: precio, precio tachado, stock, foto del color, dirección `?color=`, envío (gratis si la prenda llega al mínimo) y devoluciones (30 días).
+  - Migas de pan.
+  - Inicio con **WebSite** + **OnlineStore**.
+  - Locales como **ClothingStore**, con el horario interpretado del texto de Ajustes; si no lo entiende, no lo publica.
+  - Categorías con la lista de sus productos.
+- **Textos.**
+  - Título, descripción y **texto** de cada categoría editables, con vista previa de Google. El texto se muestra abajo de la grilla.
+  - Descripciones automáticas de ficha (colores, talles con stock, precio, condiciones) y de categoría (cantidad, precio desde, talles), que nunca se cortan a mitad de frase.
+- **Sitemap con fotos**, hasta 5 por producto.
+- **Feed de Google Merchant Center** (`/feed/google.xml`): una fila por variante con color, talle, género, edad, oferta y envío.
+- El sitemap y el feed se arman en cada pedido: en el build de Railway no hay API y saldrían vacíos.
+- Verificación de Search Console y Bing por variable (`GOOGLE_SITE_VERIFICATION`, `BING_SITE_VERIFICATION`).
+- `pnpm seo <tienda> [--viejas …]`: chequeo desde afuera de robots, sitemap, 25 páginas (título, descripción, canónica, noindex, h1, alt, datos estructurados), feed y direcciones viejas.
+
+**QA**
+- Pruebas: compartido 44/44 (+16: direcciones viejas y destinos propios, ProductGroup con variantes y envío gratis, descripciones que nunca se cortan, horario, feed), base 39/39, API 215/215 (+6: mapa resuelto a la ficha o al plan B, por SKU de talle, cadenas y círculos, destinos ajenos, auditoría, texto de categoría), worker 70/70 (+2: lector de la tienda anterior con un sitio simulado), envíos 49/49.
+- E2E (escritorio y celular): **117/117**. Nuevas:
+  - direcciones viejas → 301 (mayúsculas, barra final, `?utm_`), y una que nunca existió sigue en 404;
+  - sitemap con fotos y feed;
+  - ProductGroup, migas y canónica;
+  - WebSite y locales;
+  - en el backoffice, crear y borrar una redirección y el texto de una categoría, que se ven en la tienda al toque.
+- Contra el sitio real: las **72 direcciones** de www.isuwaya.com llegan a una página de la tienda nueva (40 de las 44 fichas a su ficha; las 4 sin fotos, como SOFT, a su categoría). `pnpm seo` → «Todo bien para Google».
+- Hallazgos corregidos:
+  - **Editar parcialmente una categoría por la API ponía orden 0 y visible.** Venía de la etapa 3: zod 4 aplica los valores por defecto también en `.partial()`. El backoffice mandaba todo y no se notaba.
+  - Las categorías perdían la imagen de vista previa (Open Graph propio pisaba el general).
+  - Sin dominio configurado, la redirección iba a la dirección interna del contenedor.
+  - La foto principal quedaba fuera de las fotos del producto en los datos cuando tenía color.
+  - El sitemap y el feed salían vacíos la primera hora después de cada deploy (se generaban en el build, sin API).
+
+**Hacker**
+- Auditoría: **265/265**. Hay 11 nuevos:
+  - `Host` y `X-Forwarded-Host` falsos;
+  - rutas armadas para escaparse a otro dominio (`//`, `%2F%2F`, `\`, CRLF);
+  - el backoffice de redirecciones sin sesión (5);
+  - el mapa sólo con rutas propias;
+  - el feed sin datos internos y escapado;
+  - robots.txt.
+- Hallazgo corregido: sin dominio configurado, la redirección usaba el `X-Forwarded-Host` del pedido. Iba sin caché, pero ahora sólo acepta el dominio configurado o el de Railway (`RAILWAY_PUBLIC_DOMAIN`).
+- Decisiones:
+  - Destino siempre propio, con tres llaves: base, API y proxy.
+  - El `Location` va con el dominio canónico.
+  - El mapa es público, porque no tiene nada secreto.
+  - El texto de categoría se muestra como texto, no como HTML.
+  - El feed no publica stock exacto.
+  - Detalle en `seguridad.md`.
 
 ## Etapa 6 · resultados del cierre (30/09/2026)
 

@@ -36,6 +36,7 @@ import { rutasAdmin } from "./modulos/admin/rutas.js";
 import { crearTransportes, type Transportes } from "@isu/envios";
 import { crearCotizadorEnvios } from "./modulos/envios/cotizador.js";
 import { rutasEnvios } from "./modulos/envios/rutas.js";
+import { rutasSeo } from "./modulos/seo/rutas.js";
 
 export interface Dependencias {
   env: Entorno;
@@ -146,6 +147,9 @@ export async function construirApp(deps: Dependencias) {
   app.addHook("onClose", async () => { await asistente.cerrar(); });
   await rutasCuponesAdmin(app, { pool, env });
   await rutasChatAdmin(app, { pool, redis, env, cache, canalInvalidar: CANAL_INVALIDAR, asistente, iaDisponible: !!(deps.ia ?? ia) });
+
+  // ── SEO: redirecciones de la tienda anterior ──
+  await rutasSeo(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR });
 
   return app;
 }

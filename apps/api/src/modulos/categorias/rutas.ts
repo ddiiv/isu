@@ -11,15 +11,18 @@ import { noEncontrado } from "../../lib/errores.js";
 export async function rutasCategorias(app: FastifyInstance, deps: { db: Db; cache: CacheCorta }) {
   const arbol = async (): Promise<CategoriaNodo[]> => {
     const filas = await deps.db
-      .select({ id: esquema.categorias.id, padreId: esquema.categorias.padreId, nombre: esquema.categorias.nombre, slug: esquema.categorias.slug })
+      .select({
+        id: esquema.categorias.id, padreId: esquema.categorias.padreId, nombre: esquema.categorias.nombre, slug: esquema.categorias.slug,
+        seoTitulo: esquema.categorias.seoTitulo, seoDescripcion: esquema.categorias.seoDescripcion, texto: esquema.categorias.texto,
+      })
       .from(esquema.categorias)
       .where(eq(esquema.categorias.visible, true))
       .orderBy(asc(esquema.categorias.orden), asc(esquema.categorias.nombre));
     const raices = filas.filter((f) => f.padreId === null);
-    return raices.map((r) => ({
-      id: r.id, nombre: r.nombre, slug: r.slug,
-      hijas: filas.filter((f) => f.padreId === r.id).map((h) => ({ id: h.id, nombre: h.nombre, slug: h.slug, hijas: [] })),
-    }));
+    const nodo = (f: (typeof filas)[number], hijas: CategoriaNodo[]): CategoriaNodo => ({
+      id: f.id, nombre: f.nombre, slug: f.slug, hijas, seoTitulo: f.seoTitulo, seoDescripcion: f.seoDescripcion, texto: f.texto,
+    });
+    return raices.map((r) => nodo(r, filas.filter((f) => f.padreId === r.id).map((h) => nodo(h, []))));
   };
 
   const api = app.withTypeProvider<ZodTypeProvider>();

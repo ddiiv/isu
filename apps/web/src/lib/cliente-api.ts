@@ -16,8 +16,10 @@ export async function api<T>(ruta: string, opciones: { metodo?: string; cuerpo?:
   else if (opciones.cuerpo !== undefined) { body = JSON.stringify(opciones.cuerpo); h["content-type"] = "application/json"; }
   let r: Response;
   try {
-    r = await fetch(`/api/t/${ruta}`, { method: opciones.metodo ?? (body ? "POST" : "GET"), headers: h, body, credentials: "same-origin", cache: "no-store" });
-  } catch {
+    // Con tope: si la tienda no contesta, mejor un mensaje que una pantalla "cargando" para siempre.
+    r = await fetch(`/api/t/${ruta}`, { method: opciones.metodo ?? (body ? "POST" : "GET"), headers: h, body, credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(opciones.archivo ? 60_000 : 25_000) });
+  } catch (e) {
+    if ((e as Error).name === "TimeoutError") throw new ErrorApi(0, "tiempo", "La tienda está tardando en responder. Probá de nuevo en unos segundos.");
     throw new ErrorApi(0, "red", "No hay conexión. Revisá internet y probá de nuevo.");
   }
   if (r.status === 204) return undefined as T;

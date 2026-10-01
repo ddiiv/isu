@@ -9,8 +9,8 @@
 
 | Servicio | Variables |
 |---|---|
-| api | `DATABASE_URL` = `postgres://tienda_app:<clave>@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` · `REDIS_URL=${{Redis.REDIS_URL}}` · `ORIGENES_PERMITIDOS=https://www.<dominio>,https://admin.<dominio>` · `PROXIES_DE_CONFIANZA=2` · `INTERNO_TOKEN` · `NODE_ENV=production` |
-| web | `API_URL=http://${{tienda-api.RAILWAY_PRIVATE_DOMAIN}}:4000` · `NEXT_PUBLIC_SITE_URL=https://www.<dominio>` · `NEXT_PUBLIC_CDN_IMAGENES=https://fotos.<dominio>` · `INTERNO_TOKEN` (el mismo que la API) · `REVALIDAR_TOKEN` · `NEXT_PUBLIC_GA_ID` · `NEXT_PUBLIC_RAZON_SOCIAL` · `NEXT_PUBLIC_CUIT` |
+| api | `PORT=4000` (**fijarlo**: si no, Railway le asigna otro y la tienda no la encuentra) · `DATABASE_URL` = `postgres://tienda_app:<clave>@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` · `REDIS_URL=${{Redis.REDIS_URL}}` · `ORIGENES_PERMITIDOS=https://www.<dominio>,https://admin.<dominio>` · `PROXIES_DE_CONFIANZA=2` · `INTERNO_TOKEN` · `NODE_ENV=production` |
+| web | `API_URL=http://${{tienda-api.RAILWAY_PRIVATE_DOMAIN}}:${{tienda-api.PORT}}` · `NEXT_PUBLIC_SITE_URL=https://www.<dominio>` · `NEXT_PUBLIC_CDN_IMAGENES=https://fotos.<dominio>` · `INTERNO_TOKEN` (el mismo que la API) · `REVALIDAR_TOKEN` · `NEXT_PUBLIC_GA_ID` · `NEXT_PUBLIC_RAZON_SOCIAL` · `NEXT_PUBLIC_CUIT` · opcional `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION` (si no se verifica por DNS; ver `seo.md`) |
 | admin | `API_URL` (igual que web) · `ADMIN_URL=https://admin.<dominio>` · `INTERNO_TOKEN` (el mismo que la API) · `PROXIES_DE_CONFIANZA=2` · `NEXT_PUBLIC_CDN_IMAGENES` (igual que web) · `NEXT_PUBLIC_SITE_URL` (para "Ver en la tienda") |
 | api (etapa 3) | `ADMIN_CLAVE_CIFRADO` (`openssl rand -base64 32`; **no cambiarla después**: todos tendrían que volver a configurar el doble factor) · `R2_*` del bucket público de fotos (para subir fotos desde el backoffice) |
 | web (etapa 3) | `MAYORISTA_URL` (a dónde lleva el botón Mayorista; se cambia en cualquier momento, sin volver a publicar) |
@@ -20,7 +20,7 @@
 | api y worker (etapa 4) | Las credenciales de cada transporte que se use (`CORREO_AR_*`, `ANDREANI_*`, `OCA_*`, `MERCADO_ENVIOS_ACTIVO=true`, `CABIFY_*`; ver `.env.example`) **en los dos servicios**: la API cotiza y genera etiquetas; el worker sigue los envíos. **Nunca** `TRANSPORTES_SIMULADOR` |
 | worker (etapa 4) | `SITIO_URL=https://www.<dominio>` (enlace de seguimiento de los avisos) · `WHATSAPP_META_TOKEN` · `WHATSAPP_META_PHONE_NUMBER_ID` (y opcionales `WHATSAPP_META_API_VERSION`, `WHATSAPP_IDIOMA`) · `MP_ACCESS_TOKEN` si se usa Mercado Envíos |
 | api (etapa 5) | Opcional: `ANTHROPIC_API_KEY` (respuestas con IA del asistente; además hay que prenderlo en Ajustes) y `CHATBOT_MODELO` |
-| worker | `DATABASE_URL` (igual que la API) · `REDIS_URL=${{Redis.REDIS_URL}}` · `STOCKER_API_URL=http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` (sin `/api`) · `STOCKER_TOKEN` · `WEB_INTERNAL_URL=http://${{tienda-web.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` · `REVALIDAR_TOKEN` (el mismo que la web) · `R2_*` si se importan fotos desde el servidor |
+| worker | `DATABASE_URL` (igual que la API) · `REDIS_URL=${{Redis.REDIS_URL}}` · `STOCKER_API_URL=http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` (sin `/api`) · `STOCKER_TOKEN` · `WEB_INTERNAL_URL=http://${{tienda-web.RAILWAY_PRIVATE_DOMAIN}}:${{tienda-web.PORT}}` (con `PORT=3000` fijo en la web) · `REVALIDAR_TOKEN` (el mismo que la web) · `R2_*` si se importan fotos desde el servidor |
 
 Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno distinto para cada uno.
 
@@ -28,6 +28,10 @@ Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno 
 `node dist/cli/crear-admin.js dueno@<dominio> "Nombre Apellido"` — imprime una contraseña provisoria; al entrar pide configurar el doble factor y cambiarla. Los demás usuarios se crean desde Backoffice → Usuarios. Si el único dueño pierde el celular, el mismo comando lo restablece.
 
 `HOST` queda en `::` (Railway enruta la red privada por IPv6).
+
+**No copiar el `.env` de desarrollo a Railway**: trae `DATABASE_URL`, `API_URL`, `REDIS_URL` y `STOCKER_API_URL` apuntando a `127.0.0.1` (la propia máquina). En Railway eso no existe: la tienda carga vacía, los botones que le hablan a la API no responden y los comandos (`mayorista:importar`, `crear-admin`) fallan con `ECONNREFUSED 127.0.0.1`. Cada variable va con las referencias de arriba (`${{…}}`).
+
+**Comprobar la instalación** (desde cualquier compu, no cambia nada): `pnpm diagnostico https://www.<dominio> https://admin.<dominio>` — dice si llegan los archivos del navegador, si la tienda llega a la API, a la base y a Redis, cuántos productos hay y si el dominio configurado coincide, y qué revisar en cada caso.
 
 5. **Credencial de Stocker.** Aplicar el patch de Stocker (backend y backoffice), entrar al backoffice de Stocker → *Integraciones* → negocio ISUWAYA → origen **Tienda online minorista** → *Emitir*. El token se muestra una sola vez: va en `STOCKER_TOKEN` del worker. En Stocker, marcar qué locales **abastecen online** (si no hay ninguno, todo sale sin stock y el worker lo registra).
 6. **Fotos (Cloudflare R2).** Crear un bucket (p. ej. `isuwaya-fotos`), conectarle un dominio propio (`fotos.<dominio>`) con acceso público de lectura y crear un token de API de R2 con permiso de escritura sólo sobre ese bucket. Subir fotos: `pnpm fotos:importar <carpeta>` con `DATABASE_URL` y `R2_CUENTA`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (forma de la carpeta en `apps/worker/src/fotos/importar.ts`). En la etapa 3 se suben desde el backoffice.

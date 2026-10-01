@@ -1,9 +1,11 @@
 import path from "node:path";
 import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 // El .env está en la raíz del monorepo (lo comparten api, worker y web); Next sólo
 // mira su propia carpeta. No pisa lo que ya venga del entorno (Railway).
 try { process.loadEnvFile(path.join(import.meta.dirname, "../../.env")); } catch { /* sin .env: variables del entorno */ }
+
 
 /*
  * Backoffice: app aparte, en su propio subdominio (admin.…), para que el
@@ -45,4 +47,10 @@ const config: NextConfig = {
     }];
   },
 };
-export default config;
+/* `next dev` no va en Railway: el servicio arranca con `pnpm --filter <app> start` (ver infra/railway/). */
+export default function configuracion(fase: string): NextConfig {
+  if (fase === PHASE_DEVELOPMENT_SERVER && (process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_PROJECT_ID)) {
+    throw new Error("Esto es `next dev` (modo desarrollo) y no va en Railway: configurá el servicio con infra/railway/<servicio>.json (ver SUBIR-A-PRODUCCION.md).");
+  }
+  return config;
+}

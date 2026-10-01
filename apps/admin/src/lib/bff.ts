@@ -29,12 +29,20 @@ export function ipCliente(req: NextRequest): string {
   return "127.0.0.1";
 }
 
+/*
+ * CSRF: el pedido tiene que venir del backoffice. Vale ADMIN_URL y también
+ * la dirección por la que se está entrando (p. ej. la de Railway antes del
+ * dominio): Origin lo pone el navegador y otro sitio no lo puede falsificar.
+ */
 export function mismoOrigen(req: NextRequest): boolean {
   const origen = req.headers.get("origin");
   if (!origen) return false;
   if (origen === ORIGEN) return true;
-  // En desarrollo se entra por localhost o 127.0.0.1 indistintamente.
-  return !SEGURO && origen === `http://${req.headers.get("host")}`;
+  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").split(",")[0]!.trim().toLowerCase();
+  const [nombre, puerto, ...resto] = host.split(":");
+  if (resto.length || !nombre || !/^[a-z0-9.-]+$/i.test(nombre) || (puerto !== undefined && !/^\d{1,5}$/.test(puerto))) return false;
+  const proto = (req.headers.get("x-forwarded-proto") ?? (SEGURO ? "https" : "http")).split(",")[0]!.trim();
+  return origen === `${proto === "https" ? "https" : "http"}://${host}`;
 }
 
 export async function aLaApi(req: NextRequest, ruta: string, init: { metodo: string; cuerpo?: BodyInit | null; tipo?: string | null }) {

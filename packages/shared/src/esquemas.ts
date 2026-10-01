@@ -50,6 +50,11 @@ export interface CategoriaNodo {
   nombre: string;
   slug: string;
   hijas: CategoriaNodo[];
+  /** Para Google (backoffice → Categorías). null = se arma solo. */
+  seoTitulo?: string | null;
+  seoDescripcion?: string | null;
+  /** Texto abajo de la grilla. */
+  texto?: string | null;
 }
 export const CategoriaNodo: z.ZodType<CategoriaNodo> = z.lazy(() =>
   z.object({
@@ -57,6 +62,9 @@ export const CategoriaNodo: z.ZodType<CategoriaNodo> = z.lazy(() =>
     nombre: z.string(),
     slug,
     hijas: z.array(CategoriaNodo),
+    seoTitulo: z.string().nullable().optional(),
+    seoDescripcion: z.string().nullable().optional(),
+    texto: z.string().nullable().optional(),
   }),
 );
 
