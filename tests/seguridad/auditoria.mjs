@@ -478,6 +478,42 @@ async function respirar() {
   chk("cupones", "backoffice: /api/a/cupones sin sesión → 401", (await pedir(`${ADMIN}/api/a/cupones`)).status === 401);
 }
 
+// ── 7e. SEO: redirecciones de la tienda anterior, feed y sitemap ──────
+{
+  await respirar();
+  const sitio = new URL(WEB);
+  // Una redirección nunca manda a otro sitio, aunque se falsifique el Host o X-Forwarded-Host.
+  const destinos = [];
+  for (const h of [{}, { host: "evil.com" }, { "x-forwarded-host": "evil.com" }, { "x-forwarded-host": "evil.com", "x-forwarded-proto": "https" }]) {
+    const r = await pedir(`${WEB}/contact`, { headers: h });
+    destinos.push(r.status === 301 ? r.headers.get("location") ?? "" : `(${r.status})`);
+  }
+  chk("seo", "las redirecciones van siempre a esta tienda (Host y X-Forwarded-Host falsos)", destinos.every((d) => { try { return !/evil/.test(new URL(d, WEB).host); } catch { return false; } }), destinos.join(" "));
+  // Rutas armadas para escaparse a otro dominio: nunca un Location ajeno.
+  let afuera = [];
+  for (const ruta of ["//evil.com", "//evil.com/%2e%2e", "/%2F%2Fevil.com", "/\\evil.com", "/contact/..%2F..%2F%2Fevil.com", "/contact%0d%0aLocation:%20http://evil.com"]) {
+    const r = await pedir(WEB + ruta).catch(() => null);
+    const loc = r?.headers.get("location");
+    if (loc && new URL(loc, WEB).host !== sitio.host) afuera.push(`${ruta} → ${loc}`);
+  }
+  chk("seo", "ninguna ruta rara redirige afuera ni parte la cabecera", !afuera.length, afuera.join(" · "));
+  // El backoffice de redirecciones exige sesión; la API valida que el destino sea propio.
+  for (const [metodo, ruta, body] of [["GET", "/v1/admin/redirecciones"], ["POST", "/v1/admin/redirecciones", { desde: "/x", hacia: "/" }], ["PUT", "/v1/admin/redirecciones/1", { desde: "/x", hacia: "/" }], ["DELETE", "/v1/admin/redirecciones/1"]]) {
+    const r = await pedir(API + ruta, { method: metodo, headers: { ...(body ? { "content-type": "application/json" } : {}), "x-isu-admin": "a".repeat(43) }, body: body ? JSON.stringify(body) : undefined });
+    chk("seo", `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
+  }
+  chk("seo", "backoffice: /api/a/redirecciones sin sesión → 401", (await pedir(`${ADMIN}/api/a/redirecciones`)).status === 401);
+  const mapa = await (await pedir(`${API}/v1/redirecciones`)).json().catch(() => ({ mapa: {} }));
+  chk("seo", "el mapa público sólo tiene rutas propias", Object.values(mapa.mapa ?? {}).every((h) => typeof h === "string" && /^\/(?![/\\])/.test(h)));
+  // Feed y sitemap: XML bien formado, sin datos internos (stock exacto, costos, ids de Stocker).
+  const feed = await (await pedir(`${WEB}/feed/google.xml`)).text();
+  chk("seo", "el feed no expone stock exacto, costos ni datos internos", feed.includes("<g:id>") && !/stock_quantity|<g:quantity|costo|stocker_id|INTERNO/i.test(feed));
+  const campos = [...feed.matchAll(/<(g:[a-z_]+|title|description|link)>([\s\S]*?)<\/\1>/g)].filter((m) => m[1] !== "g:shipping");
+  chk("seo", "el feed escapa el texto (ningún campo trae < o & sin escapar)", campos.length > 0 && campos.every((m) => !/<|&(?!(amp|lt|gt|quot|apos);)/.test(m[2])));
+  const robots = await (await pedir(`${WEB}/robots.txt`)).text();
+  chk("seo", "robots.txt no deja indexar carrito, checkout, cuenta ni la API", ["/carrito", "/checkout", "/cuenta", "/api/"].every((r) => robots.includes(`Disallow: ${r}`)));
+}
+
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────
 let bloqueado = false;
 for (let i = 0; i < 400 && !bloqueado; i++) {

@@ -1,14 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { obtenerCategorias, obtenerConfig, obtenerProductos } from "@/lib/api";
+import { apiDisponible, obtenerCategorias, obtenerConfig, obtenerProductos } from "@/lib/api";
 import { Grilla } from "@/components/Grilla";
 import { Migas } from "@/components/Migas";
 import { SinProductos } from "@/components/SinProductos";
+import { TextoCategoria } from "@/components/TextoCategoria";
+import { contextoSeo } from "@/lib/seo";
+import { descripcionCategoria } from "@isu/shared";
 
 export const revalidate = 300;
 
 export async function generateStaticParams() {
+  if (!(await apiDisponible())) return [];
   // Sin API (build de CI o la API caída) quedan las de respaldo (id negativo): no se generan en el
   // build y se arman en el primer pedido. Si no, el build falla al no poder traer los productos.
   return (await obtenerCategorias()).filter((c) => c.id > 0).map((c) => ({ categoria: c.slug }));
@@ -21,9 +25,11 @@ async function buscar(slug: string) {
 export async function generateMetadata({ params }: { params: Promise<{ categoria: string }> }): Promise<Metadata> {
   const cat = await buscar((await params).categoria);
   if (!cat) return {};
+  const [listado, config] = await Promise.all([obtenerProductos(cat.slug).catch(() => null), obtenerConfig()]);
+  const titulo = `Ropa de ${cat.nombre.toLowerCase()}`;
   return {
-    title: `Ropa de ${cat.nombre.toLowerCase()}`,
-    description: `Remeras, pantalones, buzos y más para ${cat.nombre.toLowerCase()}. Talles reales, envíos a todo el país y descuento pagando con transferencia.`,
+    title: cat.seoTitulo || titulo,
+    description: cat.seoDescripcion || descripcionCategoria(titulo, listado?.productos ?? [], contextoSeo(config)),
     alternates: { canonical: `/${cat.slug}` },
   };
 }
@@ -46,6 +52,7 @@ export default async function Categoria({ params }: { params: Promise<{ categori
       {listado?.productos.length
         ? <div className="mt-8"><Grilla productos={listado.productos} lista={cat.nombre} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} /></div>
         : <SinProductos />}
+      <TextoCategoria titulo={`Ropa de ${cat.nombre.toLowerCase()}`} texto={cat.texto} productos={listado?.productos ?? []} ruta={`/${cat.slug}`} />
     </div>
   );
 }

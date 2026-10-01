@@ -19,6 +19,7 @@ export const categorias = tienda.table("categorias", {
   visible: boolean("visible").notNull().default(true),
   seoTitulo: varchar("seo_titulo", { length: 70 }),
   seoDescripcion: varchar("seo_descripcion", { length: 160 }),
+  texto: text("texto"),
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
   actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
 });

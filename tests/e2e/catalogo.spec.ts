@@ -104,9 +104,12 @@ test.describe("ficha de producto", () => {
   test("datos estructurados de producto válidos", async ({ page }) => {
     await page.goto("/producto/jogger-rustico-puno");
     const bloques = await page.locator('script[type="application/ld+json"]').allTextContents();
-    const producto = bloques.map((b) => JSON.parse(b)).find((d) => d["@type"] === "Product");
-    expect(producto).toMatchObject({ name: "Jogger Rústico Puño", sku: "ISU-3001", brand: { name: "Isuwaya" }, offers: { priceCurrency: "ARS" } });
-    expect(Number(producto.offers.lowPrice)).toBeGreaterThan(0);
+    // Etapa 7: un ProductGroup con una variante por talle y color, cada una con su oferta.
+    const producto = bloques.map((b) => JSON.parse(b)).find((d) => d["@type"] === "ProductGroup");
+    expect(producto).toMatchObject({ name: "Jogger Rústico Puño", productGroupID: "ISU-3001", brand: { name: "Isuwaya" } });
+    expect(producto.hasVariant.length).toBeGreaterThan(1);
+    expect(producto.hasVariant[0].offers).toMatchObject({ priceCurrency: "ARS", itemCondition: "https://schema.org/NewCondition" });
+    expect(Number(producto.hasVariant[0].offers.price)).toBeGreaterThan(0);
     expect(producto.image.length).toBeGreaterThan(0);
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/producto\/jogger-rustico-puno$/);
     await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /-1200\.webp$/);

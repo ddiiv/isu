@@ -9,7 +9,6 @@ import { Analytics } from "@/components/Analytics";
 import { Hidratado } from "@/components/Hidratado";
 import { ProveedorCarrito } from "@/components/carrito/Carrito";
 import { CajonCarrito } from "@/components/carrito/CajonCarrito";
-import { JsonLd } from "@/components/JsonLd";
 import { obtenerCategorias, obtenerConfig } from "@/lib/api";
 import { SITIO } from "@/lib/sitio";
 import { preconnect } from "react-dom";
@@ -27,6 +26,11 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image" },
   robots: { index: true, follow: true, "max-image-preview": "large" },
   formatDetection: { telephone: false },
+  // Search Console y Bing Webmaster (método "etiqueta HTML"). Mejor por DNS en Cloudflare; esto es la alternativa.
+  verification: {
+    ...(process.env.GOOGLE_SITE_VERIFICATION ? { google: process.env.GOOGLE_SITE_VERIFICATION } : {}),
+    ...(process.env.BING_SITE_VERIFICATION ? { other: { "msvalidate.01": process.env.BING_SITE_VERIFICATION } } : {}),
+  },
 };
 
 export const viewport: Viewport = {
@@ -52,23 +56,6 @@ export default async function Layout({ children }: { children: React.ReactNode }
           {config.chatbot.activo ? <Asistente saludo={config.chatbot.saludo} whatsapp={config.whatsapp} /> : <BotonWhatsapp numero={config.whatsapp} />}
           <CajonCarrito descuento={config.descuentoTransferencia} montoMinimo={config.montoMinimoCarrito} />
         </ProveedorCarrito>
-        <JsonLd
-          datos={{
-            "@context": "https://schema.org",
-            "@type": "ClothingStore",
-            name: SITIO.nombre,
-            url: SITIO.url,
-            logo: `${SITIO.url}/icon.png`,
-            description: SITIO.descripcion,
-            telephone: `+${config.whatsapp}`,
-            sameAs: [SITIO.instagram],
-            location: config.locales.map((l) => ({
-              "@type": "Place",
-              name: `${SITIO.nombre} ${l.nombre}`,
-              address: { "@type": "PostalAddress", streetAddress: l.direccion, addressLocality: l.localidad, addressCountry: "AR" },
-            })),
-          }}
-        />
         <Analytics />
         <Hidratado />
       </body>

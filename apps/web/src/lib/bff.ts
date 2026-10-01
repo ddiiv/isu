@@ -1,6 +1,9 @@
 import "server-only";
 import type { NextRequest } from "next/server";
 import { SITIO } from "./sitio";
+import { origenDelPedido } from "./origen";
+
+export { origenDelPedido };
 
 /*
  * El navegador nunca habla con la API directo: habla con la tienda (mismo
@@ -33,13 +36,22 @@ export function ipCliente(req: NextRequest): string {
   return "127.0.0.1";
 }
 
+/*
+ * CSRF: el pedido tiene que venir de una página nuestra. Vale el dominio
+ * configurado (NEXT_PUBLIC_SITE_URL) y también el mismo sitio por el que se
+ * está entrando (la dirección de Railway antes de tener dominio, www y sin
+ * www…): la cabecera Origin la pone el navegador y otro sitio no la puede
+ * falsificar, así que "Origin = este mismo sitio" es la regla de siempre.
+ */
 export function mismoOrigen(req: NextRequest): boolean {
   const origen = req.headers.get("origin");
   if (!origen) return false;
-  const permitidos = new Set([new URL(SITIO.url).origin]);
+  if (origen === new URL(SITIO.url).origin) return true;
+  const propio = origenDelPedido(req);
+  if (propio && origen === propio) return true;
   // En desarrollo se entra por localhost o 127.0.0.1 indistintamente.
-  if (!SEGURO) { const h = req.headers.get("host"); if (h) permitidos.add(`http://${h}`); }
-  return permitidos.has(origen);
+  if (!SEGURO) { const h = req.headers.get("host"); if (h && origen === `http://${h}`) return true; }
+  return false;
 }
 
 export async function aLaApi(req: NextRequest, ruta: string, init: { metodo: string; cuerpo?: BodyInit | null; tipo?: string | null; extra?: Record<string, string> }) {

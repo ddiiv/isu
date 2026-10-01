@@ -476,15 +476,19 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   });
 
   // ── Categorías ───────────────────────────────────────────────────
-  const Categoria = z.object({
+  // Sin valores por defecto acá: en el PATCH (partial) un default pisaría lo que no se mandó (orden → 0, visible → true).
+  const CamposCategoria = z.object({
     nombre: z.string().trim().min(2).max(60),
     slug: esquemaSlug,
     padreId: Id.nullable(),
-    orden: z.number().int().min(0).max(1000).default(0),
-    visible: z.boolean().default(true),
+    orden: z.number().int().min(0).max(1000),
+    visible: z.boolean(),
     seoTitulo: z.string().trim().max(70).nullable().optional(),
     seoDescripcion: z.string().trim().max(160).nullable().optional(),
+    // Texto abajo de la grilla (lo leen Google y el cliente). Párrafos separados por una línea en blanco.
+    texto: z.string().trim().max(3000).nullable().optional(),
   }).strict();
+  const Categoria = CamposCategoria.extend({ orden: CamposCategoria.shape.orden.default(0), visible: CamposCategoria.shape.visible.default(true) });
   const errorCategoria = (e: unknown) => {
     const pg = e as { code?: string; message: string };
     if (pg.code === "23505") return new ErrorHttp(409, "slug", "Ya hay una categoría con esa dirección en ese nivel.");
@@ -495,7 +499,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.get("/v1/admin/categorias", async (req) => {
     await exigir(pool, req);
     const { rows } = await pool.query(
-      `SELECT c.id, c.nombre, c.slug, c.padre_id AS "padreId", c.orden, c.visible, c.seo_titulo AS "seoTitulo", c.seo_descripcion AS "seoDescripcion",
+      `SELECT c.id, c.nombre, c.slug, c.padre_id AS "padreId", c.orden, c.visible, c.seo_titulo AS "seoTitulo", c.seo_descripcion AS "seoDescripcion", c.texto,
               (SELECT count(*)::int FROM tienda.producto_categorias pc WHERE pc.categoria_id = c.id) AS productos
          FROM tienda.categorias c ORDER BY c.padre_id NULLS FIRST, c.orden, c.nombre`);
     return { categorias: rows };
@@ -505,18 +509,18 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const b = req.body;
     try {
       const { rows } = await pool.query<{ id: number }>(
-        "INSERT INTO tienda.categorias (nombre, slug, padre_id, orden, visible, seo_titulo, seo_descripcion) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
-        [b.nombre, b.slug, b.padreId, b.orden, b.visible, b.seoTitulo ?? null, b.seoDescripcion ?? null]);
+        "INSERT INTO tienda.categorias (nombre, slug, padre_id, orden, visible, seo_titulo, seo_descripcion, texto) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+        [b.nombre, b.slug, b.padreId, b.orden, b.visible, b.seoTitulo || null, b.seoDescripcion || null, b.texto || null]);
       await auditar(pool, a, "crear_categoria", "categoria", rows[0]!.id, b, ip(req));
       await invalidar([]);
       return reply.code(201).send({ id: rows[0]!.id });
     } catch (e) { throw errorCategoria(e); }
   });
-  api.patch("/v1/admin/categorias/:id", { schema: { params: z.object({ id: Id }), body: Categoria.partial() } }, async (req) => {
+  api.patch("/v1/admin/categorias/:id", { schema: { params: z.object({ id: Id }), body: CamposCategoria.partial() } }, async (req) => {
     const a = await exigir(pool, req, "operador");
-    const mapa: Record<string, string> = { nombre: "nombre", slug: "slug", padreId: "padre_id", orden: "orden", visible: "visible", seoTitulo: "seo_titulo", seoDescripcion: "seo_descripcion" };
+    const mapa: Record<string, string> = { nombre: "nombre", slug: "slug", padreId: "padre_id", orden: "orden", visible: "visible", seoTitulo: "seo_titulo", seoDescripcion: "seo_descripcion", texto: "texto" };
     const sets: string[] = []; const params: unknown[] = [req.params.id];
-    for (const [k, v] of Object.entries(req.body)) { params.push(v ?? null); sets.push(`${mapa[k]} = $${params.length}`); }
+    for (const [k, v] of Object.entries(req.body)) { params.push(v === "" ? null : v ?? null); sets.push(`${mapa[k]} = $${params.length}`); }
     if (!sets.length) return { ok: true };
     try {
       const r = await pool.query(`UPDATE tienda.categorias SET ${sets.join(", ")} WHERE id = $1`, params);

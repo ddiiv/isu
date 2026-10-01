@@ -30,12 +30,14 @@ publicada y **cerrada** (sin dominio público) hasta la última prueba.
 2. Redis y los cuatro servicios (api, worker, web, admin) con sus variables (`despliegue.md` § 4). Tokens nuevos con `openssl rand -hex 32` y `ADMIN_CLAVE_CIFRADO` con `openssl rand -base64 32` (**no cambiarla después**).
 3. Desplegar **api** primero: al arrancar aplica las migraciones (0001 a 0011) con un candado, así dos réplicas no migran a la vez. Mirar el log: "migraciones aplicadas".
 4. Desplegar **worker**: trae el catálogo de Stocker (en el log: productos y variantes aplicados). Si dice "sin locales online", volver al paso 1.3.
-5. **Fotos y categorías del mayorista** (consola del servicio worker, con el catálogo ya sincronizado):
+5. **Fotos y categorías del mayorista** (consola del servicio **worker** — Railway → worker → los tres puntos del deploy → *Shell*, o `railway ssh --service worker` —, con el catálogo ya sincronizado; ahí `DATABASE_URL` y `R2_*` ya son los de producción):
    `node dist/mayorista/cli.js` muestra el plan sin escribir nada (productos enganchados, fotos por color, categorías, los que no están en Stocker). Revisarlo y después `node dist/mayorista/cli.js --aplicar` (tarda ~15 min: le pide las fotos al sitio mayorista de a una). Si se corta, volver a correrlo: completa lo que falta sin duplicar.
-6. Desplegar **web** y **admin**.
+6. Desplegar **web** y **admin**, y comprobar: `pnpm diagnostico https://<web> https://<admin>` (desde tu compu) → "Todo bien".
 7. Primer usuario del backoffice: consola del servicio api → `node dist/cli/crear-admin.js dueno@<dominio> "Nombre"`.
 
 ## 3. Cloudflare y dominio
+
+> Si la tienda nueva reemplaza a la de Jumpseller en `www.isuwaya.com`, seguí también [`seo.md`](seo.md) § «El día del cambio de dominio»: las direcciones viejas ya redirigen solas, pero hay que correr el chequeo, actualizar `MAYORISTA_URL` si apuntaba a ese dominio y avisar a Google.
 
 1. DNS `www`, `api`, `admin` (y `fotos` al bucket R2) **proxied**, SSL *Full (strict)*.
 2. Reglas: caché de `/_next/static/*`, WAF administrado, *Bot Fight Mode*, límite en `/v1/*`.
@@ -57,16 +59,19 @@ Con una tarjeta real y montos chicos; después se cancela y se devuelve.
 - [ ] Catálogo importado: una prenda con fotos por color (la ficha abre en el color de la foto principal), Abyys en "Negro", Cloe oculta hasta tener fotos.
 - [ ] Backoffice: ingreso con doble factor, editar un producto, ver la auditoría.
 - [ ] Mails: llegan a Gmail y a Outlook sin ir a spam.
+- [ ] `pnpm seo https://www.<dominio> --viejas docs/direcciones-jumpseller.txt` → «Todo bien para Google» (las direcciones de la tienda anterior llegan a su página nueva).
 - [ ] `pnpm seguridad` contra producción (`API_URL`, `WEB_URL`, `ADMIN_URL` con los dominios reales) → todo OK. **No** correr `tests/carga` contra producción en horario de venta.
 
 ## 5. Abrir
 
-- Google Search Console: verificar el dominio y enviar `https://www.<dominio>/sitemap.xml`.
+- Google Search Console: verificar el dominio (por DNS) y enviar `https://www.<dominio>/sitemap.xml`.
+- Google Merchant Center: fuente de datos programada `https://www.<dominio>/feed/google.xml` (aparecer gratis en Shopping). Perfil de Empresa de Google para cada local. Detalle en [`seo.md`](seo.md).
 - GA4: ver que lleguen visitas y la compra de prueba (`purchase`).
 - Anunciar.
 
 ## 6. Primera semana
 
+- Search Console → *Páginas → No encontrada (404)*: si aparece una dirección vieja, agregarla en Backoffice → Redirecciones.
 - Mirar a diario: Backoffice → Panel (lo que hay que atender), Envíos → **Problemas**, Asistente → **Sin respuesta** (sumar preguntas), y los logs de api y worker en Railway.
 - Railway → *Metrics*: CPU y memoria de api/worker; conexiones de la base (la tienda usa como mucho `DB_POOL_MAX` × réplicas + 4 del worker + 1 de la escucha).
 

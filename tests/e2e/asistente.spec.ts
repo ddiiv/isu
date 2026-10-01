@@ -53,7 +53,7 @@ test.describe("asistente", () => {
     await expect(page.getByLabel("Tu consulta")).toHaveAttribute("placeholder", /código postal/);
     await preguntar(page, "1406");
     // Muestra las 5 más baratas: antes de las 14 h entra "Cabify · llega hoy" y el domicilio de Correo puede quedar afuera.
-    await expect(panel.getByText(/Correo Argentino a (domicilio|sucursal)/)).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByText(/Correo Argentino a (domicilio|sucursal)/).first()).toBeVisible({ timeout: 15_000 });
     await expect(panel.getByText(/Para una prenda al código postal 1406/)).toBeVisible();
   });
 

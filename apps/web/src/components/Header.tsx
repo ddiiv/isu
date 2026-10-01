@@ -12,12 +12,15 @@ import { SITIO } from "@/lib/sitio";
  * compu a la derecha; en celular y tablet, en una segunda fila de accesos
  * (que se desliza de costado si no entra). Queda pegado arriba.
  */
+// Al menú del celular (que viaja al navegador) sólo lo que muestra: no los textos de cada categoría.
+const paraMenu = (c: CategoriaNodo): CategoriaNodo => ({ id: c.id, nombre: c.nombre, slug: c.slug, hijas: c.hijas.map(paraMenu) });
+
 export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
   return (
     <header className="sticky top-0 z-40 border-b border-linea/70 bg-white">
       <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:h-20 lg:px-10">
         <div className="flex items-center gap-3">
-          <MenuMovil categorias={categorias} />
+          <MenuMovil categorias={categorias.map(paraMenu)} />
           <Logo className="hidden lg:flex" />
         </div>
 

@@ -18,7 +18,12 @@ simuladores), pero no se puede abrir al público hasta completarlos.
 | Clave de cifrado del backoffice (2FA) | `ADMIN_CLAVE_CIFRADO` (api) — `openssl rand -base64 32` | Generar al desplegar |
 | Tokens internos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`, `PAGOS_TOKEN`) | api, web, worker — `openssl rand -hex 32` | Generar al desplegar |
 | Primer usuario del backoffice | `pnpm admin:crear <email> "<nombre>"` contra la base de producción | Crear al desplegar |
-| Dirección del botón Mayorista | `MAYORISTA_URL` (web) — hoy `https://www.isuwaya.com` | Confirmar |
+| Dirección del botón Mayorista | `MAYORISTA_URL` (web) — hoy `https://www.isuwaya.com`. **Si la tienda nueva pasa a ese dominio, tiene que apuntar a otro** (el sitio mayorista), o el botón lleva a la misma tienda | Confirmar |
+| Google Search Console (propiedad de dominio, verificada por DNS) y envío del sitemap | Search Console · Cloudflare (registro TXT) — ver `seo.md` | Pendiente |
+| Google Merchant Center: fuente programada `/feed/google.xml` | merchants.google.com — ver `seo.md` | Pendiente |
+| Perfil de Empresa de Google de cada local | business.google.com | Pendiente |
+| Texto y título para Google de las categorías principales | Backoffice → Categorías → Editar | Pendiente (sin completar se arman solos) |
+| Día del cambio de dominio Jumpseller → tienda nueva | `seo.md` § «El día del cambio de dominio» | Pendiente |
 | Guías de talles con las medidas reales de cada molde | Backoffice → Guías de talles (y asociarlas a los productos) | Pendiente (las de muestra son de ejemplo) |
 | Destacados y Nuevos iniciales | Backoffice → Productos (casillas) | Pendiente |
 | Fotos reales de productos | `pnpm mayorista:importar --aplicar` (trae las del sitio mayorista, ver `salida-produccion.md` § 2), `pnpm fotos:importar` o Backoffice → Productos → Fotos | Pendiente (correr la importación en producción) |

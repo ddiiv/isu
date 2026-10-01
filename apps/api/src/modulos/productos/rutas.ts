@@ -105,7 +105,7 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
 
   api.get(
     "/v1/productos-slugs",
-    { schema: { response: { 200: z.array(z.object({ slug, actualizadoEn: z.string() })) } } },
+    { schema: { response: { 200: z.array(z.object({ slug, nombre: z.string(), actualizadoEn: z.string(), fotos: z.array(z.string()) })) } } },
     async (_req, reply) => {
       reply.header("cache-control", "public, max-age=300, s-maxage=600");
       return deps.cache.obtener("slugs", () => slugsPublicables(deps.pool));

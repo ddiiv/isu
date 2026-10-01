@@ -17,8 +17,9 @@ export async function api<T = unknown>(ruta: string, o: { metodo?: string; cuerp
   const q = o.query ? new URLSearchParams(Object.entries(o.query).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)])).toString() : "";
   let r: Response;
   try {
-    r = await fetch(`/api/a/${ruta}${q ? `?${q}` : ""}`, { method: o.metodo ?? (body ? "POST" : "GET"), headers: h, body, credentials: "same-origin", cache: "no-store" });
-  } catch {
+    r = await fetch(`/api/a/${ruta}${q ? `?${q}` : ""}`, { method: o.metodo ?? (body ? "POST" : "GET"), headers: h, body, credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(o.archivo ? 120_000 : 30_000) });
+  } catch (e) {
+    if ((e as Error).name === "TimeoutError") throw new ErrorApi(0, "tiempo", "El servidor está tardando en responder. Probá de nuevo en unos segundos.");
     throw new ErrorApi(0, "red", "No hay conexión. Revisá internet y probá de nuevo.");
   }
   if (r.status === 204) return undefined as T;

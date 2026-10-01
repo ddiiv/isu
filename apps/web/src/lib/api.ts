@@ -57,6 +57,20 @@ export const CATEGORIAS_RESPALDO: CategoriaNodo[] = [
   { id: -3, nombre: "Niños", slug: "ninos", hijas: [] },
 ];
 
+/*
+ * ¿Contesta la API ahora? Sin caché (la de datos puede traer respuestas de un
+ * build anterior). Lo usan las listas de páginas a generar en el build: en
+ * Railway el build no llega a la red interna, y sin API no se pre-genera
+ * nada (cada página se arma en su primera visita) en vez de fallar el build.
+ */
+let disponible: Promise<boolean> | null = null;
+export function apiDisponible(): Promise<boolean> {
+  disponible ??= fetch(`${API}/healthz`, { cache: "no-store", signal: AbortSignal.timeout(2500) })
+    .then((r) => r.ok, () => false)
+    .then((ok) => { if (!ok) console.warn(`[api] ${API} no contesta: las páginas del catálogo se arman en la primera visita`); return ok; });
+  return disponible;
+}
+
 export const obtenerConfig = () => pedir("/v1/config", ConfigPublica, CONFIG_RESPALDO);
 export const obtenerCategorias = () => pedir("/v1/categorias", z.array(CategoriaNodo), CATEGORIAS_RESPALDO);
 
@@ -115,9 +129,10 @@ export async function buscarProductos(q: string): Promise<ListadoProductos> {
   return (await pedirCatalogo(`/v1/buscar?${new URLSearchParams({ q })}`, ListadoProductos, [], { sinCache: true })) ?? LISTADO_VACIO;
 }
 
-export async function obtenerSlugs(): Promise<Array<{ slug: string; actualizadoEn: string }>> {
+const Slugs = z.array(z.object({ slug: z.string(), nombre: z.string().default(""), actualizadoEn: z.string(), fotos: z.array(z.string()).default([]) }));
+export async function obtenerSlugs(): Promise<z.infer<typeof Slugs>> {
   try {
-    return (await pedirCatalogo("/v1/productos-slugs", z.array(z.object({ slug: z.string(), actualizadoEn: z.string() })), ["catalogo"])) ?? [];
+    return (await pedirCatalogo("/v1/productos-slugs", Slugs, ["catalogo"])) ?? [];
   } catch {
     return [];
   }

@@ -86,6 +86,7 @@ const limpiar = async () => {
   await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA adm%'");
   await pool.query("DELETE FROM tienda.guias_talles WHERE nombre LIKE 'QA adm%'");
   await pool.query("DELETE FROM tienda.categorias WHERE slug LIKE 'qa-adm%'");
+  await pool.query("DELETE FROM tienda.redirecciones WHERE desde LIKE '/qa-adm%'");
 };
 
 const IP = { "x-isu-interno": INTERNO, "x-isu-ip": "10.9.9.9" };
@@ -558,5 +559,75 @@ describe("colores y talles (importación del mayorista)", () => {
     expect((await ficha()).variantes.map((v: { talle: string }) => v.talle)).toEqual(["M", "XXL"]);
     expect((await req("PATCH", "/v1/admin/variantes/NO-EXISTE-9", operador, { oculta: true })).statusCode).toBe(404);
     expect((await req("PATCH", "/v1/admin/variantes/QA-ADM-5-2", lectura2, { oculta: true })).json().error).toBe("sin_permiso");
+  });
+});
+
+describe("redirecciones de la tienda anterior (SEO)", () => {
+  const mapa = async () => (await app.inject({ url: "/v1/redirecciones", headers: IP })).json().mapa as Record<string, string>;
+  it("trae las de Jumpseller de la migración, sin la raíz ni las que no cambian", async () => {
+    const m = await mapa();
+    expect(m["/contact"]).toBe("/locales");
+    expect(m["/minorista/hombre/remeras"]).toBe("/hombre/remeras");
+    expect(m["/"]).toBeUndefined();
+    expect(m["/hombre"]).toBeUndefined();
+  });
+  it("con SKU va a la ficha mientras está publicada; si no, al plan B", async () => {
+    const r = await req("POST", "/v1/admin/redirecciones", operador, { desde: "https://www.isuwaya.com/QA-ADM-Remera-Vieja/", hacia: "/mujer/remeras-y-tops", sku: "qa-adm-1" });
+    expect(r.statusCode, r.body).toBe(201);
+    expect((await mapa())["/qa-adm-remera-vieja"]).toBe("/producto/qa-adm-1");
+    // También por el SKU de un talle (en Jumpseller a veces se cargó ése).
+    await req("POST", "/v1/admin/redirecciones", operador, { desde: "/qa-adm-por-talle", hacia: "/", sku: "QA-ADM-2-1" });
+    expect((await mapa())["/qa-adm-por-talle"]).toBe("/producto/qa-adm-2");
+    await pool.query("UPDATE tienda.productos SET visible = false WHERE id = $1", [ids["qa-adm-1"]]);
+    expect((await mapa())["/qa-adm-remera-vieja"]).toBe("/mujer/remeras-y-tops");
+    await pool.query("UPDATE tienda.productos SET visible = true WHERE id = $1", [ids["qa-adm-1"]]);
+    const lista = (await req("GET", "/v1/admin/redirecciones", lectura2)).json().redirecciones;
+    expect(lista.find((x: { desde: string }) => x.desde === "/qa-adm-remera-vieja")).toMatchObject({ sku: "QA-ADM-1", origen: "manual", destino: "/producto/qa-adm-1", producto: { slug: "qa-adm-1", publicado: true } });
+  });
+  it("sigue las cadenas y no deja armar un círculo", async () => {
+    await req("POST", "/v1/admin/redirecciones", operador, { desde: "/qa-adm-a", hacia: "/qa-adm-b" });
+    await req("POST", "/v1/admin/redirecciones", operador, { desde: "/qa-adm-b", hacia: "/hombre" });
+    expect((await mapa())["/qa-adm-a"]).toBe("/hombre"); // un solo salto
+    const c = await req("POST", "/v1/admin/redirecciones", operador, { desde: "/qa-adm-hombre-c", hacia: "/qa-adm-a" });
+    expect(c.statusCode).toBe(201);
+    const b = (await req("GET", "/v1/admin/redirecciones", operador)).json().redirecciones.find((x: { desde: string }) => x.desde === "/qa-adm-b");
+    const vuelta = await req("PUT", `/v1/admin/redirecciones/${b.id}`, operador, { desde: "/qa-adm-b", hacia: "/qa-adm-hombre-c", sku: null });
+    expect(vuelta.statusCode).toBe(409);
+    expect(vuelta.json().error).toBe("circulo");
+  });
+  it("rechaza destinos de otro sitio, duplicados y a quien no tiene permiso", async () => {
+    for (const hacia of ["//evil.com", "/\\evil.com", "javascript:alert(1)", "hombre"]) {
+      expect((await req("POST", "/v1/admin/redirecciones", operador, { desde: "/qa-adm-mala", hacia })).statusCode, hacia).toBe(400);
+    }
+    // Una dirección completa de otro dominio: se queda con la ruta (nunca redirige afuera).
+    const r = await req("POST", "/v1/admin/redirecciones", operador, { desde: "/qa-adm-afuera", hacia: "https://evil.com/locales" });
+    expect(r.statusCode).toBe(201);
+    expect((await mapa())["/qa-adm-afuera"]).toBe("/locales");
+    expect((await req("POST", "/v1/admin/redirecciones", operador, { desde: "/QA-ADM-afuera", hacia: "/" })).json().error).toBe("repetida");
+    expect((await req("POST", "/v1/admin/redirecciones", operador, { desde: "/api/x", hacia: "/" })).statusCode).toBe(400);
+    expect((await req("POST", "/v1/admin/redirecciones", lectura2, { desde: "/qa-adm-z", hacia: "/" })).json().error).toBe("sin_permiso");
+    expect((await app.inject({ method: "GET", url: "/v1/admin/redirecciones", headers: IP })).statusCode).toBe(401);
+  });
+  it("editar y borrar queda en la auditoría", async () => {
+    const r = (await req("GET", "/v1/admin/redirecciones", operador)).json().redirecciones.find((x: { desde: string }) => x.desde === "/qa-adm-afuera");
+    expect((await req("PUT", `/v1/admin/redirecciones/${r.id}`, operador, { desde: "/qa-adm-afuera", hacia: "/mujer", sku: null })).statusCode).toBe(200);
+    expect((await mapa())["/qa-adm-afuera"]).toBe("/mujer");
+    expect((await req("DELETE", `/v1/admin/redirecciones/${r.id}`, operador)).statusCode).toBe(200);
+    expect((await mapa())["/qa-adm-afuera"]).toBeUndefined();
+    expect((await req("DELETE", `/v1/admin/redirecciones/${r.id}`, operador)).statusCode).toBe(404);
+    const aud = await pool.query("SELECT accion FROM tienda.auditoria WHERE entidad = 'redireccion' AND entidad_id = $1 ORDER BY id", [String(r.id)]);
+    expect(aud.rows.map((x) => x.accion)).toEqual(["crear_redireccion", "editar_redireccion", "borrar_redireccion"]);
+  });
+  it("el texto de una categoría llega a la tienda", async () => {
+    const mujer = (await req("GET", "/v1/admin/categorias", operador)).json().categorias.find((c: { slug: string; padreId: number | null }) => c.slug === "mujer" && !c.padreId);
+    const antes = { seoTitulo: mujer.seoTitulo, seoDescripcion: mujer.seoDescripcion, texto: mujer.texto };
+    expect((await req("PATCH", `/v1/admin/categorias/${mujer.id}`, operador, { seoTitulo: "Ropa de mujer urbana", texto: "Párrafo uno.\n\nPárrafo dos." })).statusCode).toBe(200);
+    const pub = (await app.inject("/v1/categorias")).json().find((c: { slug: string }) => c.slug === "mujer");
+    expect(pub).toMatchObject({ seoTitulo: "Ropa de mujer urbana", texto: "Párrafo uno.\n\nPárrafo dos." });
+    // Un cambio parcial no toca lo que no se mandó (el orden en el menú, si está visible).
+    const despues = (await req("GET", "/v1/admin/categorias", operador)).json().categorias.find((c: { id: number }) => c.id === mujer.id);
+    expect([despues.orden, despues.visible]).toEqual([mujer.orden, mujer.visible]);
+    expect((await req("PATCH", `/v1/admin/categorias/${mujer.id}`, operador, { texto: "x".repeat(3001) })).statusCode).toBe(400);
+    await req("PATCH", `/v1/admin/categorias/${mujer.id}`, operador, antes);
   });
 });
