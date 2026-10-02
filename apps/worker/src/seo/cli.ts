@@ -28,7 +28,7 @@ try {
     console.warn(`\n${await guardar(pool, p)} redirecciones agregadas.`);
     // Avisarle a la tienda para que las use ya (si no, en menos de 5 minutos).
     if (process.env.REDIS_URL) {
-      const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true });
+      const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true, family: 0 });
       redis.on("error", () => {});
       try { await crearInvalidador({ redis, webUrl: process.env.WEB_INTERNAL_URL, token: process.env.REVALIDAR_TOKEN, log: { warn: () => {} } })([]); } finally { redis.disconnect(); }
     }

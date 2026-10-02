@@ -40,6 +40,21 @@ const env = z.object({
 
 // BullMQ exige maxRetriesPerRequest: null en la conexión de los workers.
 const conexion = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null, family: 0 });
+/*
+ * El Redis es compartido con las otras plataformas (docs/redis-compartido.md) y tiene
+ * las colas: si borra datos al llenarse o no guarda en disco, se pueden perder avisos
+ * a Stocker. Se revisa al arrancar y se avisa en el log (un Redis administrado puede
+ * no dejar leer la configuración: entonces no se dice nada).
+ */
+void Promise.all([conexion.config("GET", "maxmemory-policy"), conexion.config("GET", "appendonly")])
+  .then(([politica, aof]) => {
+    const valor = (r: unknown) => (Array.isArray(r) ? String(r[1] ?? "") : "");
+    if (valor(politica) && valor(politica) !== "noeviction") {
+      console.warn(`[redis] maxmemory-policy=${valor(politica)}: puede borrar trabajos de las colas al llenarse. Tiene que ser noeviction (docs/redis-compartido.md § 4).`);
+    }
+    if (valor(aof) === "no") console.warn("[redis] appendonly=no: ante un reinicio del Redis se pueden perder los trabajos de los últimos minutos (docs/redis-compartido.md § 4).");
+  })
+  .catch(() => {});
 const pool = crearPool({ url: env.DATABASE_URL, ssl: env.DB_SSL, max: 4, nombreApp: "isu-tienda-worker" });
 const colaStocker = new Queue(COLAS.stocker, { connection: conexion, prefix: "isu", defaultJobOptions: OPCIONES_TRABAJO });
 

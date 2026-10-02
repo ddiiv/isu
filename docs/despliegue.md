@@ -1,5 +1,7 @@
 # Despliegue: Railway + Cloudflare
 
+> **¿Pocos servicios disponibles en el plan?** La tienda entera puede ir en **un solo servicio** (más un Redis): [`un-servicio.md`](un-servicio.md). Lo de abajo es la versión con cuatro servicios separados.
+
 ## Railway (mismo proyecto que Stocker y el portal mayorista)
 
 1. **Usuario de base.** En el Postgres de Stocker (pestaña *Data* → *Query*, o `psql` con la URL de admin) correr `infra/sql/rol-tienda.sql` con una clave larga.
@@ -9,7 +11,7 @@
 
 | Servicio | Variables |
 |---|---|
-| api | `PORT=4000` (**fijarlo**: si no, Railway le asigna otro y la tienda no la encuentra) · `DATABASE_URL` = `postgres://tienda_app:<clave>@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` · `REDIS_URL=${{Redis.REDIS_URL}}` · `ORIGENES_PERMITIDOS=https://www.<dominio>,https://admin.<dominio>` · `PROXIES_DE_CONFIANZA=2` · `INTERNO_TOKEN` · `NODE_ENV=production` |
+| api | `PORT=4000` (**fijarlo**: si no, Railway le asigna otro y la tienda no la encuentra) · `DATABASE_URL` = `postgres://tienda_app:<clave>@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` · `REDIS_URL=${{Redis.REDIS_URL}}/1` (base 1 del Redis compartido: `redis-compartido.md`) · `ORIGENES_PERMITIDOS=https://www.<dominio>,https://admin.<dominio>` · `PROXIES_DE_CONFIANZA=2` · `INTERNO_TOKEN` · `NODE_ENV=production` |
 | web | `API_URL=http://${{tienda-api.RAILWAY_PRIVATE_DOMAIN}}:${{tienda-api.PORT}}` · `NEXT_PUBLIC_SITE_URL=https://www.<dominio>` · `NEXT_PUBLIC_CDN_IMAGENES=https://fotos.<dominio>` · `INTERNO_TOKEN` (el mismo que la API) · `REVALIDAR_TOKEN` · `NEXT_PUBLIC_GA_ID` · `NEXT_PUBLIC_RAZON_SOCIAL` · `NEXT_PUBLIC_CUIT` · opcional `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION` (si no se verifica por DNS; ver `seo.md`) |
 | admin | `API_URL` (igual que web) · `ADMIN_URL=https://admin.<dominio>` · `INTERNO_TOKEN` (el mismo que la API) · `PROXIES_DE_CONFIANZA=2` · `NEXT_PUBLIC_CDN_IMAGENES` (igual que web) · `NEXT_PUBLIC_SITE_URL` (para "Ver en la tienda") |
 | api (etapa 3) | `ADMIN_CLAVE_CIFRADO` (`openssl rand -base64 32`; **no cambiarla después**: todos tendrían que volver a configurar el doble factor) · `R2_*` del bucket público de fotos (para subir fotos desde el backoffice) |
@@ -20,7 +22,7 @@
 | api y worker (etapa 4) | Las credenciales de cada transporte que se use (`CORREO_AR_*`, `ANDREANI_*`, `OCA_*`, `MERCADO_ENVIOS_ACTIVO=true`, `CABIFY_*`; ver `.env.example`) **en los dos servicios**: la API cotiza y genera etiquetas; el worker sigue los envíos. **Nunca** `TRANSPORTES_SIMULADOR` |
 | worker (etapa 4) | `SITIO_URL=https://www.<dominio>` (enlace de seguimiento de los avisos) · `WHATSAPP_META_TOKEN` · `WHATSAPP_META_PHONE_NUMBER_ID` (y opcionales `WHATSAPP_META_API_VERSION`, `WHATSAPP_IDIOMA`) · `MP_ACCESS_TOKEN` si se usa Mercado Envíos |
 | api (etapa 5) | Opcional: `ANTHROPIC_API_KEY` (respuestas con IA del asistente; además hay que prenderlo en Ajustes) y `CHATBOT_MODELO` |
-| worker | `DATABASE_URL` (igual que la API) · `REDIS_URL=${{Redis.REDIS_URL}}` · `STOCKER_API_URL=http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` (sin `/api`) · `STOCKER_TOKEN` · `WEB_INTERNAL_URL=http://${{tienda-web.RAILWAY_PRIVATE_DOMAIN}}:${{tienda-web.PORT}}` (con `PORT=3000` fijo en la web) · `REVALIDAR_TOKEN` (el mismo que la web) · `R2_*` si se importan fotos desde el servidor |
+| worker | `DATABASE_URL` (igual que la API) · `REDIS_URL=${{Redis.REDIS_URL}}/1` (base 1 del Redis compartido: `redis-compartido.md`) · `STOCKER_API_URL=http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` (sin `/api`) · `STOCKER_TOKEN` · `WEB_INTERNAL_URL=http://${{tienda-web.RAILWAY_PRIVATE_DOMAIN}}:${{tienda-web.PORT}}` (con `PORT=3000` fijo en la web) · `REVALIDAR_TOKEN` (el mismo que la web) · `R2_*` si se importan fotos desde el servidor |
 
 Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno distinto para cada uno.
 

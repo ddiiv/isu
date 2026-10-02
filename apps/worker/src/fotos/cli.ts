@@ -23,7 +23,7 @@ try {
   console.warn(`\n${r.subidas} fotos subidas · ${r.omitidas.length} omitidas`);
   // Que la tienda muestre las fotos nuevas ya (y no las páginas guardadas con las anteriores).
   if (process.env.REDIS_URL && r.productos.length) {
-    const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true });
+    const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true, family: 0 });
     redis.on("error", () => {});
     try {
       await crearInvalidador({ redis, webUrl: process.env.WEB_INTERNAL_URL, token: process.env.REVALIDAR_TOKEN, log: { warn: () => {} } })(r.productos);

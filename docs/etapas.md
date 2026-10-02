@@ -13,6 +13,19 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 6 | Importación del catálogo del sitio mayorista (fotos por color, foto principal, categorías, colores) y cupones de descuento / promociones por monto | **Cerrada** (abajo) |
 | 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
 
+## Despliegue en un solo servicio (02/10/2026)
+
+- `infra/railway/todo.json` + `scripts/todo-en-uno.mjs`: la tienda entera en **un** servicio de Railway (más un Redis), para planes con pocos servicios. Guía: [`un-servicio.md`](un-servicio.md).
+  - Arranca la api, el worker, la tienda y el backoffice en el mismo contenedor y los levanta solos si se caen (esperando cada vez más, hasta 30 s).
+  - Al apagar el servicio, apaga todo en orden.
+  - `API_URL` y `WEB_INTERNAL_URL` se fijan a 127.0.0.1.
+- Escucha en `::` y, si la máquina no tiene IPv6, en `0.0.0.0`. Era un hallazgo: con `::` fijo, la tienda no arrancaba en una máquina sin IPv6.
+- **Hallazgo (también con cuatro servicios):** como el build de Railway no llega a la API, el inicio, Nuevos y Destacados salían del deploy con los valores de respaldo (sin productos destacados ni asistente) durante hasta 5 minutos. Ahora la tienda, al arrancar y apenas contesta la API, regenera esas páginas sola (`apps/web/src/instrumentation.ts`).
+- Verificado desde una copia limpia, compilando sin API como Railway y probando apenas arranca: ver la entrega.
+- **Redis compartido** entre todas las plataformas del proyecto ([`redis-compartido.md`](redis-compartido.md)): cada una en su base numerada (la tienda, la 1), con prefijo propio en claves, colas y canales.
+  - El worker avisa al arrancar si el Redis puede borrar trabajos (`maxmemory-policy` distinto de `noeviction`) o no guarda en disco (`appendonly no`).
+  - Los comandos de consola (`mayorista:importar`, `fotos:importar`, `seo:tienda-anterior`) se conectan por la red interna de Railway igual que el worker (`family: 0`).
+
 ## Etapa 7 · resultados del cierre (01/10/2026)
 
 **Qué entró** (detalle y pasos con Google en [`seo.md`](seo.md))
