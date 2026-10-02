@@ -93,7 +93,7 @@ try {
     if (r.ocultados.length) console.warn(`ocultos (sin fotos): ${r.ocultados.join(", ")}`);
     if (r.mostrados.length) console.warn(`visibles (ya tienen fotos): ${r.mostrados.join(", ")}`);
     if (process.env.REDIS_URL && r.slugs.length) {
-      const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true });
+      const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true, family: 0 });
       redis.on("error", () => {});
       try {
         await crearInvalidador({ redis, webUrl: process.env.WEB_INTERNAL_URL, token: process.env.REVALIDAR_TOKEN, log: { warn: () => {} } })(r.slugs);

@@ -11,11 +11,11 @@ if (enRailway || raiz) {
   console.error(`
 ✗ ${raiz ? "La raíz del repo no se arranca como un servicio." : "Esto es el modo desarrollo (pnpm dev): no va en Railway."}
 
-  La tienda son cuatro servicios, cada uno con su configuración:
-    tienda-api     → Settings → Config-as-code → infra/railway/api.json
-    tienda-worker  → infra/railway/worker.json
-    tienda-web     → infra/railway/web.json
-    tienda-admin   → infra/railway/admin.json
+  Todo en un solo servicio (lo más simple):
+    Settings → Config-as-code → Railway config file: infra/railway/todo.json
+  O cuatro servicios separados (para más tráfico):
+    tienda-api → infra/railway/api.json · tienda-worker → worker.json
+    tienda-web → web.json · tienda-admin → admin.json
   (Root directory: la raíz del repo. Variables: docs/despliegue.md.)
   Guía corta: SUBIR-A-PRODUCCION.md.
 `);

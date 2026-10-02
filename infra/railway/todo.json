@@ -1,0 +1,20 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "pnpm install --frozen-lockfile && pnpm build",
+    "watchPatterns": [
+      "apps/**",
+      "packages/**",
+      "scripts/**",
+      "pnpm-lock.yaml"
+    ]
+  },
+  "deploy": {
+    "startCommand": "node scripts/todo-en-uno.mjs",
+    "healthcheckPath": "/robots.txt",
+    "healthcheckTimeout": 180,
+    "restartPolicyType": "ALWAYS",
+    "numReplicas": 1
+  }
+}
