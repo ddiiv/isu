@@ -7,6 +7,9 @@
       "apps/**",
       "packages/**",
       "scripts/**",
+      "infra/**",
+      "railway.json",
+      "package.json",
       "pnpm-lock.yaml"
     ]
   },
@@ -14,7 +17,8 @@
     "startCommand": "node scripts/todo-en-uno.mjs",
     "healthcheckPath": "/robots.txt",
     "healthcheckTimeout": 180,
-    "restartPolicyType": "ALWAYS",
-    "numReplicas": 1
+    "restartPolicyType": "ON_FAILURE",
+    "numReplicas": 1,
+    "restartPolicyMaxRetries": 5
   }
 }

@@ -1,5 +1,7 @@
 # La tienda en un solo servicio de Railway
 
+> La guía completa, paso a paso y con de dónde sale cada variable, es [`subir-a-railway.md`](subir-a-railway.md). Esto es el resumen del modo de un solo servicio.
+
 Sirve cuando el plan de Railway no deja crear muchos servicios. La tienda entera ocupa **dos**:
 
 | Servicio | Qué es |
@@ -38,8 +40,14 @@ En el Postgres de Stocker (*Data → Query*), corré `infra/sql/rol-tienda.sql` 
 
 ### 3. El servicio `isu`
 
-- *Settings → Config-as-code → Railway config file*: `infra/railway/todo.json`
+No hay que elegir nada: el repo trae `railway.json` en la raíz y Railway lo usa solo (build `pnpm build`, arranque `node scripts/todo-en-uno.mjs`).
+
+Revisá que no haya nada que lo pise:
+- *Settings → Config-as-code → Railway config file*: **vacío** o `infra/railway/todo.json`. No `web.json` ni otro.
+- *Settings → Build → Custom Build Command* y *Deploy → Custom Start Command*: **vacíos**.
 - *Settings → Root directory*: vacío (la raíz del repo).
+
+Al arrancar, la tienda revisa las variables. Si alguna está mal (texto de ejemplo de la guía, una referencia `${{…}}` que no se resolvió, una dirección sin `https://`), lo dice en el log con el nombre de la variable y qué poner, y no arranca hasta que se corrija.
 
 ### 4. Variables de `isu`
 

@@ -18,9 +18,11 @@
  */
 import { spawn } from "node:child_process";
 import net from "node:net";
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { informe, revisar } from "./revisar-variables.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUERTO_WEB = Number(process.env.PORT || 3000);
@@ -31,6 +33,14 @@ const decir = (t) => process.stdout.write(`[todo-en-uno] ${t}\n`);
 if (new Set([PUERTO_WEB, PUERTO_API, PUERTO_ADMIN]).size !== 3) {
   console.error(`✗ Los puertos tienen que ser distintos: web ${PUERTO_WEB} (PORT), api ${PUERTO_API} (API_PUERTO), admin ${PUERTO_ADMIN} (ADMIN_PUERTO).\n  Poné PORT=3000 en el servicio.`);
   process.exit(1);
+}
+
+// Antes de arrancar nada: las variables. Mejor un error claro acá que cuatro partes cayéndose en el log.
+{
+  const r = revisar();
+  const texto = informe(r);
+  if (texto) process.stdout.write(`${texto}\n`);
+  if (r.errores.length) process.exit(1);
 }
 
 const API_LOCAL = `http://127.0.0.1:${PUERTO_API}`;
@@ -53,6 +63,12 @@ const PARTES = {
   web: { dir: "apps/web", archivo: ".next/standalone/apps/web/server.js", env: { PORT: String(PUERTO_WEB), HOSTNAME: TODAS } },
   admin: { dir: "apps/admin", archivo: ".next/standalone/apps/admin/server.js", env: { PORT: String(PUERTO_ADMIN), HOSTNAME: TODAS } },
 };
+
+const sinCompilar = Object.entries(PARTES).filter(([, p]) => !existsSync(path.join(RAIZ, p.dir, p.archivo))).map(([n]) => n);
+if (sinCompilar.length) {
+  console.error(`✗ Falta compilar: ${sinCompilar.join(", ")}. El build tiene que ser  pnpm install --frozen-lockfile && pnpm build\n  (lo hace solo railway.json en la raíz del repo; si en Settings → Build hay un comando propio, borralo).`);
+  process.exit(1);
+}
 
 let apagando = false;
 const vivos = new Map();

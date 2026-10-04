@@ -29,7 +29,7 @@
     "demo:transportes": "pnpm --filter @isu/envios build && node --env-file-if-exists=.env scripts/demo/transportes-simulado.mjs",
     "seo": "node scripts/seo.mjs",
     "diagnostico": "node scripts/diagnostico.mjs",
-    "start": "node scripts/no-en-produccion.mjs raiz"
+    "start": "node scripts/todo-en-uno.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
