@@ -144,9 +144,9 @@ if (deps) {
       const v = await conexion.get(CLAVE_NEGOCIO);
       return v ? Number(v) : null;
     },
-    alCambiar: async (skus) => {
-      for (let i = 0; i < skus.length; i += MAX_SKUS_POR_PEDIDO) {
-        await colaStocker.add("stock", { skus: skus.slice(i, i + MAX_SKUS_POR_PEDIDO) });
+    alCambiar: async (variantes) => {
+      for (let i = 0; i < variantes.length; i += MAX_SKUS_POR_PEDIDO) {
+        await colaStocker.add("stock", { variantes: variantes.slice(i, i + MAX_SKUS_POR_PEDIDO) });
       }
     },
     alReconectar: async () => {

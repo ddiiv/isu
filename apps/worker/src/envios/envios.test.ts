@@ -46,6 +46,8 @@ async function conEnvio(n: string, extra: Record<string, unknown> = {}) {
     paquete: { pesoGramos: 1000, altoCm: 8, anchoCm: 25, largoCm: 30, valorDeclarado: 1000000 },
     origen: { nombre: "Isuwaya", calle: "Bacacay", numero: "3231", cp: "1406", localidad: "Flores", provincia: "CABA", email: "i@i.com", telefono: "1168515444", cuit: "" },
   });
+  // El simulador numera desde el mismo valor en cada corrida: un envío que dejó otra prueba en la misma base (las de navegador) choca.
+  await pool.query("DELETE FROM tienda.envios WHERE seguimiento = $1", [creado.seguimiento]);
   const e = await pool.query("INSERT INTO tienda.envios (pedido_id, transporte, servicio, seguimiento) VALUES ($1, 'andreani', $2, $3) RETURNING id",
     [p.id, extra.servicio_envio ?? "domicilio", creado.seguimiento]);
   return { ...p, envioId: e.rows[0].id as number, seguimiento: creado.seguimiento };

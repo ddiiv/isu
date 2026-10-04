@@ -47,6 +47,11 @@ export function revisar(env = process.env) {
   const conProtocolo = (k, protocolos, ejemplo) => {
     if (!valida(k)) return null;
     const u = url(env[k]);
+    // Una referencia ${{Servicio.VARIABLE}} con un nombre de servicio que no existe, Railway la deja vacía:
+    // queda "/1", "http://:", "postgres://usuario:clave@:/" …
+    const resto = env[k].includes("://") ? env[k].slice(env[k].indexOf("://") + 3).replace(/^[^@/]*@/, "") : null;
+    const vacia = env[k].startsWith("/") || (resto !== null && (resto === "" || resto.startsWith(":") || resto.startsWith("/"))) || (u && !u.hostname);
+    if (vacia) { mal(k, `le falta el servidor: casi seguro tiene una referencia \${{Servicio.VARIABLE}} con un nombre de servicio que no existe, y Railway la dejó vacía. Escribí \${{ en el valor y elegí el servicio de la lista (ej.: ${ejemplo}).`); return null; }
     if (!u || !protocolos.includes(u.protocol)) { mal(k, `no es una dirección válida: tiene que empezar con ${protocolos.map((p) => `${p}//`).join(" o ")} (por ejemplo ${ejemplo}).`); return null; }
     if (produccion && LOCAL.test(u.hostname) && k !== "NEXT_PUBLIC_SITE_URL") mal(k, "apunta a esta misma máquina (localhost / 127.0.0.1): en Railway eso no existe. Usá la referencia ${{Servicio.…}} o la dirección interna *.railway.internal.");
     return u;

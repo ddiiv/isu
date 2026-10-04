@@ -6,6 +6,7 @@ import { crearPool, migrar } from "@isu/db";
 import { aplicarCatalogo, aplicarStock, categoriasPara, registrar } from "./sincronizar.js";
 import { crearClienteStocker, type CatalogoStocker } from "./cliente.js";
 import { escucharStocker, CANAL } from "./escucha.js";
+import { crearProcesadores, type Dependencias } from "../procesadores.js";
 
 const URL = process.env.TEST_DATABASE_URL ?? "postgres://postgres@127.0.0.1:5433/stocker_test";
 const pool = crearPool({ url: URL, max: 4 });
@@ -13,7 +14,7 @@ const BASE = 7_100_000; // ids de Stocker de mentira, lejos de cualquier dato re
 
 const ahora = (ms = 0) => new Date(Date.now() + ms).toISOString();
 function catalogo(productos: CatalogoStocker["productos"], generado = ahora()): CatalogoStocker {
-  return { negocio: 1, generado, sinLocalesOnline: false, productos };
+  return { negocio: 1, generado, truncado: false, sinLocalesOnline: false, productos };
 }
 const remera = (extra: Partial<CatalogoStocker["productos"][number]> = {}) => ({
   id: BASE + 1, sku: "QA-W-REM", titulo: "Remera Oversize Algodón", descripcion: "Algodón peinado", categoria: "Remeras", genero: "Mujer",
@@ -97,6 +98,13 @@ describe("catálogo", () => {
     // …y después termina de viajar un catálogo que se sacó antes de la venta.
     await aplicarCatalogo(pool, catalogo([remera()], ahora(-30_000)));
     expect((await vars(BASE + 1))[0].stock).toBe(4);
+  });
+
+  it("con la lista cortada (truncado) no da de baja lo que no vino", async () => {
+    await aplicarCatalogo(pool, catalogo([remera()]));
+    const r = await aplicarCatalogo(pool, { ...catalogo([]), truncado: true });
+    expect(r.bajas).toBe(0);
+    expect((await prod(BASE + 1)).en_stocker).toBe(true);
   });
 
   it("lo que se va de Stocker queda escondido (no borrado)", async () => {
@@ -196,6 +204,40 @@ describe("stock por aviso", () => {
   });
 });
 
+describe("trabajo stocker/stock (aviso stock_cambio)", () => {
+  it("traduce la variante a su SKU, no toca el stock de lo que Stocker no conoce y pide el catálogo por lo nuevo", async () => {
+    await aplicarCatalogo(pool, catalogo([remera()], ahora(-10_000)));
+    await pool.query("UPDATE tienda.variantes SET stock = 4 WHERE sku = 'QA-W-REM-NEG-L'");
+    const pedidos: string[][] = [];
+    const encolados: string[] = [];
+    const deps = {
+      pool,
+      redis: {} as Dependencias["redis"],
+      invalidar: async () => {},
+      cola: { add: async (n: string) => { encolados.push(n); return {} as never; } },
+      stocker: {
+        stock: async (skus: string[]) => {
+          pedidos.push([...skus].sort());
+          return { generado: ahora(), stock: { "QA-W-REM-NEG-M": 1 }, desconocidos: ["QA-W-REM-NEG-L"] };
+        },
+      },
+    } as unknown as Dependencias;
+    const stock = crearProcesadores(deps).stocker!.stock!;
+    const log = console.warn;
+    console.warn = () => {};
+    try {
+      // 11 y 12 son de la tienda; 999 es una variante que la tienda todavía no tiene.
+      const r = await stock({ data: { variantes: [BASE + 11, BASE + 12, BASE + 999] } } as never) as Record<string, number>;
+      expect(pedidos).toEqual([["QA-W-REM-NEG-L", "QA-W-REM-NEG-M"]]);
+      expect(r).toMatchObject({ variantesNuevas: 1, desconocidosEnStocker: 1 });
+    } finally { console.warn = log; }
+    expect(encolados).toContain("catalogo");
+    const v = Object.fromEntries((await vars(BASE + 1)).map((x) => [x.sku, x.stock]));
+    // El que Stocker no conoce queda como estaba: no pasa a «sin stock».
+    expect(v).toMatchObject({ "QA-W-REM-NEG-M": 1, "QA-W-REM-NEG-L": 4, "QA-W-REM-BLA-M": 2 });
+  });
+});
+
 describe("cliente de Stocker", () => {
   let server: http.Server;
   let url = "";
@@ -214,17 +256,47 @@ describe("cliente de Stocker", () => {
   const cli = () => crearClienteStocker({ url, token: "t".repeat(43) });
 
   it("manda la credencial y convierte pesos a centavos", async () => {
-    respuesta = { status: 200, cuerpo: { negocio: 1, generado: ahora(), sinLocalesOnline: false, productos: [{
-      id: 1, sku: "A", titulo: "A", descripcion: null, categoria: null, genero: null, modelo: null, precio: "12000.50",
-      variantes: [{ id: 2, sku: "A-1", color: " ", talle: "M", precio: null, cantidad: 1 }],
+    respuesta = { status: 200, cuerpo: { negocio: 1, generadoEn: ahora(), truncado: false, sinLocalesOnline: false, productos: [{
+      id: 1, skuAgrupador: "A", titulo: "A", descripcion: null, categoria: null, genero: null, modelo: null, precioMinorista: "12000.50", precioMayorista: 6000,
+      variantes: [{ id: 2, sku: "A-1", color: " ", talle: "M", precioMinorista: null, precioMayorista: null, publicable: 1, activo: true }],
     }] } };
     const c = await cli().catalogo();
     expect(vistos.at(-1)).toEqual({ url: "/api/integraciones/tienda/catalogo", auth: `Bearer ${"t".repeat(43)}` });
     expect(c.productos[0]!.precio).toBe(1200050);
+    expect(c.productos[0]!.sku).toBe("A");
     expect(c.productos[0]!.variantes[0]!.color).toBeNull();
+    expect(c.productos[0]!.variantes[0]!.cantidad).toBe(1);
+  });
+  it("lee la respuesta real de Stocker (contrato v1): publicable, activo y precio minorista", async () => {
+    // Recorte de GET /api/integraciones/tienda/catalogo de Stocker (04/10/2026).
+    respuesta = { status: 200, cuerpo: {
+      negocio: 2, truncado: false, sinLocalesOnline: false, generadoEn: "2026-10-04T06:48:40.252Z",
+      productos: [{
+        id: 16, skuAgrupador: "ISUABEPAN", titulo: "Abel Pantalón Hombre", precioMinorista: 32000, precioMayorista: 16000,
+        descripcion: null, categoria: "Pantalones", modelo: "ABEL", genero: null,
+        variantes: [
+          { id: 101, sku: "ISUABEPANNEGL", color: "Negro", talle: "L", precioMinorista: 32000, precioMayorista: 16000, publicable: 1002, activo: true },
+          { id: 102, sku: "ISUABEPANMOLL", color: "Moline", talle: "L", precioMinorista: 32000, precioMayorista: 16000, publicable: 0, activo: true },
+          { id: 103, sku: "ISUABEPANTOPL", color: "Topo", talle: "L", precioMinorista: 32000, precioMayorista: 16000, publicable: -2, activo: true },
+          { id: 104, sku: "ISUABEPANCACL", color: "CAC", talle: "L", precioMinorista: 32000, precioMayorista: 16000, publicable: 5, activo: false },
+        ],
+      }],
+    } };
+    const c = await cli().catalogo();
+    expect(c.negocio).toBe(2);
+    expect(c.generado).toBe("2026-10-04T06:48:40.252Z");
+    expect(c.truncado).toBe(false);
+    const p = c.productos[0]!;
+    expect({ sku: p.sku, precio: p.precio, modelo: p.modelo, genero: p.genero }).toEqual({ sku: "ISUABEPAN", precio: 3_200_000, modelo: "ABEL", genero: null });
+    // La dada de baja no viene; el publicable negativo (más reservado que stock) es 0.
+    expect(p.variantes.map((v) => [v.sku, v.cantidad, v.precio])).toEqual([["ISUABEPANNEGL", 1002, 3_200_000], ["ISUABEPANMOLL", 0, 3_200_000], ["ISUABEPANTOPL", 0, 3_200_000]]);
+  });
+  it("un catálogo cortado (truncado) se avisa", async () => {
+    respuesta = { status: 200, cuerpo: { negocio: 1, generadoEn: ahora(), truncado: true, sinLocalesOnline: false, productos: [] } };
+    expect((await cli().catalogo()).truncado).toBe(true);
   });
   it("un formato inesperado es un error claro, no basura en la base", async () => {
-    respuesta = { status: 200, cuerpo: { negocio: 1, generado: ahora(), sinLocalesOnline: false, productos: [{ id: "x" }] } };
+    respuesta = { status: 200, cuerpo: { negocio: 1, generadoEn: ahora(), sinLocalesOnline: false, productos: [{ id: "x" }] } };
     await expect(cli().catalogo()).rejects.toThrow(/formato inesperado/);
   });
   it("401 dice que la credencial está mal", async () => {
@@ -236,9 +308,11 @@ describe("cliente de Stocker", () => {
     await expect(cli().catalogo()).rejects.toThrow(/no responde/);
   });
   it("stock: pide los SKU y valida la respuesta", async () => {
-    respuesta = { status: 200, cuerpo: { generado: ahora(), stock: { "A-1": 3 } } };
+    respuesta = { status: 200, cuerpo: { generadoEn: ahora(), stock: { "A-1": 3 }, desconocidos: ["B,2"] } };
     const s = await cli().stock(["A-1", "B,2"]);
     expect(s.stock).toEqual({ "A-1": 3 });
+    // El desconocido no vuelve como 0: queda aparte.
+    expect(s.desconocidos).toEqual(["B,2"]);
     expect(vistos.at(-1)?.url).toBe("/api/integraciones/tienda/stock?skus=A-1%2CB%2C2");
     await expect(cli().stock(Array.from({ length: 201 }, (_, i) => `S${i}`))).rejects.toThrow(RangeError);
   });
@@ -252,23 +326,25 @@ describe("escucha de avisos", () => {
   };
 
   it("junta los avisos seguidos, filtra por negocio e ignora basura", async () => {
-    const tandas: string[][] = [];
-    const e = escucharStocker({ url: URL, negocio: async () => 1, alCambiar: (s) => { tandas.push(s.sort()); }, alReconectar: () => {}, esperaMs: 150, log: { warn() {}, error() {} } });
+    const tandas: number[][] = [];
+    const e = escucharStocker({ url: URL, negocio: async () => 1, alCambiar: (s) => { tandas.push(s.sort((a, b) => a - b)); }, alReconectar: () => {}, esperaMs: 150, log: { warn() {}, error() {} } });
     await esperarQue(() => e.conectado());
     await new Promise((r) => setTimeout(r, 100));
-    await notificar(JSON.stringify({ b: 1, s: ["A", "B"] }));
-    await notificar(JSON.stringify({ b: 1, s: ["B", "C"] }));
-    await notificar(JSON.stringify({ b: 2, s: ["DE-OTRO"] }));
-    await notificar("{no es json");
-    await notificar(JSON.stringify({ b: 1, s: "no es lista" }));
+    await notificar("1:11");
+    await notificar("1:12");
+    await notificar("1:11");
+    await notificar("2:99");
+    await notificar("{no es el formato");
+    await notificar("1:-3");
+    await notificar("1:abc");
     await esperarQue(() => tandas.length > 0);
     await e.parar();
-    expect(tandas).toEqual([["A", "B", "C"]]);
+    expect(tandas).toEqual([[11, 12]]);
   });
 
   it("si se corta la conexión, reconecta y pide el catálogo", async () => {
     let reconexiones = 0;
-    const tandas: string[][] = [];
+    const tandas: number[][] = [];
     const e = escucharStocker({ url: URL, negocio: async () => null, alCambiar: (s) => { tandas.push(s); }, alReconectar: () => { reconexiones++; }, esperaMs: 50, log: { warn() {}, error() {} } });
     await esperarQue(() => e.conectado());
     // Se le corta la conexión desde el servidor (como un reinicio de Postgres o un corte de red).
@@ -276,10 +352,10 @@ describe("escucha de avisos", () => {
     await esperarQue(() => reconexiones > 0, 8000);
     expect(reconexiones).toBe(1);
     await new Promise((r) => setTimeout(r, 100));
-    await notificar(JSON.stringify({ b: 9, s: ["X"] }));
+    await notificar("9:77");
     await esperarQue(() => tandas.length > 0);
     await e.parar();
-    expect(tandas).toEqual([["X"]]);
+    expect(tandas).toEqual([[77]]);
   });
 });
 

@@ -41,7 +41,7 @@ con sus pruebas (`test-tienda-online.cjs`, `test-tienda-pedidos.cjs`, `test-tien
   | `429` | Espera creciente (1 s, 2 s, 4 s… hasta 60 s), sin pasar de 10 por segundo |
 
 - **§ 5, los nombres de Stocker:** `pedidoExterno`, `precioMinorista` (la tienda usa ése y no lee el mayorista), `generadoEn`, la respuesta `{ pedidoExterno, estado, motivo, repetido }`, y `desconocidos` aparte en `/stock` (la tienda lo registra como error de catálogo, no como «sin stock»).
-- **§ 5 c, el aviso.** La tienda escucha `stock_cambio` (`<negocio>:<variante>`) y deja `stocker_stock`. Necesita el punto 3.1 para traducir la variante a la suya.
+- **§ 5 c, el aviso.** La tienda escucha `stock_cambio` (`<negocio>:<variante>`) y deja `stocker_stock`. Con el `id` de 3.1 traduce la variante a la suya (hecho).
 - **Alta de clientes: se descarta.** La tienda deja `PUT /clientes`. El comprador ya viaja en el pedido (`comprador: { nombre, documento, email }`), y así no queda una ruta de datos personales sólo para esto.
 
 ## 2. Lo que la tienda cambia de su lado
@@ -58,7 +58,9 @@ Antes de abrir, una prueba de punta a punta contra el Stocker real con una crede
 
 Ordenado por lo que bloquea primero. Ninguno es un ciclo de pedido inventado: son las cuatro cosas sin las que una tienda online no puede vender ni despachar.
 
-### 3.1 El `id` de la variante y del producto en el catálogo — bloquea todo
+### 3.1 El `id` de la variante y del producto en el catálogo — ✅ hecho (04/10/2026)
+
+> Stocker lo entregó con un JSON real del catálogo y del stock, y la tienda ya lo lee (tanda 1: catálogo, stock y aviso `stock_cambio`). Las formas y cómo se usa cada campo están en `contrato-stocker.md`. Quedan 3.2 a 3.4 para la tanda 2 (pedidos).
 
 El contrato ya lo considera razonable (§ 6, último párrafo):
 
@@ -136,8 +138,8 @@ B sirve como **puente**: abrir sólo con **Mercado Pago** (se paga en el momento
 
 | # | Qué | Quién | Bloquea |
 |---|---|---|---|
-| 3.1 | `id` de producto y variante en el catálogo, y un JSON de ejemplo | Stocker | Todo: sin esto no hay productos |
+| 3.1 | `id` de producto y variante en el catálogo, y un JSON de ejemplo | Stocker | ✅ Hecho: la tienda ya lee el catálogo, el stock y el aviso v1 |
 | 3.2 | Pago pendiente + `/cobros` (decidido: opción A) | Stocker | El checkout |
 | 3.3 | Guardar y mostrar el envío (tipo, corte, seguimiento) | Stocker | El despacho |
 | 3.4 | `/pedidos/resoluciones` de la tienda | Stocker | El aviso de despacho al cliente |
-| § 2 | Cliente de la tienda y simulador en contrato v1 | Tienda | — (se hace cuando Stocker confirme) |
+| § 2 | Cliente de la tienda y simulador en contrato v1 | Tienda | Catálogo, stock y aviso: ✅ hechos. Pedidos: cuando estén 3.2–3.4 |

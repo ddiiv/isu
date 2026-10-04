@@ -13,7 +13,7 @@ import type { Whatsapp } from "@isu/envios";
  *
  * stocker/catalogo  catálogo completo: al arrancar, cada 10 minutos y cuando
  *                   aparece un SKU que la tienda no conoce.
- * stocker/stock     stock de unos SKU, después de un aviso de Stocker.
+ * stocker/stock     stock de unas variantes (aviso stock_cambio de Stocker) o SKU (pedido).
  * stocker/latido    prueba de punta a punta (Redis → cola → worker).
  * stocker/pagado    avisarle a Stocker que un pedido se cobró (sin esto no se despacha).
  * stocker/cliente   alta o actualización del cliente en Stocker.
@@ -69,21 +69,36 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         if (r.cambios > 0) await d.invalidar(r.afectados);
         // Los renglones de stock son muchos (uno por venta): se guardan una semana.
         await d.pool.query("DELETE FROM tienda.sincronizaciones WHERE tipo = 'stock' AND inicio < now() - interval '7 days'");
-        return { ...r, afectados: r.afectados.length, sinLocalesOnline: cat.sinLocalesOnline };
+        if (cat.truncado) console.warn(`[stocker] el catálogo vino cortado (truncado): se aplicaron ${cat.productos.length} productos y no se dio de baja ninguno.`);
+        return { ...r, afectados: r.afectados.length, sinLocalesOnline: cat.sinLocalesOnline, truncado: cat.truncado };
       },
 
       stock: async (t) => {
         const d = necesita();
+        // El aviso de Stocker (stock_cambio) trae ids de variante; la API, después de un pedido, manda SKU.
+        const ids = Array.isArray(t.data?.variantes) ? (t.data.variantes as unknown[]).filter((n): n is number => Number.isInteger(n) && (n as number) > 0).slice(0, MAX_SKUS_POR_PEDIDO) : [];
         const skus = Array.isArray(t.data?.skus) ? (t.data.skus as unknown[]).filter((s): s is string => typeof s === "string").slice(0, MAX_SKUS_POR_PEDIDO) : [];
-        if (!skus.length) return { cambios: 0 };
-        const s = await d.stocker.stock(skus);
+        let variantesNuevas = 0;
+        if (ids.length) {
+          const { rows } = await d.pool.query<{ sku: string; stocker_id: number }>("SELECT sku, stocker_id FROM tienda.variantes WHERE stocker_id = ANY($1::int[])", [ids]);
+          for (const r of rows) if (!skus.includes(r.sku)) skus.push(r.sku);
+          variantesNuevas = ids.length - rows.length;
+        }
+        const catalogoNuevo = () => d.cola.add("catalogo", {}, { jobId: "catalogo-por-sku-nuevo", delay: 20_000, removeOnComplete: true, removeOnFail: true });
+        // Una variante que la tienda no conoce: producto recién cargado en Stocker. Un solo catálogo aunque lleguen muchos avisos.
+        if (variantesNuevas) await catalogoNuevo();
+        if (!skus.length) return { cambios: 0, variantesNuevas };
+        const s = await d.stocker.stock(skus.slice(0, MAX_SKUS_POR_PEDIDO));
         const r = await registrar(d.pool, "stock", async () => ({ ...(await aplicarStock(d.pool, s)), variantes: skus.length }));
         if (r.cambios > 0) await d.invalidar(r.afectados);
-        if (r.desconocidos.length) {
-          // Un SKU nuevo: producto recién cargado en Stocker. Un solo catálogo aunque lleguen muchos avisos.
-          await d.cola.add("catalogo", {}, { jobId: "catalogo-por-sku-nuevo", delay: 20_000, removeOnComplete: true, removeOnFail: true });
+        if (r.desconocidos.length && !variantesNuevas) await catalogoNuevo();
+        if (s.desconocidos.length) {
+          // Stocker no conoce un SKU que la tienda tiene: no es «sin stock», es un error de catálogo
+          // (un SKU corregido en Stocker). El stock de esa variante no se toca; el próximo catálogo la da de baja.
+          console.warn(`[stocker] SKU que Stocker no conoce: ${s.desconocidos.slice(0, 10).join(", ")}${s.desconocidos.length > 10 ? ` y ${s.desconocidos.length - 10} más` : ""}. Se pide el catálogo.`);
+          await catalogoNuevo();
         }
-        return { cambios: r.cambios, desconocidos: r.desconocidos.length };
+        return { cambios: r.cambios, desconocidos: r.desconocidos.length, desconocidosEnStocker: s.desconocidos.length, variantesNuevas };
       },
 
       pagado: async (t) => {
