@@ -54,14 +54,23 @@ Tres direcciones públicas, todas del servicio `isu`:
 ## Paso 2. Redis
 
 1. En el proyecto: **+ New → Database → Add Redis**. Dejale el nombre `Redis`.
-2. Configuración de una sola vez, **antes de conectar cualquier plataforma**. En Redis → *Data* (o la consola) corré:
+2. Configuración de una sola vez, **antes de conectar cualquier plataforma**: que no borre datos al llenarse y que guarde cada cambio en disco.
+
+   **a) En el arranque.** Redis → *Settings → Deploy → **Custom Start Command***. Ahí va **sólo** este comando, en una línea, y nada más:
    ```
-   CONFIG GET maxmemory-policy        → tiene que decir noeviction
-   CONFIG SET appendonly yes
-   CONFIG GET appendonly              → yes
+   /bin/sh -c "rm -rf $RAILWAY_VOLUME_MOUNT_PATH/lost+found/ && exec docker-entrypoint.sh redis-server --requirepass $REDIS_PASSWORD --save 60 1 --dir $RAILWAY_VOLUME_MOUNT_PATH --appendonly yes --maxmemory-policy noeviction"
    ```
-3. Para que no se pierda al reiniciar: Redis → *Settings → Deploy → Custom Start Command*. Si hay un comando que empieza con `redis-server`, agregale al final ` --appendonly yes --maxmemory-policy noeviction`, sin borrar nada de lo que ya tiene. Si no hay comando, repetí el `CONFIG SET` después de cada reinicio del Redis. La tienda avisa en el log (`[redis] …`) si alguna de las dos está mal.
-4. No le actives el *TCP Proxy* (acceso desde internet).
+   - Es el arranque de la plantilla de Redis de Railway, con `--appendonly yes --maxmemory-policy noeviction` al final.
+   - Antes de guardarlo, revisá en Redis → *Variables* que la contraseña se llame `REDIS_PASSWORD`. Si se llama distinto, cambiá ese nombre en el comando.
+   - ⚠️ **Los comandos `redis-cli` NO van acá.** Si se ponen en el Start Command, el contenedor corre eso en vez del Redis y queda caído (`Could not connect to Redis … Connection refused`).
+
+   **b) Comprobar, en la consola.** Cuando el deploy del Redis quede en verde: Redis → **Console**. Es una terminal del contenedor, no Redis: cada comando va con `redis-cli` y la contraseña que ya tiene el contenedor.
+   ```bash
+   redis-cli -a "${REDIS_PASSWORD:-$REDISPASSWORD}" --no-auth-warning CONFIG GET maxmemory-policy   # noeviction
+   redis-cli -a "${REDIS_PASSWORD:-$REDISPASSWORD}" --no-auth-warning CONFIG GET appendonly         # yes
+   ```
+   La tienda también lo revisa al arrancar y avisa en su log (`[redis] …`) si alguna de las dos está mal.
+3. No le actives el *TCP Proxy* (acceso desde internet).
 
 Detalle y reglas para las demás plataformas: `docs/redis-compartido.md`.
 
@@ -127,6 +136,8 @@ ADMIN_CLAVE_CIFRADO=<CLAVE_BASE64>
 
 MAYORISTA_URL=https://isumayoristapedidos-production.up.railway.app
 ```
+
+> **Los nombres de servicio dentro de `${{…}}` tienen que ser exactamente los de tu proyecto.** Acá dice `Postgres`, `Redis` y `stocker-backend`, pero Railway a veces les agrega un sufijo (por ejemplo `Redis-BU1C`) o se llaman distinto (`stockerback`). Si el nombre no existe, Railway deja la referencia **vacía** y la tienda no arranca («le falta el servidor»). Lo seguro es escribir `${{` en el valor y **elegir el servicio de la lista**.
 
 ### De dónde sale cada una
 
@@ -285,8 +296,11 @@ Tiene que terminar en **«Todo bien»**. Hasta que Stocker mande el catálogo, v
 | `password authentication failed for user "tienda_app"` | La clave de `DATABASE_URL` no es la del paso 3 | Corregila, o cambiala con `ALTER ROLE` |
 | `permission denied for schema tienda` | El paso 3 no se corrió completo | Correlo de nuevo (es seguro repetirlo) |
 | `[worker] … 401` con Stocker | `STOCKER_TOKEN` mal o revocado | Emití otra credencial (paso 5) |
-| `[worker] Catálogo de Stocker con formato inesperado` | Stocker todavía no manda lo que la tienda necesita | Ver `docs/respuesta-contrato-stocker.md`. No es de configuración |
-| `ECONNREFUSED` / `ENOTFOUND` con `stocker-backend` | Stocker no se encuentra por la red interna | Revisá el nombre del servicio y el puerto. Puede que Stocker escuche sólo por IPv4 y tenga que escuchar en `::` |
+| `[worker] Catálogo de Stocker con formato inesperado: …` | Stocker cambió la forma del catálogo | Después de los `:` dice qué campo. Pasáselo al agente de Stocker o de la tienda. No es de configuración |
+| `Stocker no responde en … (ENOTFOUND …)` | El nombre del servidor de `STOCKER_API_URL` no existe | Rehacé la referencia con el autocompletado: `${{` → el servicio del backend de Stocker → `RAILWAY_PRIVATE_DOMAIN` |
+| `Stocker no responde en … (ECONNREFUSED …)` | El servidor existe, pero no escucha en ese puerto | En el servicio de Stocker, mirá en qué puerto arranca (su log o su variable `PORT`) y poné ese número después de los `:` |
+| `Stocker no responde en … (no contestó …)` o `UND_ERR_CONNECT_TIMEOUT` | Stocker no escucha por la red interna (IPv6) | Stocker tiene que escuchar en `::`, no en `0.0.0.0`. Es un cambio en Stocker |
+| `Stocker no responde en … (ECONNRESET …)` | `STOCKER_API_URL` empieza con `https://` | Por la red interna va `http://` |
 | `[redis] appendonly=no` o `maxmemory-policy=…` | El Redis no está configurado | Paso 2 |
 | El servicio se reinicia solo | Probablemente memoria (las cuatro partes usan 600–900 MB) | *Metrics*. Subí el límite en *Settings → Resources* |
 

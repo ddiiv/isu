@@ -1,7 +1,32 @@
 # Contrato con Stocker
 
-> ⚠️ **Este documento describe lo que la tienda espera de Stocker, según el parche que se entregó en las etapas 1 a 5 (`stocker-backend-tienda-acumulado.patch`). Ese parche no se aplicó.**
-> Lo que Stocker tiene hoy está en [`contrato-movimientos-stocker-v1.md`](contrato-movimientos-stocker-v1.md), y lo que falta para que se entiendan, en [`respuesta-contrato-stocker.md`](respuesta-contrato-stocker.md).
+> ⚠️ **Desde la etapa 1 hasta la 5, este documento describía el parche entregado (`stocker-backend-tienda-acumulado.patch`), que no se aplicó.** Lo que Stocker tiene hoy está en [`contrato-movimientos-stocker-v1.md`](contrato-movimientos-stocker-v1.md). Lo que falta para que se entiendan está en [`respuesta-contrato-stocker.md`](respuesta-contrato-stocker.md).
+>
+> **El catálogo, el stock y el aviso ya están en el contrato v1** (tanda 1, abajo). Los pedidos todavía usan las rutas del parche (tanda 2, cuando Stocker entregue § 3.2–3.4 de la respuesta).
+
+## Catálogo, stock y aviso: lo que la tienda lee hoy (contrato v1)
+
+Formas tomadas de una respuesta real de Stocker (04/10/2026):
+
+- `GET /api/integraciones/tienda/catalogo` → `{ negocio, productos: [{ id, skuAgrupador, titulo, precioMinorista, precioMayorista, descripcion, categoria, modelo, genero, variantes: [{ id, sku, color, talle, precioMinorista, precioMayorista, publicable, activo }] }], truncado, sinLocalesOnline, generadoEn }`.
+- `GET /api/integraciones/tienda/stock?skus=A,B` (hasta 200) → `{ stock: { A: 32 }, desconocidos: ["B"], generadoEn }`.
+- `NOTIFY stock_cambio, '<negocio>:<variante>'`, uno por variante, también al apartar y al liberar una reserva.
+
+Cómo los usa la tienda (`packages/stocker`, `apps/worker/src/stocker`):
+
+| Stocker | Tienda |
+|---|---|
+| `id` (producto y variante) | `stocker_id`: la clave que no cambia aunque se corrija un SKU |
+| `skuAgrupador` | SKU del producto (`stocker_padre`) |
+| `precioMinorista` (pesos) | precio, en centavos. El de la variante pisa el del producto. **El mayorista no se lee.** |
+| `publicable` | stock que muestra la tienda. Un negativo (más reservado que stock) cuenta como 0. |
+| `activo: false` | la variante no se vende: es como si no viniera, y se desactiva |
+| `truncado: true` | la lista vino cortada: se aplica lo que vino y **no se da de baja nada** (se avisa en el log) |
+| `generadoEn` | un dato viejo nunca pisa uno nuevo |
+| `desconocidos` | **no es «sin stock»**: el stock de esa variante no se toca, se avisa en el log (`[stocker] SKU que Stocker no conoce`) y se pide el catálogo, que la da de baja si de verdad no existe |
+| `stock_cambio` | se filtra por negocio, se juntan ~1 s de avisos, la variante se traduce a su SKU y se pide `/stock`. Una variante que la tienda no tiene → catálogo (producto nuevo) |
+
+Lo que sigue abajo es la historia del parche.
 
 La tienda es un canal online más de Stocker, como Mercado Libre y Jumpseller,
 y publica **el mismo número**: lo disponible en los locales que abastecen

@@ -17,7 +17,7 @@ const BASE = 7_450_000;
 /* Stocker: tres productos. Los SKU de variante son los de las combinaciones del mayorista. */
 const variante = (id: number, sku: string, color: string | null, talle: string) => ({ id, sku, color, talle, precio: 1_000_000, cantidad: 3 });
 const stocker: CatalogoStocker = {
-  negocio: 1, generado: new Date().toISOString(), sinLocalesOnline: false,
+  negocio: 1, generado: new Date().toISOString(), truncado: false, sinLocalesOnline: false,
   productos: [
     { id: BASE + 1, sku: "ISUCLOREM", titulo: "Cloe Musculosa Dama", descripcion: null, categoria: "Remeras", genero: "Mujer", modelo: null, precio: 1_000_000,
       variantes: [variante(BASE + 11, "ISUCLOREMNEGS", "Negro", "S"), variante(BASE + 12, "ISUCLOREMNEGUNI", "Negro", "Único"), variante(BASE + 13, "ISUCLOREMBLAUNI", "Blanco", "Único")] },

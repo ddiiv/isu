@@ -87,16 +87,16 @@ Redis tiene bases numeradas (0 a 15) dentro del mismo servidor. **Cada plataform
 
 Como este Redis tiene las colas de reintento de ventas y cobros, esto **no es opcional**: si borra datos al llenarse o no guarda en disco, se pierden reintentos. El movimiento sigue en la base de la plataforma, pero hay que reenviarlo a mano.
 
-En Railway → servicio **Redis** → *Data* (o la consola con `redis-cli`):
+En Railway → servicio **Redis** → **Console**. Es una terminal del contenedor, no Redis: cada comando va con `redis-cli` y la contraseña que ya tiene el contenedor (si dice `NOAUTH`, `env | grep -i pass` muestra cómo se llama la variable):
 
-```
-CONFIG GET maxmemory-policy        → tiene que decir noeviction
-CONFIG SET appendonly yes          → guarda cada cambio en disco (no se pierden trabajos al reiniciar)
-CONFIG GET appendonly              → yes
-INFO keyspace                      → qué bases se están usando y cuántas claves tiene cada una
+```bash
+redis-cli -a "${REDIS_PASSWORD:-$REDISPASSWORD}" --no-auth-warning CONFIG GET maxmemory-policy   # tiene que decir noeviction
+redis-cli -a "${REDIS_PASSWORD:-$REDISPASSWORD}" --no-auth-warning CONFIG SET appendonly yes   # guarda cada cambio en disco (no se pierden trabajos al reiniciar)
+redis-cli -a "${REDIS_PASSWORD:-$REDISPASSWORD}" --no-auth-warning CONFIG GET appendonly   # yes
+redis-cli -a "${REDIS_PASSWORD:-$REDISPASSWORD}" --no-auth-warning INFO keyspace   # qué bases se están usando y cuántas claves tiene cada una
 ```
 
-- **Que no se pierda al reiniciar.** `CONFIG SET` dura hasta que el Redis se reinicia. Para que quede fijo: Redis → *Settings → Deploy → Custom Start Command*. Si ahí hay un comando que empieza con `redis-server`, **agregale al final** `--appendonly yes --maxmemory-policy noeviction` (no borres nada de lo que ya tiene, como la contraseña o la carpeta de datos). Si no hay comando, dejalo como está y repetí el `CONFIG SET` después de cada reinicio del Redis.
+- **Que quede fijo aunque el Redis se reinicie:** en Redis → *Settings → Deploy → Custom Start Command* va **sólo** el arranque del Redis con las dos opciones al final (el comando exacto está en `subir-a-railway.md`, paso 2). **Los `redis-cli` de arriba van en la consola, nunca en el Start Command:** ahí reemplazarían al Redis y lo dejarían caído.
 - **Aviso automático de la tienda.** Al arrancar, revisa estas dos opciones y avisa en su log (`[redis] …`) si alguna no está bien.
 - **Mantenimiento:**
   - no le actives el *TCP Proxy* (acceso desde internet);

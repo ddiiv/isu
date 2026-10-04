@@ -165,8 +165,8 @@ test.describe("backoffice de envíos", () => {
 /** Un SKU de muestra con stock de sobra (pregunta al Stocker simulado). */
 async function skuConStock(request: APIRequestContext) {
   const token = delEnv("STOCKER_TOKEN");
-  const cat = await (await request.get(`${STOCKER}/api/integraciones/tienda/catalogo`, { headers: { authorization: `Bearer ${token}` } })).json() as { productos: Array<{ variantes: Array<{ sku: string; cantidad: number }> }> };
-  const v = cat.productos.flatMap((p) => p.variantes).find((x) => x.cantidad > 3);
+  const cat = await (await request.get(`${STOCKER}/api/integraciones/tienda/catalogo`, { headers: { authorization: `Bearer ${token}` } })).json() as { productos: Array<{ variantes: Array<{ sku: string; publicable: number }> }> };
+  const v = cat.productos.flatMap((p) => p.variantes).find((x) => x.publicable > 3);
   if (!v) throw new Error("sin stock de sobra en el Stocker simulado");
   return v.sku;
 }

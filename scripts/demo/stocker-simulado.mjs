@@ -1,5 +1,9 @@
 /*
- * Stocker simulado: las dos rutas que usa la tienda, con el catálogo de muestra.
+ * Stocker simulado: las rutas que usa la tienda, con el catálogo de muestra.
+ * Catálogo, stock y aviso con las formas del contrato v1 de Stocker
+ * (skuAgrupador, precioMinorista, publicable, generadoEn, desconocidos y
+ * NOTIFY stock_cambio '<negocio>:<variante>'). Los pedidos, todavía con las
+ * formas anteriores (tanda 2).
  *
  *   GET  /api/integraciones/tienda/catalogo
  *   GET  /api/integraciones/tienda/stock?skus=A,B
@@ -31,7 +35,11 @@ const catalogo = process.env.DEMO_MAYORISTA ? catalogoDesdeMayorista(JSON.parse(
 const porSku = new Map(catalogo.flatMap((p) => p.variantes.map((v) => [v.sku, v])));
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 }) : null;
 const pedidos = new Map();
-const avisar = async (skus) => { if (pool) await pool.query("SELECT pg_notify('stocker_stock', $1)", [JSON.stringify({ b: NEGOCIO, s: skus })]); };
+// Un aviso por variante, como el Stocker real (NOTIFY stock_cambio, '<negocio>:<variante>').
+const avisar = async (skus) => {
+  if (!pool) return;
+  for (const sku of new Set(skus)) { const v = porSku.get(sku); if (v) await pool.query("SELECT pg_notify('stock_cambio', $1)", [`${NEGOCIO}:${v.id}`]); }
+};
 const leerJson = async (req) => { let b = ""; for await (const c of req) { b += c; if (b.length > 100_000) break; } try { return JSON.parse(b || "{}"); } catch { return {}; } };
 const resumen = (p) => ({
   id: p.id, pedido: p.pedido, estado: p.estado, pagoPendiente: p.pagoPendiente, envioTipo: p.envio?.tipo ?? null, envioId: p.envio?.seguimiento ?? null,
@@ -61,7 +69,7 @@ http.createServer(async (req, res) => {
     const v = porSku.get(sku);
     if (!v) return json(res, 404, { message: "SKU inexistente" });
     v.cantidad = Math.max(0, v.cantidad - Number(cantidad));
-    if (pool) await pool.query("SELECT pg_notify('stocker_stock', $1)", [JSON.stringify({ b: NEGOCIO, s: [sku] })]);
+    await avisar([sku]);
     return json(res, 200, { sku, cantidad: v.cantidad });
   }
   // ── Envíos del día (simulado, sólo desde la misma máquina) ──
@@ -84,9 +92,17 @@ http.createServer(async (req, res) => {
   if (url.pathname.endsWith("/catalogo")) {
     return json(res, 200, {
       negocio: NEGOCIO,
-      generado: new Date().toISOString(),
+      productos: catalogo.map((p) => ({
+        id: p.id, skuAgrupador: p.sku, titulo: p.titulo, precioMinorista: p.precio, precioMayorista: p.precio === null ? null : Math.round(p.precio / 2),
+        descripcion: p.descripcion ?? null, categoria: p.categoria ?? null, modelo: p.modelo ?? null, genero: p.genero ?? null,
+        variantes: p.variantes.map((v) => ({
+          id: v.id, sku: v.sku, color: v.color ?? null, talle: v.talle ?? null, precioMinorista: v.precio ?? null,
+          precioMayorista: (v.precio ?? null) === null ? null : Math.round(v.precio / 2), publicable: v.cantidad, activo: true,
+        })),
+      })),
+      truncado: false,
       sinLocalesOnline: false,
-      productos: catalogo.map(({ forma: _f, ...p }) => p),
+      generadoEn: new Date().toISOString(),
     });
   }
   // ── Pedidos de la tienda (como el parche de Stocker: aparta todo o nada) ──
@@ -137,7 +153,8 @@ http.createServer(async (req, res) => {
   if (url.pathname.endsWith("/stock")) {
     const skus = (url.searchParams.getAll("skus").join(",")).split(",").map((s) => s.trim()).filter(Boolean);
     if (skus.length > 200) return json(res, 400, { message: "Como mucho 200 SKU por pedido." });
-    return json(res, 200, { generado: new Date().toISOString(), stock: Object.fromEntries(skus.map((s) => [s, porSku.get(s)?.cantidad ?? 0])) });
+    const conocidos = skus.filter((s) => porSku.has(s));
+    return json(res, 200, { stock: Object.fromEntries(conocidos.map((s) => [s, porSku.get(s).cantidad])), desconocidos: skus.filter((s) => !porSku.has(s)), generadoEn: new Date().toISOString() });
   }
   return json(res, 404, { message: "No existe." });
 }).listen(PUERTO, "127.0.0.1", () => console.warn(`Stocker simulado en http://127.0.0.1:${PUERTO} (${catalogo.length} productos)`));

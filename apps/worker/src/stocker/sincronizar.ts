@@ -122,7 +122,9 @@ export async function aplicarCatalogo(pool: pg.Pool, cat: CatalogoStocker): Prom
   }
 
   // Lo que ya no viene de Stocker (baja, pasó a feria, quedó sin precio) se esconde. No se borra:
-  // conserva sus fotos y su slug por si vuelve.
+  // conserva sus fotos y su slug por si vuelve. Con la lista cortada (`truncado`) no se sabe qué
+  // faltó de verdad: no se da de baja nada.
+  if (cat.truncado) { res.afectados = [...afectados]; return res; }
   const ids = vendibles.map((p) => p.id);
   const bajas = await pool.query<{ slug: string }>(
     `UPDATE tienda.productos SET en_stocker = false, actualizado_en = now()
@@ -295,7 +297,7 @@ export interface ResultadoStock {
   desconocidos: string[];
 }
 
-export async function aplicarStock(pool: pg.Pool, s: StockStocker): Promise<ResultadoStock> {
+export async function aplicarStock(pool: pg.Pool, s: Pick<StockStocker, "generado" | "stock">): Promise<ResultadoStock> {
   const skus = Object.keys(s.stock);
   if (!skus.length) return { cambios: 0, afectados: [], desconocidos: [] };
   const conocidos = await pool.query<{ sku: string }>("SELECT sku FROM tienda.variantes WHERE sku = ANY($1::text[])", [skus]);

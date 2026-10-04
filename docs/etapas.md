@@ -13,6 +13,25 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 6 | Importación del catálogo del sitio mayorista (fotos por color, foto principal, categorías, colores) y cupones de descuento / promociones por monto | **Cerrada** (abajo) |
 | 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
 
+## Contrato v1 de Stocker · tanda 1: catálogo, stock y aviso (04/10/2026)
+
+Con el JSON real del catálogo y del stock que mandó Stocker (punto 3.1 de [`respuesta-contrato-stocker.md`](respuesta-contrato-stocker.md)). Detalle de cada campo en [`contrato-stocker.md`](contrato-stocker.md).
+
+- **Catálogo** (`packages/stocker`):
+  - lee `skuAgrupador`, `precioMinorista` (no el mayorista), `publicable`, `activo` y `generadoEn`;
+  - una variante con `activo: false` no se vende;
+  - un `publicable` negativo cuenta como 0.
+- **`truncado`:** si la lista vino cortada, no se da de baja nada de lo que faltó, y se avisa en el log.
+- **Stock:** un SKU en `desconocidos` no pasa a «sin stock». Se avisa en el log y se pide el catálogo.
+- **Aviso en vivo:** `LISTEN stock_cambio` (`<negocio>:<variante>`) reemplaza a `stocker_stock`. La variante se traduce a su SKU por `stocker_id`, y una variante que la tienda no tiene dispara el catálogo.
+- **Errores de conexión:** «Stocker no responde» ahora dice la causa (`ENOTFOUND`, `ECONNREFUSED`, tiempo agotado…) y qué revisar en `STOCKER_API_URL`.
+- **Simulador:** el Stocker simulado de las pruebas habla v1 en catálogo, stock y aviso. Los pedidos siguen con las formas viejas hasta la tanda 2 (3.2–3.4).
+- **Verificado** desde una copia limpia:
+  - lint y tipos;
+  - 423 pruebas unitarias, con 4 nuevas (la respuesta real de Stocker, `truncado` en el cliente y en la base, y el trabajo de stock por variante con `desconocidos`), más las del aviso y del stock pasadas a v1;
+  - 117 pruebas en navegador;
+  - diagnóstico «Todo bien», seguridad y seo.
+
 ## Despliegue en un solo servicio (02/10/2026)
 
 - `infra/railway/todo.json` + `scripts/todo-en-uno.mjs`: la tienda entera en **un** servicio de Railway (más un Redis), para planes con pocos servicios. Guía: [`un-servicio.md`](un-servicio.md).
