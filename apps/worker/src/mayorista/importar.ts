@@ -4,7 +4,7 @@ import type pg from "pg";
 import { z } from "zod";
 import { aSlug, FOTOS_POR_COLOR, proponerCategorias } from "@isu/shared";
 import type { Almacen } from "../fotos/almacen.js";
-import { guardarFoto } from "../fotos/importar.js";
+import { esTraba, guardarFoto } from "../fotos/importar.js";
 import { FotoInvalida, MAX_BYTES, procesarFoto } from "../fotos/procesar.js";
 import { AJUSTES, CATEGORIAS, type Ajuste } from "./decisiones.js";
 
@@ -323,6 +323,8 @@ export interface Resultado {
   fotosOmitidas: Array<{ sku: string; foto: string; motivo: string }>;
   ocultados: string[];
   mostrados: string[];
+  /** Productos que no se pudieron tocar (la base estuvo ocupada con ellos): se reintentan en la próxima corrida. */
+  fallidos: Array<{ sku: string; motivo: string }>;
   /** slugs para regenerar */
   slugs: string[];
 }
@@ -335,52 +337,31 @@ export interface Resultado {
  */
 export async function aplicar(
   pool: pg.Pool, almacen: Almacen, plan: Plan, descargar: Descargar,
-  o: { reemplazar?: boolean; log?: (s: string) => void; paralelo?: number } = {},
+  o: { reemplazar?: boolean; log?: (s: string) => void; paralelo?: number; reintentos?: number; esperaMs?: number; esperaBloqueoMs?: number } = {},
 ): Promise<Resultado> {
   const log = o.log ?? (() => {});
-  const res: Resultado = { productos: 0, fotosSubidas: 0, fotosOmitidas: [], ocultados: [], mostrados: [], slugs: [] };
+  const res: Resultado = { productos: 0, fotosSubidas: 0, fotosOmitidas: [], ocultados: [], mostrados: [], fallidos: [], slugs: [] };
+  const reintentos = o.reintentos ?? 5;
   for (const p of plan.productos) {
     log(`${p.sku} · ${p.nombre}`);
-    const cli = await pool.connect();
-    let teniaFotos: boolean;
-    try {
-      await cli.query("BEGIN");
-      await cli.query("SELECT 1 FROM tienda.productos WHERE id = $1 FOR UPDATE", [p.productoId]);
-      if (p.categoriaIds.length) {
-        await cli.query("DELETE FROM tienda.producto_categorias WHERE producto_id = $1", [p.productoId]);
-        await cli.query("INSERT INTO tienda.producto_categorias (producto_id, categoria_id) SELECT $1, unnest($2::int[])", [p.productoId, p.categoriaIds]);
-        // Fijas: la sincronización con Stocker ya no las recalcula.
-        await cli.query("UPDATE tienda.productos SET categoria_id = $2, categorias_fijas = true, actualizado_en = now() WHERE id = $1", [p.productoId, p.categoriaIds[0]]);
+    // Si la base está ocupada con este producto (la sincronización con Stocker lo está escribiendo),
+    // se espera y se reintenta; si sigue, se saltea y se sigue con los demás. Nunca se corta todo.
+    let teniaFotos: boolean | null = null;
+    for (let intento = 1; teniaFotos === null; intento++) {
+      try {
+        teniaFotos = await prepararProducto(pool, p, !!o.reemplazar, almacen, o.esperaBloqueoMs ?? 5000);
+      } catch (e) {
+        if (!esTraba(e)) throw e;
+        if (intento >= reintentos) break;
+        const ms = (o.esperaMs ?? 2000) * 2 ** (intento - 1);
+        log(`  … la base está ocupada con este producto; reintento en ${Math.round(ms / 1000)} s`);
+        await new Promise((r) => setTimeout(r, ms));
       }
-      for (const c of p.colores) {
-        await cli.query(
-          `UPDATE tienda.producto_colores SET hex = COALESCE($3, hex),
-                  nombre = CASE WHEN $4 THEN $2 ELSE nombre END, nombre_fijo = nombre_fijo OR $4
-            WHERE id = $1`,
-          [c.id, c.nombre.slice(0, 60), c.hex, c.nombreFijo],
-        );
-      }
-      if (p.soloTalles) {
-        await cli.query(
-          `UPDATE tienda.variantes SET oculta = x.oculta, activo = CASE WHEN x.oculta THEN false ELSE activo END, actualizado_en = now()
-             FROM (SELECT id, NOT (COALESCE(talle, '') = ANY($2::text[])) AS oculta FROM tienda.variantes WHERE producto_id = $1) x
-            WHERE tienda.variantes.id = x.id AND tienda.variantes.oculta IS DISTINCT FROM x.oculta`,
-          [p.productoId, p.soloTalles],
-        );
-      }
-      if (o.reemplazar && p.fotos.length) {
-        const viejas = await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 RETURNING clave", [p.productoId]);
-        await cli.query("COMMIT");
-        for (const v of viejas.rows) for (const w of [400, 800, 1200]) await almacen.borrar(`${v.clave}-${w}.webp`).catch(() => {});
-      } else {
-        await cli.query("COMMIT");
-      }
-      teniaFotos = !!(await pool.query("SELECT 1 FROM tienda.fotos WHERE producto_id = $1 LIMIT 1", [p.productoId])).rowCount;
-    } catch (e) {
-      await cli.query("ROLLBACK").catch(() => {});
-      throw e;
-    } finally {
-      cli.release();
+    }
+    if (teniaFotos === null) {
+      res.fallidos.push({ sku: p.sku, motivo: "la base estuvo ocupada con este producto" });
+      log("  ✗ salteado: la base estuvo ocupada con este producto (volvé a correr la importación)");
+      continue;
     }
 
     // Se adelantan unas pocas (la descarga va en fila; el procesado, en paralelo); el guardado, en orden.
@@ -430,6 +411,53 @@ export async function aplicar(
     res.slugs.push(p.slug);
   }
   return res;
+}
+
+/** Categorías, colores y talles del producto, en una transacción corta. Devuelve si ya tenía fotos. */
+async function prepararProducto(pool: pg.Pool, p: Plan["productos"][number], reemplazar: boolean, almacen: Almacen, esperaBloqueoMs: number): Promise<boolean> {
+  const cli = await pool.connect();
+  try {
+    await cli.query("BEGIN");
+    // Esperar un bloqueo, como mucho 5 s: después se reintenta el producto entero (ver aplicar).
+    await cli.query("SELECT set_config('lock_timeout', $1, true)", [`${Math.max(1, Math.round(esperaBloqueoMs))}ms`]);
+    await cli.query("SELECT 1 FROM tienda.productos WHERE id = $1 FOR UPDATE", [p.productoId]);
+    if (p.categoriaIds.length) {
+      await cli.query("DELETE FROM tienda.producto_categorias WHERE producto_id = $1", [p.productoId]);
+      await cli.query("INSERT INTO tienda.producto_categorias (producto_id, categoria_id) SELECT $1, unnest($2::int[])", [p.productoId, p.categoriaIds]);
+      // Fijas: la sincronización con Stocker ya no las recalcula.
+      await cli.query("UPDATE tienda.productos SET categoria_id = $2, categorias_fijas = true, actualizado_en = now() WHERE id = $1", [p.productoId, p.categoriaIds[0]]);
+    }
+    for (const c of p.colores) {
+      await cli.query(
+        `UPDATE tienda.producto_colores SET hex = COALESCE($3, hex),
+                nombre = CASE WHEN $4 THEN $2 ELSE nombre END, nombre_fijo = nombre_fijo OR $4
+          WHERE id = $1
+            AND (hex, nombre, nombre_fijo) IS DISTINCT FROM (COALESCE($3, hex), CASE WHEN $4 THEN $2 ELSE nombre END, nombre_fijo OR $4)`,
+        [c.id, c.nombre.slice(0, 60), c.hex, c.nombreFijo],
+      );
+    }
+    if (p.soloTalles) {
+      await cli.query(
+        `UPDATE tienda.variantes SET oculta = x.oculta, activo = CASE WHEN x.oculta THEN false ELSE activo END, actualizado_en = now()
+           FROM (SELECT id, NOT (COALESCE(talle, '') = ANY($2::text[])) AS oculta FROM tienda.variantes WHERE producto_id = $1) x
+          WHERE tienda.variantes.id = x.id AND tienda.variantes.oculta IS DISTINCT FROM x.oculta`,
+        [p.productoId, p.soloTalles],
+      );
+    }
+    if (reemplazar && p.fotos.length) {
+      const viejas = await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 RETURNING clave", [p.productoId]);
+      await cli.query("COMMIT");
+      for (const v of viejas.rows) for (const w of [400, 800, 1200]) await almacen.borrar(`${v.clave}-${w}.webp`).catch(() => {});
+    } else {
+      await cli.query("COMMIT");
+    }
+  } catch (e) {
+    await cli.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    cli.release();
+  }
+  return !!(await pool.query("SELECT 1 FROM tienda.fotos WHERE producto_id = $1 LIMIT 1", [p.productoId])).rowCount;
 }
 
 /** El plan en texto, para revisarlo antes de aplicarlo. */

@@ -16,9 +16,9 @@ import { FotoInvalida, MAX_BYTES, procesarFoto, type FotoProcesada } from "./pro
  * El color se busca por nombre ("Verde Militar", "verde-militar" y "verde
  * militar" son el mismo). Los archivos entran en orden alfabético.
  *
- * Cada foto entra en su propia transacción (ver guardarFoto): si la subida
- * falla, la fila no queda; si la fila no entra por el tope (5 por color y
- * 5 × colores por producto), no se sube nada.
+ * Cada foto entra por separado (ver guardarFoto): si la subida falla, la
+ * fila no queda; si la fila no entra por el tope (5 por color y 5 × colores
+ * por producto), los archivos subidos se borran.
  */
 const EXTENSIONES = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".avif"]);
 
@@ -50,35 +50,52 @@ export interface NuevaFoto {
   origen?: string | null;
 }
 
+/** La base cortó por una espera de bloqueo (tiempo agotado, bloqueo mutuo): se puede reintentar. */
+export const esTraba = (e: unknown) => ["57014", "55P03", "40P01", "40001"].includes((e as { code?: string })?.code ?? "");
+
 /*
- * Guarda una foto ya procesada: la fila se inserta ANTES de subir el archivo
- * (así el trigger de la base aplica los topes) y se confirma DESPUÉS de
- * subirlo. Va al final de su grupo (mismo tipo y color). Devuelve null si
- * entró o el motivo si no.
+ * Guarda una foto ya procesada. Primero sube los archivos y DESPUÉS inserta
+ * la fila, en una transacción cortita: el trigger de los topes bloquea el
+ * producto, y tenerlo bloqueado mientras se sube a R2 (segundos) trababa la
+ * sincronización con Stocker y la importación (se cortaban por tiempo).
+ * Si la fila no entra (tope, ya estaba), los archivos se borran. Va al final
+ * de su grupo (mismo tipo y color). Devuelve null si entró o el motivo si no.
  */
-export async function guardarFoto(pool: pg.Pool, almacen: Almacen, f: NuevaFoto, proc: FotoProcesada): Promise<string | null> {
+export async function guardarFoto(pool: pg.Pool, almacen: Almacen, f: NuevaFoto, proc: FotoProcesada, reintentos = 3): Promise<string | null> {
   const clave = `p/${f.productoId}/${randomBytes(8).toString("hex")}`;
-  const cli = await pool.connect();
+  const borrar = async () => { for (const w of [400, 800, 1200]) await almacen.borrar(`${clave}-${w}.webp`).catch(() => {}); };
   try {
-    await cli.query("BEGIN");
-    const orden = await cli.query<{ n: number }>(
-      "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3",
-      [f.productoId, f.tipo, f.colorId],
-    );
-    await cli.query(
-      "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt, origen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-      [f.productoId, f.tipo, f.colorId, orden.rows[0]!.n, clave, proc.ancho, proc.alto, f.alt.slice(0, 160), f.origen ?? null],
-    );
     for (const t of proc.tamanos) await almacen.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
-    await cli.query("COMMIT");
-    return null;
   } catch (e) {
-    await cli.query("ROLLBACK").catch(() => {});
-    const pg = e as { code?: string; message: string };
-    for (const w of [400, 800, 1200]) await almacen.borrar(`${clave}-${w}.webp`).catch(() => {});
-    return pg.code === "23514" ? pg.message : pg.code === "23505" ? "ya estaba importada" : `falló: ${pg.message}`;
-  } finally {
-    cli.release();
+    await borrar();
+    return `falló la subida: ${(e as Error).message}`;
+  }
+  for (let intento = 1; ; intento++) {
+    const cli = await pool.connect();
+    try {
+      await cli.query("BEGIN");
+      await cli.query("SET LOCAL lock_timeout = '5s'");
+      const orden = await cli.query<{ n: number }>(
+        "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3",
+        [f.productoId, f.tipo, f.colorId],
+      );
+      await cli.query(
+        "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt, origen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        [f.productoId, f.tipo, f.colorId, orden.rows[0]!.n, clave, proc.ancho, proc.alto, f.alt.slice(0, 160), f.origen ?? null],
+      );
+      await cli.query("COMMIT");
+      return null;
+    } catch (e) {
+      await cli.query("ROLLBACK").catch(() => {});
+      if (!(esTraba(e) && intento < reintentos)) {
+        await borrar();
+        const pg = e as { code?: string; message: string };
+        return pg.code === "23514" ? pg.message : pg.code === "23505" ? "ya estaba importada" : `falló: ${pg.message}`;
+      }
+    } finally {
+      cli.release();
+    }
+    await new Promise((r) => setTimeout(r, 1000 * 2 ** intento));
   }
 }
 

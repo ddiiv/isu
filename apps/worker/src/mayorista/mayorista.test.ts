@@ -3,9 +3,10 @@ import { mkdtemp } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import pg from "pg";
 import sharp from "sharp";
 import { crearPool, migrar } from "@isu/db";
-import { almacenEnDisco, PATRON_FOTOS } from "../fotos/almacen.js";
+import { almacenEnDisco, PATRON_FOTOS, type Almacen } from "../fotos/almacen.js";
 import { aplicarCatalogo } from "../stocker/sincronizar.js";
 import type { CatalogoStocker } from "../stocker/cliente.js";
 import { aplicar, CatalogoMayorista, conCache, descargadorDe, informe, planificar, type Descargar } from "./importar.js";
@@ -149,6 +150,60 @@ describe("importar del mayorista", () => {
     const plan2 = await planificar(pool, mayorista, { reemplazar: true });
     await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), plan2, descargar, { reemplazar: true });
     expect((await fotos(BASE + 1)).map((x) => x.origen)).not.toContain(null);
+  });
+
+  describe("con la base ocupada (la sincronización con Stocker escribiendo a la vez)", () => {
+    /** Otra conexión que bloquea un color del producto, como lo hace una tanda del catálogo. */
+    async function bloquearColor(stockerId: number) {
+      const c = new pg.Client({ connectionString: URL });
+      await c.connect();
+      await c.query("BEGIN");
+      await c.query("SELECT 1 FROM tienda.producto_colores WHERE producto_id = $1 FOR UPDATE", [await id(stockerId)]);
+      return async () => { await c.query("COMMIT"); await c.end(); };
+    }
+
+    it("espera y reintenta: no se corta («canceling statement due to statement timeout»)", async () => {
+      const soltar = await bloquearColor(BASE + 2);
+      const t = setTimeout(() => void soltar(), 700);
+      try {
+        const r = await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), await planificar(pool, mayorista), descargar, { esperaBloqueoMs: 200, esperaMs: 150, reintentos: 8 });
+        expect(r.fallidos).toEqual([]);
+        expect(r.productos).toBe(3);
+        expect((await fotos(BASE + 2)).length).toBe(5);
+      } finally { clearTimeout(t); await soltar().catch(() => {}); }
+    });
+
+    it("si sigue ocupado, saltea ese producto, sigue con los demás y lo informa", async () => {
+      const soltar = await bloquearColor(BASE + 2);
+      try {
+        const r = await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), await planificar(pool, mayorista), descargar, { esperaBloqueoMs: 100, esperaMs: 50, reintentos: 2 });
+        expect(r.fallidos.map((f) => f.sku)).toEqual(["ISUABYCAM"]);
+        expect(r.productos).toBe(2);
+        expect((await fotos(BASE + 1)).length).toBe(4);
+      } finally { await soltar(); }
+    });
+
+    it("mientras sube una foto a R2, el producto NO queda bloqueado en la base", async () => {
+      const disco = almacenEnDisco(dir, PATRON_FOTOS);
+      const pruebas: string[] = [];
+      const otro = new pg.Client({ connectionString: URL });
+      await otro.connect();
+      // Una subida lenta: en el medio, otra conexión intenta tomar el producto sin esperar.
+      const lento: Almacen = {
+        ...disco,
+        async guardar(archivo, datos, tipo) {
+          if (pruebas.length < 3) {
+            const pid = Number(archivo.split("/")[1]);
+            pruebas.push(await otro.query("SELECT 1 FROM tienda.productos WHERE id = $1 FOR UPDATE NOWAIT", [pid]).then(() => "libre", (e: { code?: string }) => e.code ?? "error"));
+          }
+          return disco.guardar(archivo, datos, tipo);
+        },
+      };
+      try {
+        await aplicar(pool, lento, await planificar(pool, mayorista), descargar);
+      } finally { await otro.end(); }
+      expect(pruebas).toEqual(["libre", "libre", "libre"]);
+    });
   });
 
   it("el descargador sólo pide /fotos/… del mismo sitio", async () => {

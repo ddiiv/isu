@@ -13,6 +13,18 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 6 | Importación del catálogo del sitio mayorista (fotos por color, foto principal, categorías, colores) y cupones de descuento / promociones por monto | **Cerrada** (abajo) |
 | 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
 
+## Arreglo: la importación de fotos se cortaba por tiempo (04/10/2026)
+
+En producción, `mayorista/cli.js --aplicar` se cortó con `canceling statement due to statement timeout` (en `producto_colores`).
+
+- **Causa.** Cada foto se subía a R2 **dentro** de la transacción que inserta su fila. El trigger de los topes bloquea el producto, así que el producto quedaba bloqueado los segundos de la subida. Si a la vez corría la sincronización con Stocker, se esperaban entre ellas, y la base corta cualquier espera a los 10 s.
+- **Arreglo, en el worker y en la subida del backoffice:** primero se suben los archivos y después entra la fila, en una transacción de milisegundos. Si la fila no entra (tope, repetida), los archivos se borran.
+- **Importación:**
+  - cada producto espera un bloqueo hasta 5 s y se reintenta con espera creciente;
+  - si sigue ocupado, se saltea, se sigue con los demás y se lista al final para volver a correrla;
+  - sólo escribe un color si cambió algo.
+- **Prueba nueva:** reproduce el bloqueo con otra conexión. Con el código anterior falla con el mismo error de producción; con el arreglo pasa.
+
 ## Contrato v1 de Stocker · tanda 1: catálogo, stock y aviso (04/10/2026)
 
 Con el JSON real del catálogo y del stock que mandó Stocker (punto 3.1 de [`respuesta-contrato-stocker.md`](respuesta-contrato-stocker.md)). Detalle de cada campo en [`contrato-stocker.md`](contrato-stocker.md).
