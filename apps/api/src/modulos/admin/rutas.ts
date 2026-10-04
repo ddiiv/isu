@@ -408,26 +408,36 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         throw new ErrorHttp(400, "foto_invalida", e instanceof FotoInvalida ? e.message : "No se pudo procesar la imagen.");
       }
       const clave = `p/${req.params.id}/${randomBytes(8).toString("hex")}`;
+      const p = await pool.query<{ nombre: string }>("SELECT nombre FROM tienda.productos WHERE id = $1", [req.params.id]);
+      if (!p.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+      const borrar = async () => { for (const w of [400, 800, 1200]) await deps.fotos!.borrar(`${clave}-${w}.webp`).catch(() => {}); };
+      // Primero se suben los archivos y DESPUÉS entra la fila, en una transacción corta: el trigger de los
+      // topes bloquea el producto, y tenerlo bloqueado durante la subida a R2 trababa la sincronización.
+      try {
+        for (const t of proc.tamanos) await deps.fotos.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
+      } catch (e) {
+        await borrar();
+        throw e;
+      }
       const cli = await pool.connect();
       let id: number;
       try {
         await cli.query("BEGIN");
-        const p = await cli.query<{ nombre: string }>("SELECT nombre FROM tienda.productos WHERE id = $1", [req.params.id]);
-        if (!p.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+        await cli.query("SET LOCAL lock_timeout = '5s'");
         const orden = await cli.query<{ n: number }>(
           "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3", [req.params.id, tipo, color ?? null]);
         // El trigger de la base aplica los topes (5 por color, 5 × colores por producto).
         id = (await cli.query<{ id: number }>(
           "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
           [req.params.id, tipo, color ?? null, orden.rows[0]!.n, clave, proc.ancho, proc.alto, (alt || p.rows[0].nombre).slice(0, 160)])).rows[0]!.id;
-        for (const t of proc.tamanos) await deps.fotos.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
         await auditar(cli, a, "subir_foto", "producto", req.params.id, { foto: id, tipo, color }, ip(req));
         await cli.query("COMMIT");
       } catch (e) {
         await cli.query("ROLLBACK").catch(() => {});
-        for (const w of [400, 800, 1200]) await deps.fotos.borrar(`${clave}-${w}.webp`).catch(() => {});
+        await borrar();
         const pg = e as { code?: string; message: string };
         if (pg.code === "23514") throw new ErrorHttp(409, "tope_fotos", pg.message);
+        if (pg.code === "55P03" || pg.code === "57014") throw new ErrorHttp(503, "ocupado", "El producto se está actualizando. Probá de nuevo en unos segundos.");
         if (pg.code === "23503") throw new ErrorHttp(400, "color", "Ese color no es de este producto.");
         throw e;
       } finally { cli.release(); }
