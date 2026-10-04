@@ -1,5 +1,8 @@
 # Contrato con Stocker
 
+> ⚠️ **Este documento describe lo que la tienda espera de Stocker, según el parche que se entregó en las etapas 1 a 5 (`stocker-backend-tienda-acumulado.patch`). Ese parche no se aplicó.**
+> Lo que Stocker tiene hoy está en [`contrato-movimientos-stocker-v1.md`](contrato-movimientos-stocker-v1.md), y lo que falta para que se entiendan, en [`respuesta-contrato-stocker.md`](respuesta-contrato-stocker.md).
+
 La tienda es un canal online más de Stocker, como Mercado Libre y Jumpseller,
 y publica **el mismo número**: lo disponible en los locales que abastecen
 online, menos reservas y el margen de seguridad de cada variante

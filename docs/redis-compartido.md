@@ -2,40 +2,23 @@
 
 > **Para el agente (o la persona) que trabaja en Stocker, la integración con Mercado Libre, la de Jumpseller, Pedidos Mayoristas o cualquier servicio nuevo del proyecto de Railway.**
 >
-> En el proyecto hay **un solo Redis** para todas las plataformas. Su función principal es la cola de movimientos hacia Stocker: ventas, compras, devoluciones y cobros. Este documento dice para qué es, qué parte usa cada plataforma y cómo usarla sin romper a las demás. Seguilo tal cual. Si algo no encaja con tu plataforma, frená y avisale al dueño antes de improvisar.
+> En el proyecto hay **un solo Redis** para todas las plataformas. Cada una tiene su propia cola de reintentos hacia Stocker (ventas, cancelaciones, cobros), que después entran a Stocker por HTTP según su contrato. Este documento dice para qué es, qué parte usa cada plataforma y cómo usarla sin romper a las demás. Seguilo tal cual. Si algo no encaja con tu plataforma, frená y avisale al dueño antes de improvisar.
 
-## Para qué es: la cola de movimientos hacia Stocker
+## Para qué es (actualizado con el contrato de Stocker v1)
 
-La función de este Redis es ser **la cola de movimientos hacia Stocker**. Cada venta, cancelación, devolución, compra o cobro que pase en cualquier plataforma entra a la cola como un mensaje, y Stocker los procesa para descontar o sumar stock y registrar el dinero recibido.
+Stocker publicó el contrato de movimientos (`contrato-movimientos-stocker-v1.md`) y **descartó la cola común**. Los movimientos (ventas, cancelaciones, cobros) le llegan **por HTTP**, cada plataforma con **su credencial**. El negocio sale de la credencial: una cola compartida, con una sola contraseña para todos, no podría garantizar quién manda qué.
 
-### Quién hace qué
-- **Stocker es el único que mueve stock y registra cobros.** Las demás plataformas sólo publican movimientos en la cola; nunca tocan el stock directamente.
-- **La cola común vive en la base 0 del Redis (la de Stocker).** Para publicar ahí, cada plataforma abre una conexión a `${{Redis.REDIS_URL}}/0` y sólo escribe en esa cola.
-- **Lo interno de cada plataforma va en su propia base** (§ 1): caché, límites y colas propias.
-- **Redis es el mensajero, no el registro.** La venta y el cobro quedan guardados en la base de datos de cada plataforma y en Stocker. Si un mensaje se pierde, se tiene que poder reenviar desde ahí.
+El Redis queda para lo que ya hacía:
+- **la cola propia de cada plataforma**, en su base y con su prefijo, que es el **reintento**: el worker toma el trabajo y llama a Stocker hasta que contesta 2xx;
+- caché, límites y avisos internos, con vencimiento.
 
-### Reglas de cada movimiento
-1. **Id único y fijo**, armado con la plataforma y su número de pedido (`ml:2000123456`, `isu:ISU-1042`, `may:P-311`).
-   - Si llega dos veces, Stocker lo procesa una sola vez.
-   - Los reintentos usan siempre el mismo id: **nunca se descuenta dos veces**.
-2. **La plataforma manda cantidades; Stocker calcula el stock.** La plataforma no manda stock ya calculado.
-3. **Una cancelación o devolución nombra el id de la venta original.** Stocker la aplica después de esa venta, aunque llegue antes.
-4. **Los cobros van como movimiento propio**, con el id del pedido, el importe, el medio de pago y el número de operación.
-5. **La cola no reemplaza la reserva al vender.** El canal que puede consultar o reservar stock en el momento de la venta, lo sigue haciendo. La cola registra lo que ya pasó. Así dos canales no venden la misma última prenda.
+**Lo que sigue valiendo de antes, y lo dice el contrato:**
+- **Stocker es el único que mueve stock y registra dinero.** Ninguna plataforma lo calcula, lo guarda como dato propio ni lo corrige.
+- **El id del movimiento es fijo** (`isu:ISU-1042`, `ml:2000123456`, `may:P-311`): un reintento nunca descuenta dos veces.
+- **El movimiento vive en la base de la plataforma** hasta que Stocker contesta 2xx. Redis es el mensajero, no el registro.
+- **Ante un `429` de Stocker, se espera cada vez más** (1 s, 2 s, 4 s… hasta 60 s), sin pasar de unos 10 por segundo.
 
-### Antes de programar: el contrato (lo define Stocker)
-Stocker publica un documento con:
-- el nombre exacto de la cola;
-- el formato del mensaje (JSON con número de versión) y los tipos (venta, cancelación, devolución, compra, cobro);
-- qué pasa si no hay stock o el SKU no existe;
-- cómo se entera cada plataforma del resultado.
-
-**Hasta que ese contrato esté publicado, ninguna plataforma cambia cómo se integra hoy con Stocker.** Por ahora cada agente aplica sólo lo de este documento: su base, sus prefijos y las reglas.
-
-**Cómo está hoy la tienda minorista (`isu`).**
-- Ya manda sus ventas a Stocker con una cola: la cola vive en su base 1, su worker la toma y la pasa a la API de Stocker.
-- Al cobrar, reserva el stock en Stocker en el momento (regla 5).
-- Cuando exista el contrato, la tienda se adapta para publicar en la cola común.
+**Cómo está la tienda minorista (`isu`).** Su cliente todavía no habla el contrato v1. La respuesta, con lo que la tienda cambia y lo que necesita de Stocker, está en `respuesta-contrato-stocker.md`.
 
 ## 1. Qué base usa cada plataforma
 
@@ -66,7 +49,7 @@ Redis tiene bases numeradas (0 a 15) dentro del mismo servidor. **Cada plataform
    - `FLUSHDB` en producción;
    - `CONFIG SET` / `CONFIG REWRITE`, que sólo los hace el dueño (§ 4);
    - `KEYS *` (frena el Redis de todos; usá `SCAN`);
-   - `DEBUG`, `SHUTDOWN`, `SWAPDB`, `MOVE`, `SELECT` a otra base que no sea la tuya. La única excepción es la conexión aparte que publica en la cola común de la base 0, y sólo para escribir en esa cola.
+   - `DEBUG`, `SHUTDOWN`, `SWAPDB`, `MOVE`, `SELECT` a otra base que no sea la tuya.
 4. **Este Redis no borra datos solo** (`maxmemory-policy noeviction`): las colas no pueden perder trabajos. Por eso:
    - toda clave de caché, sesión o límite va con vencimiento (`SET … EX`, `EXPIRE`);
    - las colas limpian lo terminado (en BullMQ, `removeOnComplete` y `removeOnFail` con un tope, p. ej. `{ count: 1000 }` o `{ age: 7 * 24 * 3600 }`);
@@ -102,7 +85,7 @@ Redis tiene bases numeradas (0 a 15) dentro del mismo servidor. **Cada plataform
 
 ## 4. Configuración del Redis (una sola vez, la hace el dueño, **antes de conectar cualquier plataforma**)
 
-Como este Redis lleva movimientos de stock y de dinero, esto **no es opcional**: si borra datos al llenarse o no guarda en disco, se pueden perder ventas o cobros en camino a Stocker.
+Como este Redis tiene las colas de reintento de ventas y cobros, esto **no es opcional**: si borra datos al llenarse o no guarda en disco, se pierden reintentos. El movimiento sigue en la base de la plataforma, pero hay que reenviarlo a mano.
 
 En Railway → servicio **Redis** → *Data* (o la consola con `redis-cli`):
 
@@ -129,8 +112,8 @@ Plataforma: …
 Base asignada: … (REDIS_URL=${{Redis.REDIS_URL}}/…)
 Prefijo de claves y colas: …
 Canales Pub/Sub: … (o ninguno)
-¿Qué movimientos genera hacia Stocker? (ventas, cancelaciones, devoluciones, compras, cobros) y cómo los manda hoy: …
-¿Ya publica en la cola común?: no (hasta que Stocker publique el contrato)
+¿Qué movimientos genera hacia Stocker? (ventas, cancelaciones, cobros) y por qué ruta los manda hoy: …
+¿Se integra con Stocker según el contrato v1 (sobre, id fijo, manejo de 429)?: sí / no / qué falta
 Cambios hechos en el código: …
 Verificado en Railway: conecta a *.railway.internal, base …, sin errores en el log (sí/no)
 Pendiente o dudas: …
