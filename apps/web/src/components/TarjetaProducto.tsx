@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { conDescuento, centavos, esClaro, formatearPesos, rutaPack, type ProductoTarjeta } from "@isu/shared";
+import { conDescuento, centavos, esClaro, formatearPesos, maxPorcentajePack, rutaPack, type AjustePacks, type ProductoTarjeta } from "@isu/shared";
 import { Foto } from "./Foto";
 import { Precio } from "./Precio";
 import { ResumenEstrellas } from "./Estrellas";
@@ -16,15 +16,15 @@ export function TarjetaProducto({
   p, descuento, cuotas, lista, indice, prioridad = false, packs,
 }: {
   p: ProductoTarjeta; descuento: number; cuotas: number; lista: string; indice: number; prioridad?: boolean;
-  /** Etapa 8: en la sección Packs, la tarjeta lleva a la página del pack y muestra el precio por unidad del pack más grande. */
-  packs?: number[];
+  /** En la sección Packs, la tarjeta lleva a la página del pack y muestra el precio por unidad del pack más grande. */
+  packs?: AjustePacks;
 }) {
   const [color, setColor] = useState<string | null>(null);
   const elegido = p.colores.find((c) => c.clave === color);
   const foto = elegido?.foto ?? p.foto;
   const comoPack = !!packs && p.pack;
-  const maxPack = comoPack ? Math.max(...packs!) : 0;
-  const href = comoPack ? rutaPack(p.slug, 2) : `/producto/${p.slug}${color ? `?color=${color}` : ""}`;
+  const maxPack = comoPack ? maxPorcentajePack(packs!) : 0;
+  const href = comoPack ? rutaPack(p.slug, packs!.minimo) : `/producto/${p.slug}${color ? `?color=${color}` : ""}`;
   const MAX = 5;
 
   return (
@@ -47,8 +47,9 @@ export function TarjetaProducto({
         <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
           {p.agotado && <span className="rounded-full bg-tinta px-2.5 py-1 text-xs font-bold text-white">Agotado</span>}
           {!p.agotado && p.nuevo && <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-marca shadow-sm">Nuevo</span>}
+          {!p.agotado && p.liquidacion && <span className="rounded-full bg-tinta px-2.5 py-1 text-xs font-bold text-white">Liquidación</span>}
           {!p.agotado && p.descuento ? <span className="rounded-full bg-oferta px-2.5 py-1 text-xs font-bold text-white">-{p.descuento}%</span> : null}
-          {!p.agotado && p.pack && !comoPack ? <span className="rounded-full bg-ahorro px-2.5 py-1 text-xs font-bold text-white">Pack x2–x5</span> : null}
+          {!p.agotado && p.pack && !comoPack ? <span className="rounded-full bg-ahorro px-2.5 py-1 text-xs font-bold text-white">También en pack</span> : null}
           {!p.agotado && comoPack ? <span className="rounded-full bg-ahorro px-2.5 py-1 text-xs font-bold text-white">Hasta {maxPack}% OFF</span> : null}
         </div>
       </Link>
@@ -84,7 +85,7 @@ export function TarjetaProducto({
           <div className="space-y-0.5">
             <p className="text-xs text-tinta-tenue">Suelta {formatearPesos(p.precio)}</p>
             <p className="text-[15px] font-bold">desde {formatearPesos(conDescuento(centavos(p.precio), maxPack))} <span className="text-sm font-normal">c/u</span></p>
-            <p className="text-xs font-bold text-ahorro">📦 Elegí 2, 3, 4 o 5 unidades</p>
+            <p className="text-xs font-bold text-ahorro">📦 Elegí de {packs!.minimo} a {packs!.maximo} unidades</p>
           </div>
         ) : (
           <Precio precio={p.precio} precioHasta={p.precioHasta} precioLista={p.precioLista} rebaja={p.descuento} descuento={descuento} cuotas={cuotas} />

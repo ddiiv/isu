@@ -51,6 +51,9 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   chatbot: { activo: false, saludo: "" },
   packs: PACKS_POR_DEFECTO,
   hayPacks: false,
+  packsEn: [],
+  hayLiquidacion: false,
+  liquidacionEn: [],
   cuidados: "",
   cifras: [],
 };
@@ -115,13 +118,31 @@ export async function obtenerNuevos(cantidad = 8): Promise<ListadoProductos> {
   }
 }
 
-/** Colecciones elegidas a mano en el backoffice (casillas "Destacado", "Nuevo" y "Pack"). */
-export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs", limite = 200): Promise<ListadoProductos> {
+/** Colecciones elegidas a mano en el backoffice (casillas "Destacado", "Nuevo" y "Pack") y la Liquidación (descuentos marcados). */
+export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite = 200): Promise<ListadoProductos> {
   try {
     return (await pedirCatalogo(`/v1/productos?coleccion=${cual}&limite=${limite}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
   } catch (err) {
     console.warn(`[api] ${cual}: ${(err as Error).message}`);
     return LISTADO_VACIO;
+  }
+}
+
+/** Etapa 9: los packs o la liquidación de una categoría de arriba (/packs/hombre). null = esa categoría no existe. */
+export async function obtenerColeccionDe(cual: "packs" | "liquidacion", categoria: string): Promise<ListadoProductos | null> {
+  return pedirCatalogo(`/v1/productos?${new URLSearchParams({ coleccion: cual, categoria })}`, ListadoProductos, ["catalogo"]);
+}
+
+/** Etapa 9: 1 o 2 prendas con foto por categoría de arriba, para el menú. Sin API, el menú sale sin fotos. */
+const FotoMenu = z.object({ slug: z.string(), nombre: z.string(), foto: z.object({ clave: z.string(), ancho: z.number().nullable(), alto: z.number().nullable(), alt: z.string().nullable() }) });
+export type FotosMenu = Record<string, Array<z.infer<typeof FotoMenu>>>;
+export async function obtenerMenu(): Promise<FotosMenu> {
+  try {
+    const r = await pedirCatalogo("/v1/menu", z.object({ categorias: z.array(z.object({ categoria: z.string(), productos: z.array(FotoMenu) })) }), ["catalogo"]);
+    return Object.fromEntries((r?.categorias ?? []).map((c) => [c.categoria, c.productos]));
+  } catch (err) {
+    console.warn(`[api] menú: ${(err as Error).message}`);
+    return {};
   }
 }
 

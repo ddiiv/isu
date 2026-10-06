@@ -23,6 +23,13 @@ export const PagoMp = z.object({
   payment_method_id: z.string().nullable().optional(),
   installments: z.number().nullable().optional(),
   date_approved: z.string().nullable().optional(),
+  // Transferencias que entran a la cuenta (etapa: transferencias que se confirman solas).
+  date_created: z.string().nullable().optional(),
+  operation_type: z.string().nullable().optional(),
+  payer: z.object({
+    first_name: z.string().nullable().optional(), last_name: z.string().nullable().optional(),
+    identification: z.object({ type: z.string().nullable().optional(), number: z.string().nullable().optional() }).nullable().optional(),
+  }).nullable().optional(),
 });
 export type PagoMp = z.infer<typeof PagoMp>;
 
@@ -85,6 +92,22 @@ export function crearMercadoPago(o: { url: string; token: string }) {
       const r = PagoMp.safeParse(await pedir(`/v1/payments/${id}`));
       if (!r.success) throw new ErrorMp("Pago de Mercado Pago con formato inesperado");
       return r.data;
+    },
+
+    /**
+     * Lo aprobado que entró a la cuenta en los últimos días (lo más nuevo primero).
+     * Entre esto están las transferencias al alias/CVU de la cuenta, que no traen
+     * número de pedido: se reconocen por el monto exacto (ver transferencias.ts).
+     */
+    async ingresosRecientes(dias = 3): Promise<PagoMp[]> {
+      const q = new URLSearchParams({
+        sort: "date_created", criteria: "desc", range: "date_created", begin_date: `NOW-${dias}DAYS`, end_date: "NOW",
+        status: "approved", limit: "100",
+      });
+      const r = z.object({ results: z.array(z.unknown()) }).safeParse(await pedir(`/v1/payments/search?${q}`));
+      if (!r.success) throw new ErrorMp("Búsqueda de Mercado Pago con formato inesperado");
+      // Uno con formato raro no tira abajo a los demás.
+      return r.data.results.flatMap((x) => { const p = PagoMp.safeParse(x); return p.success ? [p.data] : []; });
     },
 
     async pagosDe(numero: string): Promise<PagoMp[]> {

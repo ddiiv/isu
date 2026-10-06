@@ -46,6 +46,18 @@ function Productos() {
     }
   }
 
+  /** Etapa 9: un descuento marcado como liquidación con los elegidos (se edita o se termina en Descuentos). */
+  async function aLiquidacion() {
+    const pct = window.prompt(`¿Qué % de descuento llevan los ${elegidos.size} elegidos en Liquidación? (1 a 90)`, "30");
+    if (pct === null) return;
+    const porcentaje = Math.trunc(Number(pct));
+    if (!(porcentaje >= 1 && porcentaje <= 90)) { aviso.error(new Error("El % va de 1 a 90.")); return; }
+    try {
+      await api("descuentos", { cuerpo: { nombre: `Liquidación ${porcentaje}% (${new Date().toLocaleDateString("es-AR")})`, porcentaje, alcance: "productos", productoIds: [...elegidos], liquidacion: true } });
+      aviso.ok(`${elegidos.size} en Liquidación con ${porcentaje}% OFF. Se cambia o se termina en Descuentos.`);
+      setElegidos(new Set());
+    } catch (e) { aviso.error(e); }
+  }
   async function masivo(cambios: Record<string, unknown>, texto: string) {
     try {
       const r = await api<{ productos: number }>("productos/masivo", { cuerpo: { ids: [...elegidos], cambios } });
@@ -82,8 +94,9 @@ function Productos() {
           <Boton variante="borde" onClick={() => void masivo({ nuevo: false }, "Sacados de Nuevos")}>Quitar Nuevo</Boton>
           <Boton variante="borde" onClick={() => void masivo({ destacado: true }, "Destacados")}>Marcar Destacado</Boton>
           <Boton variante="borde" onClick={() => void masivo({ destacado: false }, "Sacados de Destacados")}>Quitar Destacado</Boton>
-          <Boton variante="borde" onClick={() => void masivo({ pack: true }, "Se venden en pack (2 a 5)")}>Vender en pack</Boton>
+          <Boton variante="borde" onClick={() => void masivo({ pack: true }, "Se venden en pack")}>Vender en pack</Boton>
           <Boton variante="borde" onClick={() => void masivo({ pack: false }, "Sacados de Packs")}>Quitar de Packs</Boton>
+          <Boton variante="borde" onClick={() => void aLiquidacion()}>Mandar a Liquidación…</Boton>
           <Boton variante="borde" onClick={() => void masivo({ visible: true }, "Publicados")}>Publicar</Boton>
           <Boton variante="borde" onClick={() => void masivo({ visible: false }, "Ocultados")}>Ocultar</Boton>
           <select className="rounded-full border border-linea bg-white px-3 py-2 font-bold" value="" aria-label="Agregar a categoría"

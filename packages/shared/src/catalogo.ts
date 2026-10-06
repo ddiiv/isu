@@ -49,8 +49,10 @@ export const ProductoTarjeta = z.object({
   agotado: z.boolean(),
   nuevo: z.boolean(),
   creadoEn: z.string(),
-  /** Se vende en pack de 2 a 5 (etapa 8). */
+  /** Se vende en pack (etapa 8). */
   pack: z.boolean().default(false),
+  /** Está en Liquidación: le toca un descuento marcado como liquidación (etapa 9). */
+  liquidacion: z.boolean().default(false),
   resenas: ResumenResenas.default({ promedio: null, cantidad: 0 }),
 });
 export type ProductoTarjeta = z.infer<typeof ProductoTarjeta>;
@@ -93,6 +95,7 @@ export const ProductoDetalle = z.object({
   actualizadoEn: z.string(),
   /** Etapa 8: se vende en pack, de qué está hecha y qué dicen quienes la compraron. */
   pack: z.boolean().default(false),
+  liquidacion: z.boolean().default(false),
   composicion: z.string().nullable().default(null),
   resenas: ResumenResenas.default({ promedio: null, cantidad: 0 }),
 });

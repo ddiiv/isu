@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { conRebaja, type Descuentos } from "../../lib/descuentos.js";
 import { buscarCupon, categoriasDe, CODIGO, elegir, motivoNoVigente, normalizarCodigo, promocionesVigentes, type CuponAplicado, type LineaParaCupon } from "../../lib/cupones.js";
-import { centavos, conDescuento, formatearPesos, Packs, PACKS_POR_DEFECTO, porcentajePack, type Cotizacion, type ItemCarrito, type LineaCotizada, type MedioPago } from "@isu/shared";
+import { centavos, conDescuento, formatearPesos, leerPacks, PACKS_POR_DEFECTO, porcentajePack, type AjustePacks, type Cotizacion, type ItemCarrito, type LineaCotizada, type MedioPago } from "@isu/shared";
 
 /*
  * El precio lo pone la tienda, no el navegador.
@@ -15,8 +15,9 @@ import { centavos, conDescuento, formatearPesos, Packs, PACKS_POR_DEFECTO, porce
  * transferencia → envío.
  *
  * Packs (etapa 8): las prendas marcadas como pack llevan un % según cuántas
- * unidades de ESA prenda hay en el carrito (2 a 5, cualquier talle y
- * color). No se suma a la rebaja de la prenda: gana el mayor de los dos.
+ * unidades de ESA prenda hay en el carrito (del mínimo al máximo de Ajustes →
+ * Packs, cualquier talle y color). No se suma a la rebaja de la prenda: gana
+ * el mayor de los dos.
  */
 export interface Ajustes {
   montoMinimoCarrito: number;
@@ -30,7 +31,7 @@ export interface Ajustes {
   datosTransferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string };
   locales: Array<{ nombre: string; retiro: boolean }>;
   /** % por llevar 2, 3, 4 y 5 de una prenda pack */
-  packs: number[];
+  packs: AjustePacks;
 }
 
 const POR_DEFECTO: Ajustes = {
@@ -50,7 +51,8 @@ export async function leerAjustes(pool: pg.Pool): Promise<Ajustes> {
     // Un ajuste con el tipo equivocado se ignora: mejor el valor por defecto que un total mal calculado.
     if (d === null ? (r.valor === null || typeof r.valor === "number") : typeof r.valor === typeof d) a[r.clave] = r.valor;
   }
-  if (!Packs.safeParse(a.packs).success) a.packs = PACKS_POR_DEFECTO;
+  // El formato viejo ([x2, x3, x4, x5]) también sirve; uno roto, el de fábrica.
+  a.packs = leerPacks(a.packs);
   return a as unknown as Ajustes;
 }
 

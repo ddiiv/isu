@@ -4,6 +4,8 @@
  * Las rutas que usa la API (preferencias, pagos, búsqueda) y una pantalla de
  * pago con tres botones: Aprobar, Rechazar y Dejar pendiente. Al aprobar,
  * manda el aviso FIRMADO a la API (igual que Mercado Pago) y vuelve a la tienda.
+ * Además, POST /simular/transferencia { monto } simula una transferencia al
+ * alias de la cuenta (la levanta la vuelta de la tienda, sin aviso).
  *
  * Uso: MP_ACCESS_TOKEN=… MP_WEBHOOK_SECRET=… node scripts/demo/mercadopago-simulado.mjs
  * y en la API: MP_API_URL=http://127.0.0.1:3910
@@ -105,7 +107,26 @@ http.createServer(async (req, res) => {
     }
     if (u.pathname === "/v1/payments/search") {
       const ref = u.searchParams.get("external_reference");
-      return json(res, 200, { results: [...pagos.values()].filter((p) => p.external_reference === ref).reverse() });
+      if (ref) return json(res, 200, { results: [...pagos.values()].filter((p) => p.external_reference === ref).reverse() });
+      // Lo que entró a la cuenta (transferencias que se confirman solas): aprobados, lo más nuevo primero.
+      const estado = u.searchParams.get("status");
+      const r = [...pagos.values()].filter((p) => !estado || p.status === estado).reverse().slice(0, Number(u.searchParams.get("limit") ?? 30));
+      return json(res, 200, { results: r, paging: { total: r.length } });
+    }
+    // Simula que alguien transfirió al alias/CVU de la cuenta (no viene de un checkout: sin número de pedido).
+    if (u.pathname === "/simular/transferencia" && req.method === "POST") {
+      const b = JSON.parse(await leer(req) || "{}");
+      const monto = Number(b.monto);
+      if (!(monto > 0)) return json(res, 400, { message: "monto" });
+      const ahora = new Date().toISOString();
+      const pago = {
+        id: siguiente++, status: "approved", status_detail: "accredited", external_reference: null, currency_id: "ARS",
+        transaction_amount: monto, payment_type_id: "account_money", payment_method_id: "account_money", operation_type: "money_transfer",
+        date_created: ahora, date_approved: ahora,
+        payer: { first_name: String(b.nombre ?? "Cliente"), last_name: String(b.apellido ?? "Simulado"), identification: { type: "CUIT", number: "20301112224" } },
+      };
+      pagos.set(String(pago.id), pago);
+      return json(res, 201, { id: pago.id });
     }
     return json(res, 404, { message: "not_found" });
   } catch (e) {

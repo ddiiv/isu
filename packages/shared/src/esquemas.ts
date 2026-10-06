@@ -43,9 +43,13 @@ export const ConfigPublica = z.object({
   locales: z.array(Local),
   // Etapa 5: asistente de la tienda (burbuja de chat).
   chatbot: z.object({ activo: z.boolean(), saludo: z.string().max(200) }).default({ activo: false, saludo: "" }),
-  // Etapa 8. Packs: % por llevar 2, 3, 4 y 5 de la misma prenda; hayPacks = alguna prenda se vende en pack.
+  // Packs: de `minimo` a `maximo` unidades de la misma prenda, con un % por cantidad; hayPacks = alguna prenda se vende en pack.
   packs: Packs.default(PACKS_POR_DEFECTO),
   hayPacks: z.boolean().default(false),
+  /** Etapa 9: categorías de arriba (slug) que tienen packs / productos en liquidación (el menú arma sus desplegables con esto). */
+  packsEn: z.array(z.string()).default([]),
+  hayLiquidacion: z.boolean().default(false),
+  liquidacionEn: z.array(z.string()).default([]),
   /** Cuidados generales de las prendas (la ficha los muestra). */
   cuidados: z.string().max(600).default(""),
   /** Números de la marca para el inicio ("+10 años · diseñando y fabricando"). */

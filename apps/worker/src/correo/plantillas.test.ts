@@ -29,6 +29,19 @@ describe("mails", () => {
     expect(m.html).toMatch(/\$\s?16\.000/);
     expect(m.texto).toContain("ISU-1001");
   });
+  it("transferencia que se confirma sola: el monto exacto; con Talo el CVU del pedido y sin pedir comprobante", () => {
+    const talo = armar("pedido_recibido", pedido({ transferencia: { titular: "", cuit: "", banco: "", cbu: "0000630500000060195375", alias: "isu.qa.1", monto: 1_600_000, via: "talo", automatica: true } }));
+    expect(talo.html).toContain("0000630500000060195375");
+    expect(talo.html).toContain(">CVU<");
+    expect(talo.html).not.toContain("Titular");
+    expect(talo.html).not.toContain("subí el comprobante");
+    expect(talo.html).toMatch(/se confirma solo/);
+    const mp = armar("pedido_recibido", pedido({ transferencia: { titular: "ISUWAYA", cuit: "30-1", banco: "Mercado Pago", cbu: "000", alias: "ISU.MP", monto: 1_600_037, via: "mercadopago", automatica: true } }));
+    expect(mp.html).toMatch(/\$\s?16\.000,37/);
+    expect(mp.html).toContain("con los centavos");
+    // Sin datos nuevos (mails viejos en la cola): como siempre.
+    expect(armar("pedido_recibido", pedido()).html).toContain("subí el comprobante");
+  });
   it("con cupón: la línea del descuento (escapada) antes de la de transferencia", () => {
     const m = armar("pedido_recibido", pedido({ cupon: "cupón QA10 (<b>10%</b> OFF)", descuentoCupon: 200_000, subtotal: 2_000_000, descuento: 360_000, total: 1_440_000 }));
     expect(m.html).toContain("Cupón QA10 (&lt;b&gt;10%&lt;/b&gt; OFF)");

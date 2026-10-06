@@ -1,13 +1,18 @@
 import type { Metadata } from "next";
-import { PaginaColeccion } from "@/components/PaginaColeccion";
+import { maxPorcentajePack } from "@isu/shared";
+import { obtenerConfig } from "@/lib/api";
+import { PaginaSeccion } from "@/components/PaginaSeccion";
 
 export const revalidate = 300;
-export const metadata: Metadata = {
-  title: "Packs: llevá más, pagá menos",
-  description: "Armá tu pack de 2 a 5 prendas con tus talles y colores y pagá menos por cada una. Envíos a todo el país.",
-  alternates: { canonical: "/packs" },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { packs } = await obtenerConfig();
+  return {
+    title: "Packs: llevá más, pagá menos",
+    description: `Armá tu pack de ${packs.minimo} a ${packs.maximo} prendas con tus talles y colores: hasta ${maxPorcentajePack(packs)}% OFF en cada una. Packs de hombre, mujer y niños.`,
+    alternates: { canonical: "/packs" },
+  };
+}
 
 export default function Packs() {
-  return <PaginaColeccion cual="packs" titulo="Packs" bajada="Llevá más, pagá menos. Elegí 2, 3, 4 o 5 unidades y armalas con tus colores y talles: cuantas más, más barata cada una." />;
+  return <PaginaSeccion cual="packs" />;
 }

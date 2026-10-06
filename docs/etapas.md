@@ -13,6 +13,72 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 6 | Importación del catálogo del sitio mayorista (fotos por color, foto principal, categorías, colores) y cupones de descuento / promociones por monto | **Cerrada** (abajo) |
 | 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
 | 8 | Inicio completo (carrusel de portada, packs, pestañas por categoría, números de la marca, opiniones al final), packs de 2 a 5 unidades con su dirección `pack-xN`, descripción y composición en la ficha, reseñas de compras verificadas con moderación | **Cerrada** (abajo) · guía en [`inicio-packs-resenas.md`](inicio-packs-resenas.md) |
+| 9 | Packs de 2 a 10 (configurable) armados sobre la prenda padre con el stock de cada variante, sección Packs y Liquidación en la barra divididas por Hombre / Mujer / Niños, menú del celular con subcategorías y 1–2 fotos por categoría, barra de envío gratis en la ficha | **Cerrada** (abajo) · guía en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md) |
+
+## Etapa 9 · resultados del cierre (06/10/2026)
+
+**Qué entró** (cómo se usa en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md))
+- **Packs de 2 a 10, sobre la prenda padre.** No vienen de Stocker: una prenda marcada «Pack» se vende en cantidad con sus mismas fotos y variantes. Cada prenda del pack con su talle y color.
+  - Ajustes → Packs: mínimo, máximo (hasta 20) y un % por cantidad. De fábrica: 2 a 10, del 10 al 25 %.
+  - **Stock:** no ofrece más de lo que hay entre todas las variantes, y una variante deja de ofrecerse cuando las otras prendas del pack ya se llevaron todas. «Copiar la prenda 1 a todas» copia hasta donde alcanza y avisa.
+  - `pack-x15-…` (fuera del rango) redirige a la cantidad más cercana.
+- **Packs en la barra**, con desplegable Hombre / Mujer / Niños; `/packs` con una sección por categoría y `/packs/<categoría>` con la grilla y filtros.
+- **Liquidación:** un descuento con la casilla «Es liquidación» (o Productos → «Mandar a Liquidación…»).
+  - Sus prendas con stock salen en `/liquidacion` y `/liquidacion/<categoría>`, en la barra con su desplegable, con la etiqueta «Liquidación» en la tarjeta y en la ficha.
+- **Menú del celular por niveles:** al tocar Hombre, Mujer o Niños, sus subcategorías, los atajos a sus packs y su liquidación, y 1 o 2 fotos de prendas que la representan. Elige las destacadas primero, después las nuevas, siempre con foto y stock. En la compu, el desplegable de cada categoría muestra lo mismo.
+- **Envío gratis en la ficha:** «Te faltan $ X para el envío gratis» con barra, según el carrito (Ajustes → Envío gratis desde).
+- **Migración 0015:** pasa el ajuste viejo de packs (x2 a x5) al nuevo y suma la casilla de liquidación a los descuentos.
+
+**QA**
+- Pruebas unitarias: **476/476**, 10 más que en la entrega anterior.
+  - Compartido: rango y % de packs, formato viejo, direcciones `pack-xN`.
+  - API: config con el rango y las categorías con packs, 7 unidades → 22 %, ajuste inválido o viejo → 400, rango 3–4, packs por categoría, liquidación (sección, por categoría y por subcategorías; vencida o agotada no sale), fotos del menú (destacadas primero, 2 como mucho, sin stock no).
+  - Caché con techo.
+- Pruebas en navegador: **134/134**, 7 más (las nuevas corren en compu y celular según corresponda).
+  - Nuevas: el pack de 10 con el stock real (cantidades apagadas, dirección que baja sola, «Copiar a todas» que no alcanza, variante agotada en la última prenda), Packs y Liquidación por categoría, el menú del celular (subcategorías, fotos, volver, Packs, Escape) y la barra de envío gratis.
+- Hallazgos corregidos antes de entregar:
+  - **«Copiar la prenda 1 a todas» no avisaba** cuando no alcanzaba el stock: la cuenta de las que faltaban se hacía dentro de una actualización de React que corre después, y el aviso salía con 0. Lo encontró la prueba nueva del pack.
+  - Pruebas anteriores puestas al día con el cambio:
+    - el menú del celular ahora va por niveles (Hombre › Pantalones);
+    - «Mujer» también es un acceso del header en el celular;
+    - el orden por precio se lee del precio que se cobra, no del tachado de una prenda en liquidación.
+
+**Hacker**
+- Auditoría: **348/348**, con 22 chequeos nuevos (§ 7h, detalle en `seguridad.md`).
+- Hallazgos corregidos antes de entregar:
+  - **Caché sin techo.** La caché corta de la API guardaba para siempre cada clave pedida, y las claves salen de la dirección: pedir miles de categorías inventadas la hacía crecer sin límite. Ahora tiene tope y borra las vencidas.
+  - **La auditoría leía el ajuste de packs viejo** (una lista): con el formato nuevo se habría caído en vez de chequear el tope.
+
+## Transferencias que se confirman solas (06/10/2026)
+
+Guía en [`transferencias.md`](transferencias.md).
+
+**Qué entró**
+- **Un CVU por pedido con Talo.** Al crear un pedido por transferencia se pide a Talo un cobro con su CVU y alias, por el monto exacto. Talo avisa y la tienda lo confirma preguntándole con su credencial.
+- **La cuenta de Mercado Pago, sin costo.** El pedido pide un monto con centavos únicos ($ 45.000,37). La tienda reconoce la transferencia entre lo que entró a la cuenta y la confirma. Recibir transferencias en Mercado Pago no tiene comisión.
+- **Ajustes → Transferencias que se confirman solas:** las dos opciones. Juntas, va Talo y, si no responde, Mercado Pago. Con ninguna, todo como antes.
+- **Cómo se busca la plata:** el aviso (Talo o Mercado Pago), la página del pedido abierta (cada 20 s) y la vuelta del worker (cada 2 minutos). Además, antes de vencer un pedido se mira si la transferencia llegó.
+- **Página del pedido y mail:** el monto exacto con los centavos y botón de copiar, y el CVU propio con Talo. El comprobante pasa a ser el plan B.
+- **Backoffice → Transferencias:** lo que no se pudo asignar solo (sin los centavos, de menos, plata que no es de una compra). Se asigna a un pedido o se descarta. El panel muestra cuántas hay.
+- **Migración 0014**, simulador de Talo (`pnpm demo:talo`) y transferencias simuladas en el Mercado Pago de prueba.
+- **Precios:** tarjeta y Mercado Pago al precio de lista y transferencia con descuento, como ya estaba. No hay recargo por pagar con tarjeta: lo prohíbe la Ley 25.065 (art. 37 c) y la Res. 51-E/2017.
+
+**QA**
+- Pruebas unitarias: **466/466**, 22 más que en la entrega anterior.
+  - API: 15 nuevas de transferencias (Talo: CVU por pedido, aviso que no se cree, de menos y después completo, pago de otro pedido, token vencido, Talo caído; Mercado Pago: centavos únicos, la vuelta, ventas del local y tarjetas que no cuentan, el aviso, la página abierta, antes de vencer, apagar el ajuste con pedidos esperando, nada que esperar) y 5 del backoffice (lista, asignar, no a uno ya cobrado ni si no alcanza, descartar, ajuste).
+  - Compartido: el monto con centavos. Worker: el mail con el CVU o los centavos.
+- Pruebas en navegador: **127/127**, 2 más. Nuevas: Talo de punta a punta, y Mercado Pago con centavos confirmado solo y sin centavos asignado a mano desde el backoffice. Corren en su propio proyecto, después de las demás, porque cambian un ajuste de toda la tienda.
+- Hallazgos corregidos antes de entregar:
+  - **Montos redondeados.** Se mostraban a pesos ($ 16.000 en vez de $ 16.000,37): con la cuenta de Mercado Pago, el cliente habría transferido sin los centavos. Ahora el monto a transferir se muestra exacto.
+  - **Pedidos colgados al apagar el ajuste.** Apagar la opción de Mercado Pago dejaba sin confirmar los pedidos que ya habían pedido el monto con centavos. Ahora el ajuste sólo decide qué hacen los pedidos nuevos, y los que esperan se siguen confirmando. Lo encontró la prueba en navegador; hay una prueba nueva que con el código anterior falla.
+
+**Hacker**
+- Auditoría: **326/326**, con 15 chequeos nuevos (§ 7g, detalle en `seguridad.md`).
+- Decisiones:
+  - El aviso de Talo no se cree (no viene firmado) y, con un id ajeno, ni se consulta.
+  - Las credenciales de Talo quedan sólo en el servidor.
+  - Asignar a mano pide rol operador y queda auditado.
+  - Una transferencia nunca se cuenta dos veces.
 
 ## Etapa 8 · resultados del cierre (06/10/2026)
 

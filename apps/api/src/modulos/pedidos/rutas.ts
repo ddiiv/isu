@@ -86,6 +86,17 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
         p = await servicio.delDueno(req.params.numero, await quien(req));
       }
     }
+    // Transferencia que se confirma sola: con la página abierta se mira si ya llegó (Talo: cada 20 s por
+    // pedido; la cuenta de Mercado Pago: una sola consulta cada 20 s para todos los pedidos).
+    if (["esperando_transferencia", "transferencia_informada"].includes(p.estado) && (p.transferencia_via === "talo" || p.transferencia_via === "mercadopago")) {
+      const clave = p.transferencia_via === "talo" ? `isu:consulta-talo:${p.numero}` : "isu:consulta-mp-cuenta";
+      const primera = await deps.redis.set(clave, "1", "EX", 20, "NX").catch(() => "OK");
+      if (primera === "OK") {
+        await (p.transferencia_via === "talo" ? servicio.transferencias.conciliarTalo(p.id) : servicio.transferencias.conciliarMp())
+          .catch((e) => req.log.warn({ err: (e as Error).message }, "no se pudo mirar la transferencia"));
+        p = await servicio.delDueno(req.params.numero, await quien(req));
+      }
+    }
     reply.headers(sinCache);
     return servicio.publico(p);
   });
@@ -166,8 +177,31 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
     if (tipo && tipo !== "payment") return reply.code(200).send({ ok: true, ignorado: tipo });
     // No se cree el aviso: se le pregunta a Mercado Pago por ese pago.
     const pago = await deps.mp.pago(dataId);
-    const r = await servicio.aplicarPagoMp(pago, "mercadopago (aviso)");
+    // Sin número de pedido: puede ser una transferencia al alias de la cuenta (se reconoce por el monto exacto).
+    const r = pago.external_reference
+      ? await servicio.aplicarPagoMp(pago, "mercadopago (aviso)")
+      : await servicio.transferencias.aplicarIngresoMp(pago, "mercadopago (aviso)");
     return reply.code(200).send({ ok: true, aplicado: r.aplicado });
+  });
+
+  /*
+   * ── Aviso de Talo ──
+   * Trae sólo ids y no viene firmado: no se cree. Si el id es de un cobro que
+   * creó esta tienda, se le pregunta a Talo por ese pago con nuestra
+   * credencial (con un id inventado no se le pregunta nada a nadie). Talo
+   * pide respuesta en menos de 3 s: si tarda, sigue en segundo plano y la
+   * vuelta del worker lo levanta igual.
+   */
+  api.post("/v1/pagos/talo/aviso", async (req, reply) => {
+    if (!servicio.transferencias.taloActivo) return reply.code(503).send({ error: "sin_talo" });
+    const b = (req.body ?? {}) as { paymentId?: unknown };
+    const id = typeof b.paymentId === "string" ? b.paymentId : "";
+    if (!/^[A-Za-z0-9_-]{3,120}$/.test(id)) return reply.code(200).send({ ok: true, ignorado: "sin_id" });
+    const p = (await deps.pool.query<{ id: number }>("SELECT id FROM tienda.pedidos WHERE talo_pago = $1", [id])).rows[0];
+    if (!p) return reply.code(200).send({ ok: true, ignorado: "ajeno" });
+    const trabajo = servicio.transferencias.conciliarTalo(p.id).catch((e) => { req.log.warn({ err: (e as Error).message }, "aviso de Talo no aplicado"); return null; });
+    await Promise.race([trabajo, new Promise((r) => setTimeout(r, 2500))]);
+    return reply.code(200).send({ ok: true });
   });
 
   /*
@@ -202,6 +236,8 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
   };
   api.post("/v1/interno/vencer", async (req) => { soloInterno(req); return servicio.vencer(); });
   api.post("/v1/interno/conciliar-mp", async (req) => { soloInterno(req); return servicio.conciliarMp(); });
+  // Transferencias que se confirman solas (Talo y la cuenta de Mercado Pago): cada 2 minutos.
+  api.post("/v1/interno/conciliar-transferencias", async (req) => { soloInterno(req); return servicio.transferencias.conciliar(); });
 
   // ── Botón de arrepentimiento (Res. 424/2020) ──
   api.post("/v1/arrepentimiento", { schema: { body: Arrepentimiento, response: { 201: z.object({ codigo: z.string(), mensaje: z.string() }) } } }, async (req, reply) => {

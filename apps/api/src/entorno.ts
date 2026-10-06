@@ -52,6 +52,12 @@ const Entorno = z.object({
   MP_API_URL: z.string().url().default("https://api.mercadopago.com"),
   // Credencial para registrar pagos por API (transferencias, cobros en el local).
   PAGOS_TOKEN: z.string().min(32).optional(),
+  // Transferencias que se confirman solas con un CVU por pedido (Talo: panel → Usuario → Credenciales).
+  // Las tres juntas; además hay que prenderlo en Ajustes → Transferencias. Pruebas: https://sandbox-api.talo.com.ar
+  TALO_API_URL: z.string().url().default("https://api.talo.com.ar"),
+  TALO_USER_ID: z.string().regex(/^[A-Za-z0-9_-]{4,80}$/).optional(),
+  TALO_CLIENT_ID: z.string().min(4).max(200).optional(),
+  TALO_CLIENT_SECRET: z.string().min(8).max(400).optional(),
   // Comprobantes de transferencia (privados). En producción: R2_BUCKET_PRIVADO.
   COMPROBANTES_DIR: z.string().min(1).optional(),
   // Duración de la sesión de un cliente, en días (se renueva sola con el uso).

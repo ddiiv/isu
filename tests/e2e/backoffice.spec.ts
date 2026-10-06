@@ -90,8 +90,10 @@ test.describe("tienda", () => {
   test("armá tu outfit: talle y presupuesto → outfits → al carrito", async ({ page }) => {
     const errores = vigilar(page);
     await page.goto("/outfits");
-    await page.getByRole("button", { name: "Mujer", exact: true }).click();
-    await page.getByRole("button", { name: "M", exact: true }).click();
+    // En el celular "Mujer" también es un acceso del header (abre el menú): el de la página.
+    const pagina = page.getByRole("main");
+    await pagina.getByRole("button", { name: "Mujer", exact: true }).click();
+    await pagina.getByRole("button", { name: "M", exact: true }).click();
     await page.getByRole("button", { name: /100\.000/ }).click();
     await page.getByRole("button", { name: "Armar mis outfits" }).click();
     await expect(page.getByRole("heading", { name: /Te armamos \d+ outfits?/ })).toBeVisible();

@@ -107,7 +107,7 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
 
 ## Packs, reseñas y portada (etapa 8)
 
-- **Packs:** el % lo calcula la API con lo que hay en el carrito (`pedidos/cotizar.ts`), al cotizar y otra vez al crear el pedido. El navegador manda sólo SKU y cantidad: cualquier campo de más (`pack`, `porcentaje`…) es 400. Con más de 5 unidades vale el % de 5, y no se suma a una rebaja: gana el mayor.
+- **Packs:** el % lo calcula la API con lo que hay en el carrito (`pedidos/cotizar.ts`), al cotizar y otra vez al crear el pedido. El navegador manda sólo SKU y cantidad: cualquier campo de más (`pack`, `porcentaje`…) es 400. Con más unidades que el máximo de Ajustes vale el % del máximo, y no se suma a una rebaja: gana el mayor. El ajuste se valida entero (de 2 a 20 unidades, un % por cantidad, nunca más de 60 % ni menor al de una unidad menos).
 - **Reseñas, quién opina:** sólo con el enlace del mail.
   - El enlace va firmado (HMAC) con una clave derivada de `INTERNO_TOKEN` para este uso (`isu:opinar:`): la firma del seguimiento no sirve acá ni al revés, y la de un pedido no sirve para otro. Se compara en tiempo constante.
   - Mismo 404 si el pedido no existe o la firma no corresponde: no se puede averiguar qué números existen.
@@ -132,3 +132,39 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - banners con rutas propias;
   - el % de pack desde el navegador y el tope con 10 unidades;
   - backoffice sin sesión (11).
+
+## Transferencias que se confirman solas
+
+- **El aviso de Talo no viene firmado.** Por eso no se cree:
+  - si el id no es de un cobro que creó la tienda, no se le pregunta nada a Talo, así que un id inventado no genera tráfico;
+  - si es de la tienda, se le pregunta a Talo con la credencial propia;
+  - se exige que el pago sea de ese pedido (`external_id`) y que haya llegado el monto.
+- **El aviso de Mercado Pago** sigue con su firma (HMAC) y la consulta del pago a Mercado Pago.
+- **Transferencias a la cuenta de Mercado Pago:**
+  - se reconocen por un monto único: el total más 1 a 99 centavos. Lo garantiza un índice único de la base entre los pedidos que esperan;
+  - no cuentan las ventas del local (QR/Point), los cobros con tarjeta ni los pagos del checkout (traen número de pedido);
+  - con el ajuste apagado, lo que entra a la cuenta ni se mira ni se anota.
+- **Una vez y sólo una:** cada transferencia recibida es única por proveedor e id, y el pago, por proveedor y referencia. El aviso, la página abierta y la vuelta del worker pueden llegar a la vez sin cobrar dos veces.
+- **Asignar a mano:**
+  - pide rol operador y queda en la auditoría;
+  - no se puede asignar a un pedido ya cobrado, ni una transferencia que no alcanza.
+- **Credenciales:** las de Talo viven sólo en el servidor (la auditoría revisa que no aparezcan en el HTML ni en el JavaScript). El token se renueva solo si Talo lo rechaza.
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7g):
+  - avisos de Talo inventados, con `../`, inyección, de otro tipo o gigantes;
+  - la vuelta interna sin credencial;
+  - un aviso de Mercado Pago sin firma;
+  - el backoffice sin sesión.
+
+## Packs de 2 a 10, Liquidación y menú (etapa 9)
+
+- **Packs:** el rango y los % se validan enteros en el backoffice. Un ajuste viejo o roto se lee como el de fábrica, nunca como «sin tope». La página del pack sólo reconoce `pack-x2` a `pack-x20` (otra cosa es 404). Una cantidad fuera del rango de Ajustes redirige a la más cercana de la misma prenda, dentro de la tienda. Que no se ofrezca más que el stock es comodidad: el carrito y Stocker lo vuelven a controlar.
+- **Liquidación:** es un descuento con la casilla «Es liquidación». Crearlo o editarlo pide sesión de operador y queda en la auditoría, como cualquier descuento. «Mandar a Liquidación…» usa la misma ruta.
+- **Parámetros nuevos:** `coleccion` es una lista cerrada y `categoria` un slug validado. Un campo de más es 400 y una categoría que no existe, 404. Nada de eso llega armado a la consulta.
+- **Fotos del menú (`/v1/menu`):** sólo nombre, slug y foto de prendas publicadas con stock, 2 por categoría como mucho.
+- **Caché de la API con techo:** las claves salen de la dirección (categoría, colección). Antes, pedir miles de slugs inventados las dejaba en memoria para siempre. Ahora, pasadas 5000, se borran las vencidas y, si no alcanza, las más viejas (prueba en `apps/api/test/cache.test.ts`).
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7h):
+  - colección y categoría con `../`, inyección, mayúsculas, 500 letras o un campo de más;
+  - que el menú no exponga stock ni precios, y que sus fotos sean claves propias;
+  - que el rango de packs de la config esté dentro del tope;
+  - el backoffice sin sesión: liquidación, rango de packs;
+  - páginas de Packs y Liquidación con un script en la dirección, y `pack-x999` / `pack-x15`.

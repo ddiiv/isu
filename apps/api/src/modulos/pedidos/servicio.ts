@@ -10,6 +10,8 @@ import { ErrorHttp } from "../../lib/errores.js";
 import { sha256, tokenNuevo } from "../../lib/cripto.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorMp, type MercadoPago, type PagoMp } from "../../lib/mercadopago.js";
+import type { Talo } from "../../lib/talo.js";
+import { crearTransferencias } from "./transferencias.js";
 import { conEnvio, cotizar, leerAjustes, type Ajustes } from "./cotizar.js";
 import { motivoNoVigente, normalizarCodigo } from "../../lib/cupones.js";
 import type { Descuentos } from "../../lib/descuentos.js";
@@ -43,6 +45,8 @@ export interface DepsPedidos {
   cotizador?: CotizadorEnvios;
   /** Etapa 8: para firmar el enlace de "Opiná de tu compra" (INTERNO_TOKEN). */
   secreto?: string;
+  /** Transferencias que se confirman solas: CVU por pedido (sin credenciales de Talo, null). */
+  talo?: Talo | null;
 }
 
 const ESTADO_INICIAL: Record<MedioPago, string> = {
@@ -70,6 +74,17 @@ interface FilaPedido {
   vence_en: Date | null; pagado_en: Date | null; mp_preferencia: string | null; creado_en: Date;
   transporte: string | null; servicio_envio: string | null; sucursal_envio: { id: string; nombre: string; direccion: string } | null;
   avisos_whatsapp: boolean; paquete_envio: Paquete | null;
+  transferencia_via: "talo" | "mercadopago" | "cuenta" | null; transferencia_monto: number | null;
+  talo_pago: string | null; talo_cvu: string | null; talo_alias: string | null;
+}
+
+/** A dónde y cuánto transfiere este pedido (Talo: su CVU; Mercado Pago: el monto con centavos únicos; si no, los datos de Ajustes). */
+function paraTransferir(p: FilaPedido, a: Ajustes) {
+  if (p.transferencia_via === "talo" && p.talo_cvu) {
+    return { titular: "", cuit: "", banco: "", cbu: p.talo_cvu, alias: p.talo_alias ?? "", monto: p.transferencia_monto ?? p.total, via: "talo" as const, automatica: true };
+  }
+  const via = p.transferencia_via === "mercadopago" ? "mercadopago" as const : "cuenta" as const;
+  return { ...a.datosTransferencia, monto: p.transferencia_monto ?? p.total, via, automatica: via === "mercadopago" };
 }
 
 async function evento(db: pg.Pool | pg.PoolClient, pedidoId: number, estado: string, actor: string, detalle?: string) {
@@ -78,6 +93,10 @@ async function evento(db: pg.Pool | pg.PoolClient, pedidoId: number, estado: str
 
 export function crearServicioPedidos(deps: DepsPedidos) {
   const { pool } = deps;
+  const transferencias = crearTransferencias({
+    pool, mp: deps.mp, talo: deps.talo ?? null, log: deps.log, apiPublica: deps.apiPublica, evento,
+    pagar: (numero, pago) => pagar(numero, pago),
+  });
   const urlPedido = (numero: string, acceso: string) => `${deps.sitio.replace(/\/+$/, "")}/pedido/${numero}#c=${acceso}`;
 
   async function stockerOError(): Promise<ClienteStocker> {
@@ -270,6 +289,15 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       [p.id, estado, venceEn, r.estado],
     )).rows[0]!;
     await evento(pool, p.id, estado, "tienda", `Mercadería apartada en Stocker hasta ${vence(venceEn)}`);
+    // Transferencia: el CVU propio del pedido (Talo) o el monto con centavos únicos (Mercado Pago).
+    if (medioPago === "transferencia") {
+      try {
+        await transferencias.asignar({ id: p.id, numero: p.numero, total: p.total, estado: p.estado, nombre: contacto.nombre, apellido: contacto.apellido, email: contacto.email, dni: contacto.dni });
+        p = (await pool.query<FilaPedido>("SELECT * FROM tienda.pedidos WHERE id = $1", [p.id])).rows[0]!;
+      } catch (e) {
+        deps.log.error({ err: (e as Error).message, pedido: p.numero }, "no se pudo asignar a dónde transferir: van los datos de Ajustes");
+      }
+    }
     await deps.colas.stocker("cliente", { email: contacto.email, nombre: contacto.nombre, apellido: contacto.apellido, telefono: contacto.telefono, dni: contacto.dni });
 
     let redirigir: string | null = null;
@@ -291,7 +319,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       descuento: p.descuento, envio: p.envio, descuentoCupon: p.descuento_cupon, cupon: p.cupon_nombre ? conCupon({ codigo: p.cupon_codigo, nombre: p.cupon_nombre }) : null, entrega: p.entrega, local: p.local_retiro, direccion: p.direccion,
       venceEn: p.vence_en?.toISOString() ?? null, items,
       enlace: acceso ? urlPedido(p.numero, acceso) : `${deps.sitio.replace(/\/+$/, "")}/cuenta`,
-      transferencia: p.medio_pago === "transferencia" ? ajustes.datosTransferencia : null,
+      transferencia: p.medio_pago === "transferencia" ? paraTransferir(p, ajustes) : null,
     };
   }
 
@@ -322,7 +350,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       opinar: ["entregado", "retirado"].includes(p.estado) && deps.secreto ? firmaOpinar(p.numero, deps.secreto) : null,
       pago: {
         url: null,
-        transferencia: p.medio_pago === "transferencia" && ESTADOS_PENDIENTES.includes(p.estado as never) ? a.datosTransferencia : null,
+        transferencia: p.medio_pago === "transferencia" && ESTADOS_PENDIENTES.includes(p.estado as never) ? paraTransferir(p, a) : null,
         comprobanteSubido: (comp.rowCount ?? 0) > 0,
       },
     };
@@ -444,6 +472,12 @@ export function crearServicioPedidos(deps: DepsPedidos) {
           const ahora = (await pool.query<{ estado: string }>("SELECT estado FROM tienda.pedidos WHERE id = $1", [p.id])).rows[0];
           if (ahora?.estado !== "esperando_pago") continue;
         }
+        // Transferencia que se confirma sola: antes de vencer, se mira si llegó y no se procesó todavía.
+        if (p.estado === "esperando_transferencia" && (p.transferencia_via === "talo" || p.transferencia_via === "mercadopago")) {
+          await (p.transferencia_via === "talo" ? transferencias.conciliarTalo(p.id) : transferencias.conciliarMp());
+          const ahora = (await pool.query<{ estado: string }>("SELECT estado FROM tienda.pedidos WHERE id = $1", [p.id])).rows[0];
+          if (ahora?.estado !== "esperando_transferencia") continue;
+        }
         if (p.estado === "error_reserva") {
           // Por si Stocker sí había apartado: se cancela del otro lado (no existe = nada que hacer).
           await (await stockerOError()).cancelarPedido(p.numero, "La tienda no pudo confirmar el pedido");
@@ -478,7 +512,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     return !!e && e.estado !== "cancelado" && e.estadoEnvio !== "despachado";
   }
 
-  return { sigueEnDeposito, crear, delDueno, publico, pagar, aplicarPagoMp, consultarMp, linkDePago, liberar, vencer, conciliarMp, datosMail, evento };
+  return { sigueEnDeposito, crear, delDueno, publico, pagar, aplicarPagoMp, consultarMp, linkDePago, liberar, vencer, conciliarMp, datosMail, evento, transferencias };
 }
 export type ServicioPedidos = ReturnType<typeof crearServicioPedidos>;
 export { ErrorStocker };

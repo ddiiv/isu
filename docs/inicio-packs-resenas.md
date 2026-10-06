@@ -33,9 +33,9 @@ El carrusel pasa solo cada 6 segundos. Se frena con el mouse encima, y no se mue
 ## 2. Packs: llevá más, pagá menos
 
 - **Qué prendas.** Productos → casilla **Pack**, en la lista o en la ficha. Se pueden marcar muchas juntas con «Vender en pack».
-- **Cuánto se descuenta.** Ajustes → **Packs**: el % por llevar 2, 3, 4 y 5 unidades. Por defecto: 10, 15, 18 y 20. Llevando más, el % no puede ser menor.
-- **La página del pack.** `/producto/pack-x2-<prenda>`. Al elegir 3, 4 o 5 unidades, la dirección cambia a `pack-x3-…`, `pack-x4-…` y así: se puede compartir. Cada prenda se arma con su talle y su color, y «Igual a la anterior» copia la elección.
-- **Cómo se cobra.** El descuento lo calcula el carrito (la API), contando las unidades de esa prenda **en cualquier talle y color**. Vale aunque las sume sueltas desde la ficha. Con más de 5, vale el % de 5.
+- **Cuántas y cuánto se descuenta.** Ajustes → **Packs**: el mínimo y el máximo de unidades (2 a 10 de fábrica, hasta 20) y el % por cada cantidad. Por defecto: 10, 15, 18, 20, 21, 22, 23, 24 y 25. Llevando más, el % no puede ser menor. *(Etapa 9: antes era de 2 a 5; el stock, las secciones por categoría y Liquidación están en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md).)*
+- **La página del pack.** `/producto/pack-x2-<prenda>`. Al elegir otra cantidad, la dirección cambia a `pack-x3-…`, `pack-x4-…` y así: se puede compartir. Cada prenda se arma con su talle y su color; «Igual a la anterior» copia la elección y «Copiar la prenda 1 a todas» llena las vacías. Nunca ofrece más de lo que hay en stock.
+- **Cómo se cobra.** El descuento lo calcula el carrito (la API), contando las unidades de esa prenda **en cualquier talle y color**. Vale aunque las sume sueltas desde la ficha. Con más que el máximo, vale el % del máximo.
   - **No se suma a una rebaja** de la prenda (Descuentos): gana el mayor.
   - **Un cupón** se aplica después, igual que con una rebaja: un cupón que no vale «sobre rebajas» tampoco vale sobre una prenda en pack.
   - **La transferencia** suma su % al final, como siempre.

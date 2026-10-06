@@ -89,6 +89,7 @@ const limpiar = async () => {
   await pool.query("DELETE FROM tienda.categorias WHERE slug LIKE 'qa-adm%'");
   await pool.query("DELETE FROM tienda.redirecciones WHERE desde LIKE '/qa-adm%'");
   await pool.query("DELETE FROM tienda.banners WHERE alt LIKE 'QA adm%'");
+  await pool.query("DELETE FROM tienda.transferencias_recibidas WHERE externo LIKE 'qa-adm-%'");
 };
 
 const IP = { "x-isu-interno": INTERNO, "x-isu-ip": "10.9.9.9" };
@@ -641,7 +642,8 @@ describe("packs", () => {
   it("marcar una prenda como pack la muestra en Packs, con su composición, y prende el menú", async () => {
     expect((await app.inject("/v1/config")).json().hayPacks).toBe(false);
     expect((await req("PATCH", `/v1/admin/productos/${ids["qa-adm-1"]}`, operador, { pack: true, composicion: "100% algodón peinado" })).statusCode).toBe(200);
-    expect((await app.inject("/v1/config")).json()).toMatchObject({ hayPacks: true, packs: [10, 15, 18, 20] });
+    // La migración 0015 pasó el ajuste de fábrica [10, 15, 18, 20] a la escala de 2 a 10.
+    expect((await app.inject("/v1/config")).json()).toMatchObject({ hayPacks: true, packs: { minimo: 2, maximo: 10, porcentajes: [10, 15, 18, 20, 21, 22, 23, 24, 25] }, packsEn: ["mujer"] });
     const col = (await app.inject("/v1/productos?coleccion=packs")).json();
     expect(col.productos.map((p: { slug: string }) => p.slug)).toEqual(["qa-adm-1"]);
     expect(col.productos[0].pack).toBe(true);
@@ -657,9 +659,9 @@ describe("packs", () => {
       [850_000, 1_000_000, { unidades: 3, porcentaje: 15 }], [935_000, 1_100_000, { unidades: 3, porcentaje: 15 }],
     ]);
     expect(tres.subtotal).toBe(2 * 850_000 + 935_000);
-    // Con más de 5, el de 5. Una prenda que no es pack no suma.
+    // 7 de la misma prenda → el % de 7. Una prenda que no es pack no suma.
     const muchas = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 4 }, { sku: "QA-ADM-1-2", cantidad: 3 }, { sku: "QA-ADM-5-1", cantidad: 2 }])).json();
-    expect(muchas.lineas.map((l: { pack: { porcentaje: number } | null }) => l.pack?.porcentaje ?? 0)).toEqual([20, 20, 0]);
+    expect(muchas.lineas.map((l: { pack: { porcentaje: number } | null }) => l.pack?.porcentaje ?? 0)).toEqual([22, 22, 0]);
   });
   it("no se suma a la rebaja de la prenda: gana el mayor", async () => {
     const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm rebaja remera", porcentaje: 25, alcance: "productos", productoIds: [ids["qa-adm-1"]] });
@@ -667,14 +669,94 @@ describe("packs", () => {
     expect(dos.lineas[0]).toMatchObject({ precio: 750_000, precioLista: 1_000_000, pack: null });
     await pool.query("DELETE FROM tienda.descuentos WHERE id = $1", [d.json().id]);
   });
-  it("los % se cambian en Ajustes (nunca menos llevando más)", async () => {
-    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: [10, 5, 20, 25] })).statusCode).toBe(400);
-    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: [10, 15, 90, 95] })).statusCode).toBe(400);
-    expect((await req("PUT", "/v1/admin/ajustes", dueno, { hayPacks: false })).statusCode).toBe(400);
-    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: [5, 10, 20, 30] })).statusCode).toBe(200);
-    const cuatro = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 4 }])).json();
-    expect(cuatro.lineas[0]).toMatchObject({ precio: 800_000, pack: { unidades: 4, porcentaje: 20 } });
-    await req("PUT", "/v1/admin/ajustes", dueno, { packs: [10, 15, 18, 20] });
+  it("mínimo, máximo y % se cambian en Ajustes (nunca menos llevando más); con más del máximo, el del máximo", async () => {
+    for (const malo of [
+      { minimo: 2, maximo: 5, porcentajes: [10, 5, 20, 25] }, { minimo: 2, maximo: 5, porcentajes: [10, 15, 90, 95] },
+      { minimo: 2, maximo: 5, porcentajes: [10, 15] }, { minimo: 1, maximo: 2, porcentajes: [5, 10] }, { minimo: 2, maximo: 30, porcentajes: Array(29).fill(5) },
+      [10, 15, 18, 20],
+    ]) expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: malo })).statusCode, JSON.stringify(malo)).toBe(400);
+    for (const k of ["hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn"]) expect((await req("PUT", "/v1/admin/ajustes", dueno, { [k]: false })).statusCode, k).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: { minimo: 3, maximo: 4, porcentajes: [10, 20] } })).statusCode).toBe(200);
+    // 2 ya no es pack; 4 es el máximo; 6, el % del máximo.
+    const pct = async (n: number) => (await carrito([{ sku: "QA-ADM-1-1", cantidad: n }])).json().lineas[0].pack?.porcentaje ?? 0;
+    expect([await pct(2), await pct(3), await pct(4), await pct(6)]).toEqual([0, 10, 20, 20]);
+    expect((await app.inject("/v1/config")).json().packs).toEqual({ minimo: 3, maximo: 4, porcentajes: [10, 20] });
+    await req("PUT", "/v1/admin/ajustes", dueno, { packs: { minimo: 2, maximo: 10, porcentajes: [10, 15, 18, 20, 21, 22, 23, 24, 25] } });
+  });
+  it("los packs se piden por categoría de arriba (/packs/mujer, /packs/ninos)", async () => {
+    await req("PATCH", `/v1/admin/productos/${ids["qa-adm-4"]}`, operador, { pack: true });
+    const de = async (c: string) => app.inject(`/v1/productos?coleccion=packs&categoria=${c}`);
+    expect((await (await de("mujer")).json()).productos.map((p: { slug: string }) => p.slug)).toEqual(["qa-adm-1"]);
+    expect((await (await de("ninos")).json()).productos.map((p: { slug: string }) => p.slug)).toEqual(["qa-adm-4"]);
+    expect((await de("no-existe")).statusCode).toBe(404);
+    expect((await app.inject("/v1/productos?coleccion=packs&categoria=Mujer'--")).statusCode).toBe(400);
+    expect((await app.inject("/v1/config")).json().packsEn).toEqual(expect.arrayContaining(["mujer", "ninos"]));
+    await req("PATCH", `/v1/admin/productos/${ids["qa-adm-4"]}`, operador, { pack: false });
+  });
+});
+
+describe("liquidación (etapa 9)", () => {
+  const lista = async (q: string) => (await app.inject(`/v1/productos?${q}`)).json().productos.map((p: { slug: string }) => p.slug);
+  it("un descuento marcado como liquidación pone sus productos en Liquidación (por categoría), con la etiqueta", async () => {
+    expect((await app.inject("/v1/config")).json()).toMatchObject({ hayLiquidacion: false, liquidacionEn: [] });
+    const comun = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm rebaja común", porcentaje: 10, alcance: "productos", productoIds: [ids["qa-adm-2"]] });
+    const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm liquidación", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-3"], ids["qa-adm-4"]], liquidacion: true });
+    expect(d.statusCode, d.body).toBe(201);
+    expect(await lista("coleccion=liquidacion")).toEqual(expect.arrayContaining(["qa-adm-3", "qa-adm-4"]));
+    expect(await lista("coleccion=liquidacion")).not.toContain("qa-adm-2");
+    expect(await lista("coleccion=liquidacion&categoria=ninos")).toEqual(["qa-adm-4"]);
+    expect(await lista("coleccion=liquidacion&categoria=mujer")).toEqual(["qa-adm-3"]);
+    const tarjeta = (await app.inject("/v1/productos?coleccion=liquidacion&categoria=mujer")).json().productos[0];
+    expect(tarjeta).toMatchObject({ liquidacion: true, descuento: 30 });
+    expect((await app.inject("/v1/productos/qa-adm-3")).json()).toMatchObject({ liquidacion: true, descuento: 30 });
+    expect((await app.inject("/v1/productos/qa-adm-2")).json().liquidacion).toBe(false);
+    expect((await app.inject("/v1/config")).json()).toMatchObject({ hayLiquidacion: true, liquidacionEn: expect.arrayContaining(["mujer", "ninos"]) });
+    const admin = (await req("GET", "/v1/admin/descuentos", operador)).json().descuentos.find((x: { id: number }) => x.id === d.json().id);
+    expect(admin).toMatchObject({ liquidacion: true });
+    // Lo agotado no se liquida (no se muestra).
+    await pool.query("UPDATE tienda.variantes SET stock = 0 WHERE producto_id = $1", [ids["qa-adm-4"]]);
+    expect(await lista("coleccion=liquidacion&categoria=ninos")).toEqual([]);
+    await pool.query("UPDATE tienda.variantes SET stock = 5 WHERE producto_id = $1", [ids["qa-adm-4"]]);
+    // Vencida o pausada, sale de Liquidación.
+    await req("PUT", `/v1/admin/descuentos/${d.json().id}`, operador, { nombre: "QA adm liquidación", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-3"], ids["qa-adm-4"]], liquidacion: true, desde: "2020-01-01T00:00:00Z", hasta: "2020-02-01T00:00:00Z" });
+    expect(await lista("coleccion=liquidacion")).not.toContain("qa-adm-3");
+    expect((await app.inject("/v1/config")).json().hayLiquidacion).toBe(false);
+    await req("DELETE", `/v1/admin/descuentos/${d.json().id}`, operador);
+    await req("DELETE", `/v1/admin/descuentos/${comun.json().id}`, operador);
+  });
+  it("por categorías (con sus subcategorías) también vale", async () => {
+    const mujer = (await pool.query("SELECT id FROM tienda.categorias WHERE slug = 'mujer' AND padre_id IS NULL")).rows[0].id;
+    const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm liquidación mujer", porcentaje: 40, alcance: "categorias", categoriaIds: [mujer], liquidacion: true });
+    expect(await lista("coleccion=liquidacion&categoria=mujer")).toEqual(expect.arrayContaining(["qa-adm-1", "qa-adm-2", "qa-adm-3", "qa-adm-5"]));
+    expect(await lista("coleccion=liquidacion&categoria=ninos")).toEqual([]);
+    await req("DELETE", `/v1/admin/descuentos/${d.json().id}`, operador);
+  });
+});
+
+describe("menú con fotos (etapa 9)", () => {
+  it("1 o 2 prendas con foto y stock por categoría de arriba: primero las destacadas", async () => {
+    // Fotos de muestra (sin archivo: el menú sólo necesita la clave).
+    for (const [slug, clave] of [["qa-adm-5", "p/qa/menu-5"], ["qa-adm-2", "p/qa/menu-2"], ["qa-adm-4", "p/qa/menu-4"]] as const) {
+      await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, clave, ancho, alto, orden) VALUES ($1, 'exhibicion', $2, 800, 1000, 99) ON CONFLICT (clave) DO NOTHING", [ids[slug], clave]);
+    }
+    // Otras pruebas dejaron destacadas: se arranca de cero y al final se devuelven.
+    const destacadas = (await pool.query<{ id: number }>("SELECT id FROM tienda.productos WHERE destacado AND slug LIKE 'qa-adm-%'")).rows.map((x) => x.id);
+    await pool.query("UPDATE tienda.productos SET destacado = false WHERE id = ANY($1::int[])", [destacadas]);
+    await req("PATCH", `/v1/admin/productos/${ids["qa-adm-5"]}`, operador, { destacado: true });
+    const r = await app.inject("/v1/menu");
+    expect(r.statusCode).toBe(200);
+    const menu = Object.fromEntries(r.json().categorias.map((c: { categoria: string; productos: unknown[] }) => [c.categoria, c.productos]));
+    expect(menu.mujer.length).toBeLessThanOrEqual(2);
+    expect(menu.mujer[0]).toMatchObject({ slug: "qa-adm-5", foto: { ancho: 800, alto: 1000 } });
+    expect(menu.ninos.map((p: { slug: string }) => p.slug)).toEqual(["qa-adm-4"]);
+    // Sin stock no sale.
+    await pool.query("UPDATE tienda.variantes SET stock = 0 WHERE producto_id = $1", [ids["qa-adm-4"]]);
+    const sin = Object.fromEntries((await app.inject("/v1/menu")).json().categorias.map((c: { categoria: string; productos: unknown[] }) => [c.categoria, c.productos]));
+    expect(sin.ninos ?? []).toEqual([]);
+    await pool.query("UPDATE tienda.variantes SET stock = 5 WHERE producto_id = $1", [ids["qa-adm-4"]]);
+    await req("PATCH", `/v1/admin/productos/${ids["qa-adm-5"]}`, operador, { destacado: false });
+    await pool.query("UPDATE tienda.productos SET destacado = true WHERE id = ANY($1::int[])", [destacadas]);
+    await pool.query("DELETE FROM tienda.fotos WHERE clave LIKE 'p/qa/menu-%'");
   });
 });
 
@@ -826,5 +908,79 @@ describe("portada (banners del inicio)", () => {
     expect((await app.inject("/v1/portada")).json().banners.some((x: { id: number }) => x.id === b.id)).toBe(false);
     expect((await req("DELETE", `/v1/admin/banners/${b.id}`, operador)).statusCode).toBe(200);
     expect(await readdir(path.join(dirFotos, "b", String(b.id)))).toEqual([]);
+  });
+});
+
+describe("transferencias recibidas (lo que no se pudo asignar solo)", () => {
+  async function pedido(total: number, estado = "esperando_transferencia") {
+    const r = await pool.query(
+      `INSERT INTO tienda.pedidos (acceso_hash,email,nombre,apellido,telefono,dni,entrega,local_retiro,medio_pago,subtotal,total,estado,transferencia_via,transferencia_monto)
+       VALUES ($1,'qa-adm-transf@test.com','Ana','García','1','2','retiro','Flores','transferencia',$2,$2,$3,'mercadopago',$2 + 37) RETURNING id, numero`,
+      ["e".repeat(64), total, estado]);
+    return r.rows[0] as { id: number; numero: string };
+  }
+  async function recibida(externo: string, monto: number, estado = "sin_pedido") {
+    const r = await pool.query(
+      `INSERT INTO tienda.transferencias_recibidas (via, externo, monto, pagador, recibida_en, estado) VALUES ('mercadopago', $1, $2, 'Carla Pérez', now(), $3) RETURNING id`,
+      [externo, monto, estado]);
+    return r.rows[0].id as number;
+  }
+
+  it("la lista: lo que falta resolver primero, y qué está prendido", async () => {
+    const id = await recibida("qa-adm-lista", 1_234_500);
+    const r = (await req("GET", "/v1/admin/transferencias", lectura2)).json();
+    expect(r.transferencias.find((t: { id: number }) => t.id === id)).toMatchObject({ via: "mercadopago", monto: 1_234_500, pagador: "Carla Pérez", estado: "sin_pedido", pedido: null });
+    expect(r.porResolver).toBeGreaterThanOrEqual(1);
+    expect(r.estado).toEqual({ talo: { prendido: false, configurado: false }, mercadoPago: { prendido: expect.any(Boolean), configurado: expect.any(Boolean) } });
+    expect((await req("GET", "/v1/admin/resumen", operador)).json().transferenciasPorResolver).toBeGreaterThanOrEqual(1);
+    expect((await req("GET", "/v1/admin/transferencias")).statusCode).toBe(401);
+    expect((await req("GET", "/v1/admin/transferencias?estado=pendiente", operador)).statusCode).toBe(400);
+  });
+
+  it("asignar a mano: sólo operador, confirma el pedido, queda auditado y no se repite", async () => {
+    const p = await pedido(1_000_000);
+    const id = await recibida("qa-adm-asignar", 1_000_000);
+    expect((await req("POST", `/v1/admin/transferencias/${id}/asignar`, lectura2, { pedido: p.numero })).json().error).toBe("sin_permiso");
+    expect((await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: "1234" })).statusCode).toBe(400);
+    enviados.length = 0;
+    const r = await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: p.numero.toLowerCase() });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ estado: "pagado" });
+    expect(enviados.some((e) => e.nombre === "pagado")).toBe(true);
+    const t = (await pool.query("SELECT estado, pedido_id, resuelta_por FROM tienda.transferencias_recibidas WHERE id = $1", [id])).rows[0];
+    expect(t).toMatchObject({ estado: "aplicada", pedido_id: p.id, resuelta_por: expect.stringMatching(/^qa-adm/) });
+    const aud = await pool.query("SELECT accion FROM tienda.auditoria WHERE entidad = 'transferencia' AND entidad_id = $1", [String(id)]);
+    expect(aud.rows.map((x) => x.accion)).toEqual(["asignar_transferencia"]);
+    expect((await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: p.numero })).json().error).toBe("ya_resuelta");
+  });
+
+  it("no se asigna a un pedido ya cobrado, ni una que no alcanza (queda sin resolver)", async () => {
+    const pagado = await pedido(1_000_000, "pagado");
+    const id = await recibida("qa-adm-cobrado", 1_000_000);
+    expect((await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: pagado.numero })).json().error).toBe("ya_pagado");
+    const p = await pedido(2_000_000);
+    const r = await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: p.numero });
+    expect(r.json()).toMatchObject({ error: "no_alcanza" });
+    expect((await pool.query("SELECT estado FROM tienda.pedidos WHERE id = $1", [p.id])).rows[0].estado).toBe("esperando_transferencia");
+    expect((await pool.query("SELECT estado FROM tienda.transferencias_recibidas WHERE id = $1", [id])).rows[0].estado).toBe("sin_pedido");
+    expect((await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: "ISU-99999999" })).statusCode).toBe(404);
+  });
+
+  it("descartar (algo que no es una compra): con nota, una sola vez", async () => {
+    const id = await recibida("qa-adm-descartar", 50_000);
+    expect((await req("POST", `/v1/admin/transferencias/${id}/descartar`, lectura2, {})).json().error).toBe("sin_permiso");
+    expect((await req("POST", `/v1/admin/transferencias/${id}/descartar`, operador, { nota: "Me devolvió un préstamo" })).statusCode).toBe(200);
+    expect((await pool.query("SELECT estado, nota FROM tienda.transferencias_recibidas WHERE id = $1", [id])).rows[0]).toEqual({ estado: "descartada", nota: "Me devolvió un préstamo" });
+    expect((await req("POST", `/v1/admin/transferencias/${id}/descartar`, operador, {})).statusCode).toBe(404);
+    expect((await req("POST", "/v1/admin/transferencias/99999999/descartar", operador, {})).statusCode).toBe(404);
+  });
+
+  it("el ajuste se prende desde Ajustes (sólo el dueño) y con el formato justo", async () => {
+    expect((await req("PUT", "/v1/admin/ajustes", operador, { transferenciasAuto: { talo: false, mercadoPago: true } })).json().error).toBe("sin_permiso");
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { transferenciasAuto: { talo: "si", mercadoPago: true } })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { transferenciasAuto: { talo: false, mercadoPago: true, extra: 1 } })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { transferenciasAuto: { talo: false, mercadoPago: true } })).statusCode).toBe(200);
+    expect((await req("GET", "/v1/admin/transferencias", operador)).json().estado.mercadoPago.prendido).toBe(true);
+    await req("PUT", "/v1/admin/ajustes", dueno, { transferenciasAuto: { talo: false, mercadoPago: false } });
   });
 });

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { ListadoProductos, ProductoDetalle, slug } from "@isu/shared";
 import type { CacheCorta } from "../../lib/cache.js";
 import { noEncontrado } from "../../lib/errores.js";
-import { buscar, coleccion, detalle, leerAjuste, productosDeCategoria, productosNuevos, slugsPublicables, tarjetas } from "./consultas.js";
+import { buscar, coleccion, detalle, fotosDelMenu, leerAjuste, productosDeCategoria, productosNuevos, slugsPublicables, tarjetas } from "./consultas.js";
 import type { Descuentos } from "../../lib/descuentos.js";
 
 /*
@@ -13,7 +13,9 @@ import type { Descuentos } from "../../lib/descuentos.js";
  *
  *   GET /v1/productos?categoria=mujer[&sub=remeras-y-tops]   grilla de una categoría
  *   GET /v1/productos?nuevos=8                               lo último que entró (home)
- *   GET /v1/productos?coleccion=packs                        lo que se vende en pack (etapa 8)
+ *   GET /v1/productos?coleccion=packs[&categoria=hombre]     lo que se vende en pack (etapa 8; por categoría, etapa 9)
+ *   GET /v1/productos?coleccion=liquidacion[&categoria=…]    lo que está en Liquidación (etapa 9)
+ *   GET /v1/menu                                             fotos del menú: 1 o 2 prendas por categoría de arriba (etapa 9)
  *   GET /v1/productos/:slug                                  ficha
  *   GET /v1/buscar?q=remera                                  búsqueda
  *   GET /v1/productos-slugs                                  para el sitemap
@@ -49,21 +51,29 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
           z.object({ categoria: slug, sub: slug.optional(), limite: z.coerce.number().int().min(1).max(24).optional() }).strict(),
           z.object({ nuevos: z.coerce.number().int().min(1).max(24) }).strict(),
           // Colecciones elegidas en el backoffice (sección del inicio y su página).
-          z.object({ coleccion: z.enum(["nuevos", "destacados", "packs"]), limite: z.coerce.number().int().min(1).max(200).default(200) }).strict(),
+          z.object({
+            coleccion: z.enum(["nuevos", "destacados", "packs", "liquidacion"]), limite: z.coerce.number().int().min(1).max(200).default(200),
+            // Etapa 9: /packs/hombre, /liquidacion/mujer (una categoría de arriba, con sus hijas).
+            categoria: slug.optional(),
+          }).strict(),
         ]),
         response: { 200: ListadoProductos },
       },
     },
     async (req, reply) => {
       const q = req.query;
-      const clave = "nuevos" in q ? `nuevos:${q.nuevos}` : "coleccion" in q ? `col:${q.coleccion}:${q.limite}` : `cat:${q.categoria}/${q.sub ?? ""}:${q.limite ?? ""}`;
+      const clave = "nuevos" in q ? `nuevos:${q.nuevos}` : "coleccion" in q ? `col:${q.coleccion}:${q.limite}:${q.categoria ?? ""}` : `cat:${q.categoria}/${q.sub ?? ""}:${q.limite ?? ""}`;
       const r = await deps.cache.obtener(clave, async () => {
         let filas;
         if ("nuevos" in q) {
           // Lo marcado como nuevo; si todavía no se marcó nada, lo último que entró.
           filas = await coleccion(deps.pool, "nuevos", q.nuevos);
           if (!filas.length) filas = await productosNuevos(deps.pool, q.nuevos);
-        } else if ("coleccion" in q) filas = await coleccion(deps.pool, q.coleccion, q.limite);
+        } else if ("coleccion" in q) {
+          const id = q.categoria ? await categoriaId(q.categoria) : null;
+          if (q.categoria && id === null) return null;
+          filas = await coleccion(deps.pool, q.coleccion, q.limite, id);
+        }
         else {
           const id = await categoriaId(q.categoria, q.sub);
           if (id === null) return null;
@@ -78,6 +88,15 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
       return r;
     },
   );
+
+  api.get("/v1/menu", {
+    schema: {
+      response: { 200: z.object({ categorias: z.array(z.object({ categoria: z.string(), productos: z.array(z.object({ slug: z.string(), nombre: z.string(), foto: z.object({ clave: z.string(), ancho: z.number().int().nullable(), alto: z.number().int().nullable(), alt: z.string().nullable() }) })) })) }) },
+    },
+  }, async (_req, reply) => {
+    reply.header("cache-control", CACHE_PUBLICO);
+    return { categorias: await deps.cache.obtener("menu", () => fotosDelMenu(deps.pool)) };
+  });
 
   api.get(
     "/v1/productos/:slug",

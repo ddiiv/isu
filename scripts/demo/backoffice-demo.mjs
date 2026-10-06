@@ -6,7 +6,8 @@
  *   · un descuento del 20 % en calzas,
  *   · dos cupones: BIENVENIDA10 (10 %, una vez por cliente) y ENVIOGRATIS
  *     (envío gratis desde $30.000).
- *   · etapa 8: tres prendas que se venden en pack, composición, opiniones de
+ *   · etapa 9: liquidación de invierno (un descuento marcado como liquidación) y packs en las tres categorías;
+ *   · etapa 8: prendas que se venden en pack, composición, opiniones de
  *     muestra (de pedidos de prueba entregados) y dos banners en la portada.
  * En producción todo esto se hace desde el backoffice.
  *
@@ -74,7 +75,11 @@ await pool.query(`INSERT INTO tienda.cupones (codigo, nombre, tipo, valor, minim
   ON CONFLICT (codigo) WHERE codigo IS NOT NULL DO NOTHING`);
 
 // ── Etapa 8: packs, composición, opiniones de muestra y portada ──
-console.warn(`Packs: ${await porNombre("pack", ["Remera Oversize Algodón Peinado", "Remera Básica Cuello Redondo", "Top Deportivo Ribb", "Musculosa Morley"])}`);
+console.warn(`Packs: ${await porNombre("pack", ["Remera Oversize Algodón Peinado", "Remera Básica Cuello Redondo", "Top Deportivo Ribb", "Musculosa Morley", "Bermuda Rústica con Bolsillos", "Remera Estampada Niños"])}`);
+// Etapa 9: Liquidación de fin de temporada (un descuento marcado como liquidación), en las tres categorías.
+await pool.query(`INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, producto_ids, liquidacion, creado_por)
+  SELECT 'Liquidación de invierno (demo)', 35, 'productos', array_agg(id), true, 'demo' FROM tienda.productos
+   WHERE nombre IN ('Campera Rompevientos Liviana', 'Buzo Crop Friza', 'Campera Inflable Niños', 'Pantalón Cargo Gabardina') HAVING count(*) > 0`);
 await pool.query("UPDATE tienda.productos SET composicion = '100% algodón jersey' WHERE nombre IN ('Remera Oversize Algodón Peinado', 'Remera Básica Cuello Redondo') AND composicion IS NULL");
 await pool.query("DELETE FROM tienda.pedidos WHERE email LIKE 'demo-resena-%@isuwaya.test'");
 const OPINIONES = [
@@ -102,7 +107,7 @@ console.warn(`Opiniones de muestra: ${numeroResena}`);
 if (process.env.FOTOS_DIR) {
   await pool.query("DELETE FROM tienda.banners WHERE alt LIKE '%(demo)'");
   const BANNERS = [
-    ["Packs de remeras: llevá más, pagá menos (demo)", "/packs", "#2e6b3f", "Packs · Llevá más, pagá menos", "Hasta 20% OFF armando tu pack"],
+    ["Packs de remeras: llevá más, pagá menos (demo)", "/packs", "#2e6b3f", "Packs · Llevá más, pagá menos", "Hasta 25% OFF armando tu pack de 2 a 10"],
     ["Nuevos ingresos de temporada (demo)", "/nuevos", "#2c5f91", "Nuevos ingresos", "Lo último que salió del taller"],
   ];
   for (const [i, [alt, enlace, color, titulo, bajada]] of BANNERS.entries()) {

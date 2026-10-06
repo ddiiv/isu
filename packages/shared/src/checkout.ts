@@ -167,7 +167,15 @@ export const PedidoPublico = z.object({
     // Mercado Pago / Pago Fácil: a dónde ir a pagar (si todavía no pagó)
     url: z.string().nullable(),
     // Transferencia: a dónde transferir
-    transferencia: z.object({ titular: z.string(), cuit: z.string(), banco: z.string(), cbu: z.string(), alias: z.string() }).nullable(),
+    transferencia: z.object({
+      titular: z.string(), cuit: z.string(), banco: z.string(), cbu: z.string(), alias: z.string(),
+      /** Cuánto transferir, en centavos (con Mercado Pago, con los centavos que identifican el pedido). */
+      monto: z.number().int(),
+      /** talo: CVU propio del pedido · mercadopago: alias de la cuenta de MP · cuenta: se confirma a mano. */
+      via: z.enum(["talo", "mercadopago", "cuenta"]),
+      /** Se confirma sola, sin comprobante. */
+      automatica: z.boolean(),
+    }).nullable(),
     comprobanteSubido: z.boolean(),
   }),
 });

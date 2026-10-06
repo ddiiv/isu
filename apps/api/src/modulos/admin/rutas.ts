@@ -72,6 +72,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         "SELECT DISTINCT ON (tipo) tipo, inicio, fin, error, cambios FROM tienda.sincronizaciones ORDER BY tipo, inicio DESC"),
     ]);
     const resenas = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM tienda.resenas WHERE estado = 'pendiente'");
+    const transferencias = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM tienda.transferencias_recibidas WHERE estado IN ('sin_pedido', 'monto_distinto')");
     const p = ped.rows[0]!;
     return {
       pedidosHoy: p.hoy, ventasHoy: Number(p.ventas_hoy), ventasMes: Number(p.ventas_mes),
@@ -79,6 +80,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       catalogo: cat.rows[0],
       sincronizacion: sinc.rows.map((s) => ({ tipo: s.tipo, inicio: s.inicio.toISOString(), fin: s.fin?.toISOString() ?? null, error: s.error, cambios: s.cambios })),
       resenasPorModerar: resenas.rows[0]?.n ?? 0,
+      transferenciasPorResolver: transferencias.rows[0]?.n ?? 0,
     };
   });
 
@@ -576,14 +578,16 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     desde: z.iso.datetime({ offset: true }).nullable().default(null),
     hasta: z.iso.datetime({ offset: true }).nullable().default(null),
     activo: z.boolean().default(true),
+    // Etapa 9: sus productos salen en la sección Liquidación (fin de temporada o lo que se elija liquidar).
+    liquidacion: z.boolean().default(false),
   }).strict().refine((d) => d.alcance !== "categorias" || d.categoriaIds.length > 0, { message: "Elegí al menos una categoría", path: ["categoriaIds"] })
     .refine((d) => d.alcance !== "productos" || d.productoIds.length > 0, { message: "Elegí al menos un producto", path: ["productoIds"] })
     .refine((d) => !d.desde || !d.hasta || new Date(d.hasta) > new Date(d.desde), { message: "La fecha de fin tiene que ser posterior", path: ["hasta"] });
-  const aFila = (d: z.infer<typeof Descuento>) => [d.nombre, d.porcentaje, d.alcance, d.alcance === "categorias" ? d.categoriaIds : [], d.alcance === "productos" ? d.productoIds : [], d.desde, d.hasta, d.activo];
+  const aFila = (d: z.infer<typeof Descuento>) => [d.nombre, d.porcentaje, d.alcance, d.alcance === "categorias" ? d.categoriaIds : [], d.alcance === "productos" ? d.productoIds : [], d.desde, d.hasta, d.activo, d.liquidacion];
   api.get("/v1/admin/descuentos", async (req) => {
     await exigir(pool, req);
     const { rows } = await pool.query(
-      `SELECT id, nombre, porcentaje, alcance, categoria_ids AS "categoriaIds", producto_ids AS "productoIds", desde, hasta, activo, creado_por AS "creadoPor",
+      `SELECT id, nombre, porcentaje, alcance, categoria_ids AS "categoriaIds", producto_ids AS "productoIds", desde, hasta, activo, liquidacion, creado_por AS "creadoPor",
               (activo AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())) AS vigente
          FROM tienda.descuentos ORDER BY activo DESC, id DESC`);
     return { descuentos: rows };
@@ -591,7 +595,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.post("/v1/admin/descuentos", { schema: { body: Descuento } }, async (req, reply) => {
     const a = await exigir(pool, req, "operador");
     const { rows } = await pool.query<{ id: number }>(
-      "INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, categoria_ids, producto_ids, desde, hasta, activo, creado_por) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+      "INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, categoria_ids, producto_ids, desde, hasta, activo, liquidacion, creado_por) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
       [...aFila(req.body), a.email]);
     await auditar(pool, a, "crear_descuento", "descuento", rows[0]!.id, req.body, ip(req));
     await invalidar([]);
@@ -600,7 +604,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.put("/v1/admin/descuentos/:id", { schema: { params: z.object({ id: Id }), body: Descuento } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const r = await pool.query(
-      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, actualizado_en=now() WHERE id = $1",
+      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, liquidacion=$10, actualizado_en=now() WHERE id = $1",
       [req.params.id, ...aFila(req.body)]);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese descuento.");
     await auditar(pool, a, "editar_descuento", "descuento", req.params.id, req.body, ip(req));
@@ -651,8 +655,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     alias: z.string().trim().regex(/^$|^[A-Za-z0-9.-]{6,20}$/, "El alias tiene de 6 a 20 letras, números, puntos o guiones"),
   }).strict();
   const AJUSTES: Record<string, z.ZodType> = {
-    // hayPacks no se guarda: sale de las prendas marcadas como pack.
-    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks"].includes(k))),
+    // hayPacks, packsEn, hayLiquidacion y liquidacionEn no se guardan: salen de los productos y los descuentos.
+    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn"].includes(k))),
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),
@@ -672,6 +676,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     chatbotIa: AjusteChatbotIa,
     // Etapa 8: reseñas (publicar sin revisar, a los cuántos días de entregado se pide la opinión).
     resenas: z.object({ publicarSolas: z.boolean(), pedirDias: z.number().int().min(1).max(60) }).strict(),
+    // Transferencias que se confirman solas: CVU por pedido (Talo) y/o alias de la cuenta de Mercado Pago con centavos únicos.
+    transferenciasAuto: z.object({ talo: z.boolean(), mercadoPago: z.boolean() }).strict(),
   };
   api.get("/v1/admin/ajustes", async (req) => {
     await exigir(pool, req, "dueno");

@@ -1,4 +1,4 @@
-import { formatearPesos } from "@isu/shared";
+import { formatearPesos, formatearPesosExactos } from "@isu/shared";
 
 /*
  * Mails al cliente. HTML simple (tablas, estilos en línea: es lo que leen
@@ -25,7 +25,11 @@ interface DatosPedido {
   /** "cupón VERANO10 (10% OFF)" o "promo …" (etapa 6) */
   cupon?: string | null; descuentoCupon?: number;
   entrega: "envio" | "retiro"; local: string | null; venceEn: string | null; items: Item[]; enlace: string;
-  transferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string } | null;
+  transferencia: {
+    titular: string; cuit: string; banco: string; cbu: string; alias: string;
+    /** Transferencias que se confirman solas: el monto exacto (centavos) y a dónde. Mails viejos en la cola pueden no traerlo. */
+    monto?: number; via?: "talo" | "mercadopago" | "cuenta"; automatica?: boolean;
+  } | null;
 }
 
 const fecha = (iso: string | null) => (iso ? new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "");
@@ -78,11 +82,17 @@ export function armar(plantilla: Plantilla, datos: Record<string, unknown>): { a
       let como: string;
       if (d.medioPago === "transferencia" && d.transferencia) {
         const t = d.transferencia;
-        como = `<p><b>Transferí ${esc(formatearPesos(d.total))}</b> antes del ${esc(fecha(d.venceEn))}:</p>
-<table role="presentation" style="font-size:14px;background:#e9f3ec;border-radius:10px;padding:12px;width:100%">
-<tr><td>Titular</td><td><b>${esc(t.titular)}</b></td></tr><tr><td>CUIT</td><td>${esc(t.cuit)}</td></tr><tr><td>Banco</td><td>${esc(t.banco)}</td></tr>
-<tr><td>CBU</td><td><b>${esc(t.cbu)}</b></td></tr><tr><td>Alias</td><td><b>${esc(t.alias)}</b></td></tr></table>
-<p>Después subí el comprobante desde tu pedido: así lo confirmamos más rápido.</p>`;
+        const monto = t.monto ?? d.total;
+        const filas = ([["Titular", t.titular, false], ["CUIT", t.cuit, false], ["Banco", t.banco, false], [t.via === "talo" ? "CVU" : "CBU / CVU", t.cbu, true], ["Alias", t.alias, true]] as const)
+          .filter(([, v]) => v).map(([k, v, fuerte]) => `<tr><td>${k}</td><td>${fuerte ? `<b>${esc(v)}</b>` : esc(v)}</td></tr>`).join("");
+        const despues = t.via === "talo"
+          ? "Esa cuenta es sólo para tu pedido: el pago se confirma solo en unos minutos, no hace falta mandar el comprobante."
+          : t.via === "mercadopago"
+            ? "Transferí el monto exacto, <b>con los centavos</b>: así reconocemos tu pago y se confirma solo en unos minutos."
+            : "Después subí el comprobante desde tu pedido: así lo confirmamos más rápido.";
+        como = `<p><b>Transferí ${esc(formatearPesosExactos(monto))}</b> antes del ${esc(fecha(d.venceEn))}:</p>
+<table role="presentation" style="font-size:14px;background:#e9f3ec;border-radius:10px;padding:12px;width:100%">${filas}</table>
+<p>${despues}</p>`;
       } else if (d.medioPago === "local") {
         como = `<p>Lo pagás al retirarlo en <b>${esc(d.local)}</b> hasta el ${esc(fecha(d.venceEn))}. Te lo tenemos guardado.</p>`;
       } else {

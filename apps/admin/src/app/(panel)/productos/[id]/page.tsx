@@ -127,7 +127,7 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
                 </Campo>
               )}
               <Casilla etiqueta="Nuevo" ayuda='Lleva la etiqueta "Nuevo" y sale en "Nuevos" (barra de navegación e inicio).' marcada={f.nuevo} disabled={!operador} onChange={(v) => cambiar("nuevo", v)} />
-              <Casilla etiqueta="Se vende en pack (2 a 5)" ayuda='Sale en "Packs" del inicio y del menú. Llevando 2 o más, cada una tiene el % de Ajustes → Packs (no se suma a una rebaja: gana el mayor).' marcada={f.pack} disabled={!operador} onChange={(v) => cambiar("pack", v)} />
+              <Casilla etiqueta="Se vende en pack" ayuda='Sale en "Packs" del inicio y del menú (en su categoría: Hombre, Mujer, Niños). Se arma con esta prenda, de las cantidades y con el % de Ajustes → Packs, con el stock de cada talle y color (no se suma a una rebaja: gana el mayor).' marcada={f.pack} disabled={!operador} onChange={(v) => cambiar("pack", v)} />
               {f.pack && (
                 <Campo etiqueta="Posición en Packs" ayuda="Más chico = más arriba." className="pl-7">
                   <input type="number" className={`${claseEntrada} w-28`} min={-1000} max={1000} disabled={!operador} value={f.packOrden} onChange={(e) => cambiar("packOrden", Math.max(-1000, Math.min(1000, Number(e.target.value) || 0)))} />

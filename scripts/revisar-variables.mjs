@@ -27,7 +27,8 @@ export function revisar(env = process.env) {
 
   const VARIABLES = ["DATABASE_URL", "REDIS_URL", "NEXT_PUBLIC_SITE_URL", "SITIO_URL", "ADMIN_URL", "API_PUBLICA_URL", "ORIGENES_PERMITIDOS",
     "STOCKER_API_URL", "STOCKER_TOKEN", "INTERNO_TOKEN", "REVALIDAR_TOKEN", "PAGOS_TOKEN", "ADMIN_CLAVE_CIFRADO", "NEXT_PUBLIC_CDN_IMAGENES",
-    "MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET", "SMTP_URL", "MAYORISTA_URL", "R2_CUENTA", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"];
+    "MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET", "SMTP_URL", "MAYORISTA_URL", "R2_CUENTA", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+    "TALO_API_URL", "TALO_USER_ID", "TALO_CLIENT_ID", "TALO_CLIENT_SECRET"];
   const conRelleno = new Set();
   for (const k of VARIABLES) {
     const v = env[k];
@@ -107,6 +108,13 @@ export function revisar(env = process.env) {
   if (!env.STOCKER_API_URL || !env.STOCKER_TOKEN) ojo("STOCKER_API_URL / STOCKER_TOKEN", "faltan: la tienda arranca, pero sin productos (no puede traer el catálogo ni mandar pedidos a Stocker).");
   else if (valida("STOCKER_TOKEN") && env.STOCKER_TOKEN.length < 20) mal("STOCKER_TOKEN", "es muy corta para ser una credencial de Stocker: copiala del backoffice de Stocker (origen «Tienda online minorista»).");
   if (!env.R2_BUCKET && !env.FOTOS_DIR) ojo("R2_*", "faltan: no hay dónde guardar fotos (ni la importación del mayorista ni el backoffice pueden subirlas).");
+  // Transferencias con un CVU por pedido (Talo): las tres juntas, y en producción contra Talo de verdad.
+  const talo = ["TALO_USER_ID", "TALO_CLIENT_ID", "TALO_CLIENT_SECRET"].filter((k) => env[k]);
+  if (talo.length && talo.length < 3) mal("TALO_*", `van las tres juntas (TALO_USER_ID, TALO_CLIENT_ID y TALO_CLIENT_SECRET): falta ${["TALO_USER_ID", "TALO_CLIENT_ID", "TALO_CLIENT_SECRET"].filter((k) => !env[k]).join(" y ")}. Sin las tres, el CVU por pedido no se usa.`);
+  if (talo.length === 3) {
+    const u = conProtocolo("TALO_API_URL", ["https:", "http:"], "https://api.talo.com.ar");
+    if (produccion && u && u.hostname !== "api.talo.com.ar") ojo("TALO_API_URL", `apunta a ${u.hostname}: en producción va https://api.talo.com.ar (sandbox-api es sólo para pruebas: ahí no entra plata de verdad).`);
+  }
   return { errores: [...new Set(errores)], avisos: [...new Set(avisos)] };
 }
 

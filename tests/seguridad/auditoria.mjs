@@ -588,7 +588,8 @@ async function respirar() {
   // Packs: el % lo pone la API; desde el navegador no se manda.
   const packs = await (await pedir(`${API}/v1/productos?coleccion=packs&limite=5`)).json().catch(() => null);
   const conf = await (await pedir(`${API}/v1/config`)).json().catch(() => ({}));
-  const tope = Math.max(0, ...(conf.packs ?? []));
+  // Etapa 9: { minimo, maximo, porcentajes } (antes, una lista de %).
+  const tope = Math.max(0, ...(Array.isArray(conf.packs) ? conf.packs : conf.packs?.porcentajes ?? []));
   const prenda = Array.isArray(packs?.productos) ? packs.productos[0] : Array.isArray(packs) ? packs[0] : null;
   if (prenda?.slug) {
     const ficha = await (await pedir(`${API}/v1/productos/${prenda.slug}`)).json().catch(() => ({}));
@@ -612,6 +613,110 @@ async function respirar() {
     chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
   }
   for (const ruta of ["/api/a/resenas", "/api/a/banners"]) chk(G, `backoffice: ${ruta} sin sesión → 401`, (await pedir(ADMIN + ruta)).status === 401);
+}
+
+// ── 7g. Transferencias que se confirman solas (Talo y la cuenta de Mercado Pago) ──
+{
+  await respirar();
+  const G = "transferencias";
+  const json = (url, body, h = {}) => pedir(url, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) });
+  // El aviso de Talo no viene firmado: con ids que no son de la tienda no pasa nada (ni se le pregunta a Talo).
+  for (const [nombre, cuerpo] of [
+    ["id inventado", { message: "Pago Actualizado", paymentId: "VAR-inventado-123", externalId: "ISU-1001" }],
+    ["id con ../", { paymentId: "../../etc/passwd" }],
+    ["id con inyección", { paymentId: "x' OR '1'='1" }],
+    ["id que no es texto", { paymentId: { $ne: null } }],
+    ["sin id", {}],
+  ]) {
+    const r = await json(`${API}/v1/pagos/talo/aviso`, cuerpo);
+    const b = await r.json().catch(() => ({}));
+    chk(G, `aviso de Talo con ${nombre}: no aplica nada`, (r.status === 200 && b.ignorado) || r.status === 503 || r.status === 400, `${r.status} ${b.ignorado ?? ""}`);
+  }
+  const grande = await pedir(`${API}/v1/pagos/talo/aviso`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ paymentId: "a".repeat(2_000_000) }) });
+  chk(G, "aviso de Talo gigante → rechazado", grande.status === 413 || grande.status === 400 || grande.status === 503, String(grande.status));
+  // La vuelta de conciliación es sólo del worker.
+  for (const h of [{}, { "x-isu-interno": "x".repeat(40) }]) {
+    const r = await json(`${API}/v1/interno/conciliar-transferencias`, {}, h);
+    chk(G, `conciliar transferencias ${Object.keys(h).length ? "con credencial inventada" : "sin credencial"} → 404`, r.status === 404, String(r.status));
+  }
+  // Un aviso de Mercado Pago sin firma no confirma ninguna transferencia.
+  chk(G, "aviso de Mercado Pago sin firma (transferencia inventada) → 401", (await json(`${API}/v1/pagos/mercadopago/aviso?type=payment&data.id=123456789`, { type: "payment", data: { id: "123456789" } })).status === 401);
+  // Backoffice: sin sesión, nada.
+  for (const [metodo, ruta, body] of [
+    ["GET", "/v1/admin/transferencias"], ["POST", "/v1/admin/transferencias/1/asignar", { pedido: "ISU-1001" }], ["POST", "/v1/admin/transferencias/1/descartar", {}],
+    ["PUT", "/v1/admin/ajustes", { transferenciasAuto: { talo: true, mercadoPago: true } }],
+  ]) {
+    const r = await pedir(API + ruta, { method: metodo, headers: { ...(body ? { "content-type": "application/json" } : {}), "x-isu-admin": "a".repeat(43) }, body: body ? JSON.stringify(body) : undefined });
+    chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
+  }
+  chk(G, "backoffice: /api/a/transferencias sin sesión → 401", (await pedir(`${ADMIN}/api/a/transferencias`)).status === 401);
+  // Ningún secreto de Talo viaja al navegador.
+  const taloSecreto = process.env.TALO_CLIENT_SECRET;
+  if (taloSecreto && taloSecreto.length >= 8) {
+    let texto = "";
+    for (const p of ["/", "/checkout"]) {
+      const h = await (await pedir(WEB + p)).text();
+      texto += h;
+      for (const m of [...h.matchAll(/\/_next\/static\/chunks\/[^"]+\.js/g)].slice(0, 15)) texto += await (await pedir(WEB + m[0])).text();
+    }
+    chk(G, "la clave de Talo no aparece en el HTML ni en el JavaScript", !texto.includes(taloSecreto));
+  }
+}
+
+// ── 7h. Etapa 9: packs de 2 a 10, Packs y Liquidación por categoría, fotos del menú ──
+{
+  await respirar();
+  const G = "etapa 9";
+  // La colección y la categoría van validadas: nada raro llega a la consulta.
+  for (const [nombre, qs, esperado] of [
+    ["colección inventada", "coleccion=todo", [400]],
+    ["categoría con ../", "coleccion=packs&categoria=..%2F..%2Fetc", [400]],
+    ["categoría con inyección", "coleccion=liquidacion&categoria=x'%20OR%20'1'%3D'1", [400]],
+    ["categoría en mayúsculas", "coleccion=liquidacion&categoria=HOMBRE", [400]],
+    ["categoría de 500 letras", `coleccion=packs&categoria=${"a".repeat(500)}`, [400]],
+    ["categoría que no existe", "coleccion=packs&categoria=no-existe-esto", [404]],
+    ["colección con campo de más", "coleccion=packs&precioMaximo=1", [400]],
+    ["límite gigante", "coleccion=liquidacion&limite=100000", [400]],
+  ]) {
+    const r = await pedir(`${API}/v1/productos?${qs}`);
+    chk(G, `GET productos con ${nombre} → ${esperado.join("/")}`, esperado.includes(r.status), String(r.status));
+  }
+  // Las fotos del menú: 1 o 2 por categoría, sólo lo necesario y con claves propias.
+  const menu = await (await pedir(`${API}/v1/menu`)).json().catch(() => null);
+  const cats = Array.isArray(menu?.categorias) ? menu.categorias : null;
+  chk(G, "menú: responde la lista de categorías", !!cats);
+  if (cats) {
+    chk(G, "menú: como mucho 2 fotos por categoría", cats.every((c) => c.productos.length >= 1 && c.productos.length <= 2));
+    const prendas = cats.flatMap((c) => c.productos);
+    chk(G, "menú: sólo nombre, slug y foto (sin stock, costos ni precios)", prendas.every((p) => Object.keys(p).sort().join() === "foto,nombre,slug"), JSON.stringify(prendas[0] ?? {}));
+    chk(G, "menú: las fotos son claves propias (sin URLs ajenas)", prendas.every((p) => typeof p.foto.clave === "string" && !/^[a-z]+:|^\/\/|\.\./i.test(p.foto.clave)));
+  }
+  // Config: sólo slugs de categorías; el rango de packs dentro del tope.
+  const conf = await (await pedir(`${API}/v1/config`)).json().catch(() => ({}));
+  chk(G, "config: packsEn y liquidacionEn son slugs", [...(conf.packsEn ?? []), ...(conf.liquidacionEn ?? [])].every((x) => /^[a-z0-9][a-z0-9-]*$/.test(x)));
+  chk(G, "config: packs de 2 a 20 como mucho, un % por cantidad y nunca más de 60", !!conf.packs && conf.packs.minimo >= 2 && conf.packs.maximo <= 20 && conf.packs.minimo <= conf.packs.maximo
+    && conf.packs.porcentajes?.length === conf.packs.maximo - conf.packs.minimo + 1 && conf.packs.porcentajes.every((p) => p >= 0 && p <= 60), JSON.stringify(conf.packs ?? null));
+  // Backoffice: marcar liquidación, cambiar el rango de packs o mandar a liquidación necesita sesión.
+  for (const [metodo, ruta, body] of [
+    ["POST", "/v1/admin/descuentos", { nombre: "Liquidación hackeo", porcentaje: 90, alcance: "todo", liquidacion: true }],
+    ["PUT", "/v1/admin/descuentos/1", { nombre: "Liquidación hackeo", porcentaje: 90, alcance: "todo", liquidacion: true }],
+    ["PUT", "/v1/admin/ajustes", { packs: { minimo: 2, maximo: 20, porcentajes: Array(19).fill(90) } }],
+  ]) {
+    const r = await pedir(API + ruta, { method: metodo, headers: { "content-type": "application/json", "x-isu-admin": "a".repeat(43) }, body: JSON.stringify(body) });
+    chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
+  }
+  // Tienda: las páginas nuevas no reflejan lo que viene en la dirección y no se caen.
+  for (const ruta of ["/packs/%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E", "/liquidacion/no-existe-esto", "/liquidacion/..%2F..%2Fadmin", "/producto/pack-x999-remera-basica-cuello-redondo"]) {
+    const r = await pedir(WEB + ruta);
+    const t = await r.text();
+    chk(G, `tienda ${decodeURIComponent(ruta).slice(0, 40)} → 404 sin reflejar`, r.status === 404 && !t.includes("<script>alert(1)"), String(r.status));
+  }
+  {
+    // Un pack fuera del rango va al más cercano (no a otro sitio).
+    const r = await pedir(`${WEB}/producto/pack-x15-remera-basica-cuello-redondo`);
+    const destino = r.headers.get("location") ?? "";
+    chk(G, "pack x15 → redirige dentro de la tienda a un pack del rango", [307, 308].includes(r.status) && /^(\/|https?:\/\/(127\.0\.0\.1|localhost)[:/])/.test(destino) && /pack-x([2-9]|1\d|20)-/.test(destino), `${r.status} ${destino}`);
+  }
 }
 
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────

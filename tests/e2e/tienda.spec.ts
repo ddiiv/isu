@@ -77,7 +77,9 @@ test.describe("navegación", () => {
     await expect(menu).toBeHidden();
     await expect(abrir).toBeFocused();
     await abrir.click();
-    await menu.getByRole("link", { name: "Pantalones", exact: true }).first().click();
+    // Por niveles (etapa 9): primero la categoría, después la subcategoría.
+    await menu.getByRole("button", { name: /^Hombre/ }).click();
+    await menu.getByRole("link", { name: "Pantalones", exact: true }).click();
     await expect(page).toHaveURL(/\/hombre\/pantalones$/);
   });
 
