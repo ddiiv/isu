@@ -12,6 +12,10 @@ const FOTOS = /^(productos\/\d{1,10}\/fotos|banners\/\d{1,10}\/foto)$/;
 const IMAGENES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif"]);
 const MAX_JSON = 256 * 1024;
 const MAX_FOTO = 25 * 1024 * 1024;
+// Etapa 10: guías de talles desde Excel.
+const EXCEL = "guias-talles/excel";
+const TIPO_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const MAX_EXCEL = 5 * 1024 * 1024;
 // Las respuestas de estas rutas traen el token de sesión: va a la cookie, no a la página.
 const CREAN_SESION = new Set(["ingresar", "2fa"]);
 
@@ -37,6 +41,12 @@ async function pasar(req: NextRequest, ctx: { params: Promise<{ ruta: string[] }
       const buf = Buffer.from(await req.arrayBuffer());
       if (buf.length > MAX_FOTO) return error(413, "demasiado_grande", "La foto pesa más de 25 MB.");
       cuerpo = buf; tipo = ct;
+    } else if (ruta === EXCEL && req.method === "POST") {
+      if (ct !== TIPO_XLSX && ct !== "application/octet-stream") return error(415, "tipo", "Subí un archivo de Excel (.xlsx).");
+      if (Number(req.headers.get("content-length") ?? 0) > MAX_EXCEL) return error(413, "demasiado_grande", "El archivo pesa más de 5 MB.");
+      const buf = Buffer.from(await req.arrayBuffer());
+      if (buf.length > MAX_EXCEL) return error(413, "demasiado_grande", "El archivo pesa más de 5 MB.");
+      cuerpo = buf; tipo = TIPO_XLSX;
     } else {
       const texto = await req.text();
       if (texto.length > MAX_JSON) return error(413, "demasiado_grande", "Pedido demasiado grande.");

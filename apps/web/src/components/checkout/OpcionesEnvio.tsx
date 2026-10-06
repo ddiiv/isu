@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { formatearPesos, type OpcionEnvio, type SucursalEnvio } from "@isu/shared";
+import { formatearPesos, type ItemCarrito, type OpcionEnvio, type SucursalEnvio } from "@isu/shared";
 import { api, type ErrorApi } from "@/lib/cliente-api";
 
 /*
@@ -15,7 +15,7 @@ const CP_VALIDO = /^([A-Za-z]\d{4}[A-Za-z]{3}|\d{4})$/;
 const cp4 = (cp: string) => (/^\d{4}$/.test(cp) ? cp : cp.slice(1, 5));
 
 export function OpcionesEnvio({ items, destino, medioPago, cupon, valor, alCambiar, error, recargar }: {
-  items: Array<{ sku: string; cantidad: number }>;
+  items: ItemCarrito[];
   /** con un cupón de envío gratis, las opciones salen en $0 */
   cupon?: string | null;
   destino: { cp: string; provincia: string; localidad: string };

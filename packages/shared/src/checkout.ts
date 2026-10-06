@@ -20,11 +20,30 @@ export type MedioPago = z.infer<typeof MedioPago>;
 export const MAX_UNIDADES_POR_ARTICULO = 20;
 export const MAX_LINEAS_CARRITO = 30;
 
-export const ItemCarrito = z.object({
+/** Hasta cuántos packs iguales en una línea. */
+export const MAX_PACKS_POR_LINEA = 10;
+
+export const ItemSuelto = z.object({
   sku: texto(1, 100),
   cantidad: z.number().int().min(1).max(MAX_UNIDADES_POR_ARTICULO),
 }).strict();
+export type ItemSuelto = z.infer<typeof ItemSuelto>;
+
+/*
+ * Un pack (etapa 10): va aparte de las prendas sueltas, aunque sea la misma
+ * prenda. `pack` dice qué lleva UN pack (variante y cuántas de cada una) y
+ * `cantidad`, cuántos packs iguales. El % lo pone la API según cuántas
+ * prendas lleva el pack; el navegador no lo manda.
+ */
+export const ItemPack = z.object({
+  pack: z.array(z.object({ sku: texto(1, 100), cantidad: z.number().int().min(1).max(20) }).strict()).min(1).max(20),
+  cantidad: z.number().int().min(1).max(MAX_PACKS_POR_LINEA),
+}).strict();
+export type ItemPack = z.infer<typeof ItemPack>;
+
+export const ItemCarrito = z.union([ItemSuelto, ItemPack]);
 export type ItemCarrito = z.infer<typeof ItemCarrito>;
+export const esPack = (i: ItemCarrito): i is ItemPack => "pack" in i;
 export const Items = z.array(ItemCarrito).min(1, "El carrito está vacío").max(MAX_LINEAS_CARRITO);
 
 export const Direccion = z.object({
@@ -88,6 +107,8 @@ export const PedidoCotizar = z.object({
 
 export const LineaCotizada = z.object({
   sku: z.string(),
+  /** Suelta: el SKU. Dentro de un pack: "<clave del pack>|<SKU>" (la misma variante puede ir suelta y en un pack, a otro precio). */
+  clave: z.string(),
   productoSlug: z.string().nullable(),
   nombre: z.string(),
   color: z.string().nullable(),
@@ -98,14 +119,38 @@ export const LineaCotizada = z.object({
   cantidad: z.number().int(),
   disponible: z.number().int(),          // hasta 20
   subtotal: z.number().int(),
-  /** Etapa 8: entra en un pack (cuántas unidades de la prenda lleva y qué % le toca). */
-  pack: z.object({ unidades: z.number().int(), porcentaje: z.number().int() }).nullable().optional(),
+  /** Es parte de un pack (etapa 10: de cuál, cuántas prendas lleva cada pack y qué % le toca). Suelta: null. */
+  pack: z.object({ clave: z.string(), unidades: z.number().int(), porcentaje: z.number().int() }).nullable().optional(),
 });
 export type LineaCotizada = z.infer<typeof LineaCotizada>;
 
+/** Un pack del carrito, como se muestra: "Pack x5 Remera …" con lo que lleva y cuántos. */
+export const PackCotizado = z.object({
+  clave: z.string(),
+  productoSlug: z.string(),
+  nombre: z.string(),
+  foto: z.string().nullable(),
+  /** prendas por pack */
+  unidades: z.number().int(),
+  /** % que se descuenta (el del pack o la rebaja de la prenda, el mayor) */
+  porcentaje: z.number().int(),
+  /** cuántos packs iguales */
+  cantidad: z.number().int(),
+  /** precio de UN pack */
+  precio: z.number().int(),
+  /** lo que saldrían esas prendas sueltas, sin descuento */
+  precioLista: z.number().int(),
+  subtotal: z.number().int(),
+  /** cuántos packs iguales se pueden llevar con el stock que hay (hasta 10) */
+  disponible: z.number().int(),
+  prendas: z.array(z.object({ sku: z.string(), color: z.string().nullable(), talle: z.string().nullable(), foto: z.string().nullable(), cantidad: z.number().int(), precio: z.number().int() })),
+});
+export type PackCotizado = z.infer<typeof PackCotizado>;
+
 export const Problema = z.object({
   sku: z.string().nullable(),
-  tipo: z.enum(["no_existe", "sin_stock", "stock_insuficiente", "minimo"]),
+  /** sku: el SKU, o la clave del pack ("pack" = ese pack ya no se puede armar así). */
+  tipo: z.enum(["no_existe", "sin_stock", "stock_insuficiente", "minimo", "pack"]),
   mensaje: z.string(),
 });
 
@@ -117,7 +162,10 @@ export const CuponCotizado = z.object({
 export type CuponCotizado = z.infer<typeof CuponCotizado>;
 
 export const Cotizacion = z.object({
+  /** Todas las prendas: las sueltas y las de cada pack (con `pack`). */
   lineas: z.array(LineaCotizada),
+  /** Los packs, agrupados para mostrarlos (etapa 10). */
+  packs: z.array(PackCotizado).default([]),
   subtotal: z.number().int(),
   /** Cupón o promoción aplicado (uno por compra) y cuánto descuenta. */
   cupon: CuponCotizado.nullable().optional(),

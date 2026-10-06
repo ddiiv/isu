@@ -3,15 +3,16 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useCarrito } from "./Carrito";
-import { BarraEnvioGratis, CampoCupon, LineasCarrito, Totales } from "./LineasCarrito";
+import { BarraEnvioGratis, CampoCupon, LineasCarrito, OpcionesPago, Totales } from "./LineasCarrito";
 import { IconoBolsa, IconoCerrar } from "../iconos";
 
 /*
  * Carrito lateral: se abre al agregar una prenda. Muestra cuánto falta para
- * el envío gratis y deja ir directo a pagar. Accesible: foco adentro,
+ * el envío gratis y deja ir directo a pagar: con transferencia (con su % ya
+ * aplicado) o con tarjeta / Mercado Pago, cada uno con su total. Accesible: foco adentro,
  * Escape cierra, el fondo no scrollea.
  */
-export function CajonCarrito({ descuento, montoMinimo }: { descuento: number; montoMinimo: number }) {
+export function CajonCarrito({ descuento, montoMinimo, cuotas, medios }: { descuento: number; montoMinimo: number; cuotas: number; medios: string[] }) {
   const { abierto, cerrar, lineas, cotizacion, cotizar, unidades } = useCarrito();
   const panel = useRef<HTMLDivElement>(null);
 
@@ -53,12 +54,9 @@ export function CajonCarrito({ descuento, montoMinimo }: { descuento: number; mo
             </div>
             <div className="space-y-3 border-t border-linea p-5">
               <CampoCupon />
-              <Totales c={cotizacion} descuento={descuento} />
+              <Totales c={cotizacion} />
               {faltaMinimo && <p className="text-sm font-bold text-oferta">{faltaMinimo.mensaje}</p>}
-              <Link href="/checkout" onClick={(e) => { if (bloqueado) e.preventDefault(); else cerrar(); }} aria-disabled={bloqueado}
-                className={`boton w-full py-4 text-base ${bloqueado ? "cursor-not-allowed bg-linea text-tinta-tenue" : "bg-tinta text-white hover:bg-marca-fuerte"}`}>
-                Finalizar compra
-              </Link>
+              <OpcionesPago c={cotizacion} descuento={descuento} cuotas={cuotas} medios={medios} bloqueado={bloqueado} alElegir={cerrar} />
               <Link href="/carrito" onClick={cerrar} className="block text-center text-sm underline">Ver carrito</Link>
               {montoMinimo > 0 && !faltaMinimo && <p className="text-center text-xs text-tinta-tenue">Compra mínima alcanzada.</p>}
             </div>

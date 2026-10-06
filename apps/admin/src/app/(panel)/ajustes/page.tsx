@@ -120,7 +120,7 @@ export default function Ajustes() {
           const entero = (x: string, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(Number(x)) || min));
           return (
             <Tarjeta titulo="Packs (llevá más, pagá menos)">
-              <p className="mb-3 text-sm text-tinta-suave">Una prenda marcada «Se vende en pack» se arma de un mínimo a un máximo de unidades, cada una con su talle y su color (siempre con el stock que hay de cada variante). El % sale de cuántas lleva de esa prenda, en cualquier talle y color. No se suma a la rebaja de la prenda: gana el mayor. Con más del máximo, vale el del máximo.</p>
+              <p className="mb-3 text-sm text-tinta-suave">Una prenda marcada «Se vende en pack» se arma de un mínimo a un máximo de unidades, cada una con su talle y su color (siempre con el stock que hay de cada variante). El % sale de cuántas prendas lleva el pack. En el carrito el pack va aparte: las prendas sueltas, aunque sean la misma, van a su precio. No se suma a la rebaja de la prenda: gana el mayor.</p>
               <div className="flex flex-wrap gap-3">
                 <Campo etiqueta="Mínimo"><input type="number" min={2} max={pk.maximo} className={`${claseEntrada} w-24`} value={pk.minimo} onChange={(e) => rango(entero(e.target.value, 2, pk.maximo), pk.maximo)} /></Campo>
                 <Campo etiqueta="Máximo"><input type="number" min={pk.minimo} max={PACK_TOPE} className={`${claseEntrada} w-24`} value={pk.maximo} onChange={(e) => rango(pk.minimo, entero(e.target.value, pk.minimo, PACK_TOPE))} /></Campo>

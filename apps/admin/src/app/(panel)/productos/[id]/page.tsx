@@ -14,6 +14,7 @@ interface Detalle {
     destacado: boolean; destacadoOrden: number; nuevo: boolean; categorias: number[];
     guiaTallesId: number | null; parteOutfit: string | null; parteOutfitSugerida: string | null; pesoGramos: number | null;
     pack: boolean; packOrden: number; composicion: string | null; resenas: { cantidad: number; promedio: number | null };
+    eliminadoEn: string | null; eliminadoPor: string | null;
   };
   colores: Array<{ id: number; clave: string; nombre: string; hex: string | null; orden: number; activo: boolean; nombreFijo: boolean }>;
   fotos: Array<{ id: number; tipo: "color" | "exhibicion"; colorId: number | null; orden: number; clave: string; ancho: number; alto: number; alt: string | null }>;
@@ -55,6 +56,16 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
     finally { setGuardando(false); }
   }
 
+  /** Etapa 10: eliminar (baja suave: sale de la tienda y Stocker no lo vuelve a publicar) o restaurar. */
+  async function eliminarORestaurar(restaurar: boolean) {
+    if (!restaurar && !window.confirm(`¿Eliminar «${original.nombre}»? Sale de la tienda y de la lista de productos, y Stocker no lo vuelve a publicar. Se puede restaurar desde Productos → «Eliminados».`)) return;
+    try {
+      await api(restaurar ? "productos/restaurar" : "productos/eliminar", { cuerpo: { ids: [original.id] } });
+      aviso.ok(restaurar ? "Restaurado: quedó oculto. Publicalo cuando quieras." : "Eliminado.");
+      await recargar();
+    } catch (e) { aviso.error(e); }
+  }
+
   const guiasDisponibles = guias?.guias ?? [];
   const tallesProducto = [...new Set(d.variantes.filter((v) => v.activo && v.talle).map((v) => v.talle!))];
 
@@ -63,10 +74,13 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
       <p className="mb-2 text-sm"><Link href="/productos" className="text-marca hover:underline">← Productos</Link></p>
       <Titulo acciones={<>
         {SITIO && <a href={`${SITIO}/producto/${original.slug}`} target="_blank" rel="noopener" className="rounded-full border border-linea bg-white px-4 py-2 text-sm font-bold hover:border-tinta">Ver en la tienda ↗</a>}
-        {operador && <Boton onClick={() => void guardar()} disabled={!sucio || guardando}>{guardando ? "Guardando…" : "Guardar cambios"}</Boton>}
+        {operador && !original.eliminadoEn && <Boton variante="peligro" onClick={() => void eliminarORestaurar(false)}>Eliminar</Boton>}
+        {operador && original.eliminadoEn && <Boton variante="borde" onClick={() => void eliminarORestaurar(true)}>Restaurar</Boton>}
+        {operador && !original.eliminadoEn && <Boton onClick={() => void guardar()} disabled={!sucio || guardando}>{guardando ? "Guardando…" : "Guardar cambios"}</Boton>}
       </>}>{original.nombre}</Titulo>
       <div className="mb-4 space-y-2">
         <aviso.Aviso />
+        {original.eliminadoEn && <Mensaje>Eliminado el {new Date(original.eliminadoEn).toLocaleString("es-AR")}{original.eliminadoPor ? ` por ${original.eliminadoPor}` : ""}: no se muestra en la tienda. Restauralo para volver a editarlo.</Mensaje>}
         {!original.enStocker && <Mensaje tipo="info">Este artículo ya no está en el catálogo de Stocker: no se muestra en la tienda.</Mensaje>}
       </div>
 
@@ -163,7 +177,7 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
           <Tarjeta titulo="Guía de talles">
             <select className={claseEntrada} disabled={!operador} value={f.guiaTallesId ?? ""} onChange={(e) => cambiar("guiaTallesId", e.target.value ? Number(e.target.value) : null)} aria-label="Guía de talles">
               <option value="">Sin guía</option>
-              {guiasDisponibles.map((g) => <option key={g.id} value={g.id}>{g.nombre} ({g.tipo === "nino" ? "niños" : "adulto"})</option>)}
+              {guiasDisponibles.map((g) => <option key={g.id} value={g.id}>{g.nombre} ({g.tipo === "nino" ? "niños" : g.tipo === "adulto" ? "adulto" : "talles propios"})</option>)}
             </select>
             <p className="mt-2 text-xs text-tinta-tenue">Talles de este producto: {tallesProducto.join(" · ") || "—"}</p>
             <p className="mt-1 text-xs"><Link href={f.guiaTallesId ? `/guias-talles/${f.guiaTallesId}` : "/guias-talles/nueva"} className="text-marca hover:underline">{f.guiaTallesId ? "Editar esta guía" : "Crear una guía nueva"}</Link></p>

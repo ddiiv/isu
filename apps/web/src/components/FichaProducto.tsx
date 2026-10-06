@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ResumenEstrellas } from "./Estrellas";
 import { BotonGuiaTalles, useRecomendado } from "./GuiaTalles";
 import { Foto, SinFoto } from "./Foto";
@@ -17,7 +18,8 @@ import { BarraEnvioGratis } from "./BarraEnvioGratis";
  * precio y cómo llega. Todo lo que cambia con la elección del cliente vive
  * acá; el resto de la página es estático.
  *
- * El carrito llega en la etapa 2: hasta entonces se compra por WhatsApp con
+ * Con stock: "Agregar al carrito" y "Comprar ahora" (agrega y va directo
+ * al checkout). Sin stock en el color elegido: "Consultar por WhatsApp", con
  * el producto, el color y el talle ya escritos en el mensaje.
  */
 export function FichaProducto({ p, config }: { p: ProductoDetalle; config: ConfigPublica }) {
@@ -29,6 +31,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
   const [color, setColor] = useState<string | null>(primerConStock);
   const [talle, setTalle] = useState<string | null>(null);
   const carrito = useCarrito();
+  const router = useRouter();
   // Si el cliente ya cargó sus medidas (acá o en "Armá tu outfit"), se marca su talle.
   const recomendado = useRecomendado(p.guiaTalles);
   const [avisoTalle, setAvisoTalle] = useState(false);
@@ -63,12 +66,24 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
   const listo = !!variante && variante.stock > 0;
 
   const mensaje = [
-    `Hola Isuwaya! Quiero comprar: ${p.nombre}`,
+    `Hola Isuwaya! Busco esta prenda que figura sin stock: ${p.nombre}`,
     colorActual && colorActual.nombre !== "Único" ? `Color: ${colorActual.nombre}` : null,
     variante?.talle ? `Talle: ${variante.talle}` : null,
     `${SITIO.url}/producto/${p.slug}`,
   ].filter(Boolean).join("\n");
   const whatsapp = `https://wa.me/${config.whatsapp}?text=${encodeURIComponent(mensaje)}`;
+  /** Agrega la prenda elegida; "Comprar ahora" la agrega y va directo al checkout. */
+  function agregar(comprarYa: boolean) {
+    if (conTalle && !talle) { setAvisoTalle(true); return; }
+    if (!listo || !variante) return;
+    const foto = colorActual?.fotos[0] ?? p.exhibicion[0] ?? null;
+    carrito.agregar({
+      sku: variante.sku, nombre: p.nombre, slug: p.slug,
+      color: colorActual && colorActual.nombre !== "Único" ? colorActual.nombre : null,
+      talle: variante.talle, precio: variante.precio, foto: foto?.clave ?? null,
+    }, 1, { abrir: !comprarYa });
+    if (comprarYa) router.push("/checkout");
+  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-14">
@@ -171,28 +186,28 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             : null}
         </p>
 
+        {/* Con stock: agregar o comprar ya. Sin stock en este color: consultar por WhatsApp. */}
         <div className="mt-3 space-y-2">
-          <button type="button"
-            onClick={() => {
-              if (conTalle && !talle) { setAvisoTalle(true); return; }
-              if (!listo || !variante) return;
-              const foto = colorActual?.fotos[0] ?? p.exhibicion[0] ?? null;
-              carrito.agregar({
-                sku: variante.sku, nombre: p.nombre, slug: p.slug,
-                color: colorActual && colorActual.nombre !== "Único" ? colorActual.nombre : null,
-                talle: variante.talle, precio: variante.precio, foto: foto?.clave ?? null,
-              });
-            }}
-            disabled={!hayDelColor}
-            className={`boton w-full py-4 text-base ${hayDelColor ? "bg-tinta text-white hover:bg-marca-fuerte" : "cursor-not-allowed bg-linea text-tinta-tenue"}`}>
-            {hayDelColor ? "Agregar al carrito" : "Sin stock"}
-          </button>
-          {avisoTalle && conTalle && !talle && <p className="text-center text-sm font-bold text-oferta" role="alert">Elegí un talle para agregarlo.</p>}
-          <a href={whatsapp} target="_blank" rel="noopener noreferrer"
-            onClick={() => evento("generate_lead", { currency: "ARS", value: precio / 100, items: [item(p, { item_variant: variante?.sku })] })}
-            className="boton w-full border border-linea py-3 text-[15px] hover:border-tinta">
-            <IconoWhatsapp /> Consultar por WhatsApp
-          </a>
+          {hayDelColor ? (
+            <>
+              <button type="button" onClick={() => agregar(false)} className="boton w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte">
+                Agregar al carrito
+              </button>
+              <button type="button" onClick={() => agregar(true)} className="boton w-full border-2 border-tinta py-3.5 text-base hover:bg-tinta hover:text-white">
+                Comprar ahora
+              </button>
+              {avisoTalle && conTalle && !talle && <p className="text-center text-sm font-bold text-oferta" role="alert">Elegí un talle para agregarlo.</p>}
+            </>
+          ) : (
+            <>
+              <button type="button" disabled className="boton w-full cursor-not-allowed bg-linea py-4 text-base text-tinta-tenue">Sin stock</button>
+              <a href={whatsapp} target="_blank" rel="noopener noreferrer"
+                onClick={() => evento("generate_lead", { currency: "ARS", value: precio / 100, items: [item(p, { item_variant: variante?.sku })] })}
+                className="boton w-full border border-linea py-3 text-[15px] hover:border-tinta">
+                <IconoWhatsapp /> Consultar por WhatsApp
+              </a>
+            </>
+          )}
         </div>
         <BarraEnvioGratis desde={config.envioGratisDesde} className="mt-4" />
 

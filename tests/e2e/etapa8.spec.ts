@@ -80,13 +80,23 @@ test.describe("packs", () => {
     }
     await page.getByRole("button", { name: "Agregar pack x3 al carrito" }).click();
     const cajon = page.getByRole("dialog");
-    await expect(cajon.getByText(/Pack x3 · −15%/).first()).toBeVisible({ timeout: 15_000 });
+    // Etapa 10: el pack es UNA línea, con lo que lleva y su %.
+    const linea = cajon.locator("li", { has: page.getByRole("list", { name: /Qué lleva el pack Pack x3/ }) });
+    await expect(linea.getByText("📦 Pack · −15%")).toBeVisible({ timeout: 15_000 });
+    await expect(linea.getByRole("list", { name: /Qué lleva el pack/ }).getByRole("listitem")).not.toHaveCount(0);
     // El total del carrito es el de la página del pack.
     const total = (await page.getByText("Total del pack").locator("..").locator("p").nth(1).innerText()).trim();
-    await expect(cajon.getByText(total).first()).toBeVisible();
-    // Sacar la primera prenda: quedan 2 (pack x2, 10%).
-    await cajon.getByRole("button", { name: "Quitar" }).first().click();
-    await expect(cajon.getByText(/Pack x2 · −10%/).first()).toBeVisible({ timeout: 15_000 });
+    await expect(linea.getByText(total).first()).toBeVisible();
+    // La misma prenda suelta va aparte, a su precio: no suma para el pack.
+    await page.keyboard.press("Escape");
+    await page.goto(`/producto/${PACK}`);
+    await page.locator("html[data-hidratado]").waitFor({ state: "attached" });
+    await page.locator("fieldset", { hasText: "Talle" }).getByRole("button", { disabled: false }).first().click();
+    await page.getByRole("button", { name: "Agregar al carrito" }).click();
+    // Dos líneas: el pack (con su −15%) y la suelta (sin descuento de pack).
+    await expect(cajon.locator("ul.divide-y > li")).toHaveCount(2, { timeout: 15_000 });
+    await expect(cajon.getByText("📦 Pack · −15%")).toHaveCount(1);
+    await expect(cajon.locator("ul.divide-y > li").filter({ hasNotText: "Pack x3" }).getByRole("link", { name: /^Remera Básica/ }).first()).toBeVisible();
     expect(errores).toEqual([]);
   });
 

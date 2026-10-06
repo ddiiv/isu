@@ -3,6 +3,18 @@
 @layer base { body { @apply bg-fondo-suave font-sans text-tinta antialiased; } h1, h2 { @apply font-display tracking-tight; } }
 
 /*
+ * Etapa 10: las tablas del backoffice con el mismo aire (títulos chicos en
+ * mayúscula, filas que se marcan al pasar) y las cajas que las envuelven
+ * con una sombra suave.
+ */
+@layer components {
+  main table thead th { @apply text-[11px] font-bold uppercase tracking-wider text-tinta-tenue; }
+  main table tbody tr { @apply transition-colors; }
+  main table tbody tr:hover { @apply bg-fondo-suave/60; }
+  main .overflow-x-auto.rounded-2xl { @apply shadow-[0_1px_3px_rgba(16,24,40,0.05)]; }
+}
+
+/*
  * Tablas del backoffice en el celular: cada fila pasa a ser una tarjeta y
  * cada celda muestra su título (data-etiqueta). Así las casillas y montos
  * quedan a la vista sin deslizar la tabla de costado.

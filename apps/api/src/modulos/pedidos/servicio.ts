@@ -87,6 +87,23 @@ function paraTransferir(p: FilaPedido, a: Ajustes) {
   return { ...a.datosTransferencia, monto: p.transferencia_monto ?? p.total, via, automatica: via === "mercadopago" };
 }
 
+/*
+ * Las líneas para Stocker: una por SKU (Stocker suma las repetidas pero se
+ * queda con un solo precio). Si la misma variante va suelta y en un pack, se
+ * manda el precio promedio de las dos al centavo: el total del pedido es el
+ * exacto.
+ */
+export function paraStocker(c: { lineas: Array<{ sku: string; clave: string; cantidad: number; precio: number }>; cobrado: Map<string, number> }) {
+  const porSku = new Map<string, { cantidad: number; centavos: number }>();
+  for (const l of c.lineas) {
+    const x = porSku.get(l.sku) ?? { cantidad: 0, centavos: 0 };
+    x.cantidad += l.cantidad;
+    x.centavos += (c.cobrado.get(l.clave) ?? l.precio) * l.cantidad;
+    porSku.set(l.sku, x);
+  }
+  return [...porSku].map(([sku, x]) => ({ sku, cantidad: x.cantidad, precioUnitario: pesos(Math.round(x.centavos / x.cantidad)) }));
+}
+
 async function evento(db: pg.Pool | pg.PoolClient, pedidoId: number, estado: string, actor: string, detalle?: string) {
   await db.query("INSERT INTO tienda.pedido_eventos (pedido_id, estado, detalle, actor) VALUES ($1, $2, $3, $4)", [pedidoId, estado, detalle?.slice(0, 500) ?? null, actor.slice(0, 150)]);
 }
@@ -226,9 +243,10 @@ export function crearServicioPedidos(deps: DepsPedidos) {
           c.aplicado?.cupon.id ?? null, c.aplicado?.cupon.codigo ?? null, c.aplicado?.cupon.nombre ?? null, c.descuentoCupon ?? 0, c.envioBonificado],
       )).rows[0]!;
       for (const l of c.lineas) {
+        // Las prendas de un pack llevan "(Pack xN)" en el nombre: así se ven en el mail, la página del pedido, Mercado Pago y el backoffice.
         await cli.query(
           "INSERT INTO tienda.pedido_items (pedido_id, sku, producto_id, nombre, color, talle, precio, precio_lista, cantidad, precio_cobrado) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-          [p.id, l.sku, c.filas.get(l.sku)?.producto_id ?? null, l.nombre, l.color, l.talle, l.precio, l.precioLista, l.cantidad, c.cobrado.get(l.sku) ?? l.precio],
+          [p.id, l.sku, c.filas.get(l.sku)?.producto_id ?? null, l.pack ? `${l.nombre} (Pack x${l.pack.unidades})`.slice(0, 200) : l.nombre, l.color, l.talle, l.precio, l.precioLista, l.cantidad, c.cobrado.get(l.clave) ?? l.precio],
         );
       }
       if (c.aplicado) {
@@ -253,7 +271,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       r = await stocker.crearPedido({
         pedido: p.numero,
         // El precio que se cobró de verdad (con el cupón repartido), para que la venta en Stocker cierre.
-        items: c.lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad, precioUnitario: pesos(c.cobrado.get(l.sku) ?? l.precio) })),
+        items: paraStocker(c),
         comprador: { nombre: `${contacto.nombre} ${contacto.apellido}`, email: contacto.email, documento: contacto.dni },
         total: pesos(c.total),
         pagoPendiente: true,
@@ -275,7 +293,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       await pool.query("UPDATE tienda.pedidos SET estado = 'sin_stock', stocker_estado = $2, actualizado_en = now() WHERE id = $1", [p.id, r.estado]);
       await evento(pool, p.id, "sin_stock", "stocker", r.motivo ?? undefined);
       // Que la tienda deje de ofrecer lo que ya no hay.
-      await deps.colas.stocker("stock", { skus: c.lineas.map((l) => l.sku) });
+      await deps.colas.stocker("stock", { skus: [...new Set(c.lineas.map((l) => l.sku))] });
       const nombres = new Map(c.lineas.map((l) => [l.sku, `${l.nombre}${l.talle ? ` (${l.talle})` : ""}`]));
       const faltantes = (r.faltantes ?? []).map((f) => ({ sku: f.sku, hay: f.hay, nombre: nombres.get(f.sku) ?? f.sku }));
       throw new ErrorHttp(409, "sin_stock", faltantes.length

@@ -193,7 +193,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       querystring: z.object({
         q: z.string().trim().max(80).optional(),
         categoria: Id.optional(),
-        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "de_baja"]).default("todos"),
+        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "de_baja", "eliminados"]).default("todos"),
         pagina: Pagina,
       }).strict(),
     },
@@ -211,11 +211,12 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       destacados: "p.destacado", nuevos: "p.nuevo", packs: "p.pack",
       sin_descripcion: "p.en_stocker AND p.descripcion IS NULL AND p.stocker_descripcion IS NULL",
     };
-    w.push(filtros[filtro]!);
+    // Los eliminados sólo aparecen en su filtro (para restaurarlos).
+    w.push(filtro === "eliminados" ? "p.eliminado_en IS NOT NULL" : `(${filtros[filtro]}) AND p.eliminado_en IS NULL`);
     params.push(POR_PAGINA, (pagina - 1) * POR_PAGINA);
     const { rows } = await pool.query(
       `SELECT p.id, p.slug, p.nombre, p.stocker_padre AS sku, p.visible, p.en_stocker AS "enStocker", p.destacado, p.destacado_orden AS "destacadoOrden", p.nuevo,
-              p.pack, p.resenas_cantidad AS "resenas", p.resenas_promedio::float AS "estrellas",
+              p.pack, p.resenas_cantidad AS "resenas", p.resenas_promedio::float AS "estrellas", p.eliminado_en AS "eliminadoEn",
               p.stocker_categoria AS "categoriaStocker", p.stocker_genero AS "generoStocker", p.categorias_fijas AS "categoriasFijas",
               (SELECT COALESCE(sum(v.stock), 0)::int FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo) AS stock,
               (SELECT min(v.precio) FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo) AS precio,
@@ -248,7 +249,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         categoriaStocker: p.stocker_categoria, generoStocker: p.stocker_genero, categoriasFijas: p.categorias_fijas,
         destacado: p.destacado, destacadoOrden: p.destacado_orden, nuevo: p.nuevo, categorias: cats.rows.map((c) => c.categoria_id),
         guiaTallesId: p.guia_talles_id, parteOutfit: p.parte_outfit, parteOutfitSugerida: parteDe(p.stocker_categoria, p.nombre),
-        pack: p.pack, packOrden: p.pack_orden, composicion: p.composicion,
+        pack: p.pack, packOrden: p.pack_orden, composicion: p.composicion, eliminadoEn: p.eliminado_en, eliminadoPor: p.eliminado_por,
         resenas: { cantidad: p.resenas_cantidad, promedio: p.resenas_promedio === null ? null : Number(p.resenas_promedio) },
       },
       colores: colores.rows, fotos: fotos.rows, variantes: variantes.rows,
@@ -305,7 +306,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       // La fecha en que se marcó: los recién marcados van primero en "Nuevos".
       sets.push(c.nuevo ? "nuevo_desde = CASE WHEN nuevo THEN nuevo_desde ELSE now() END" : "nuevo_desde = NULL");
     }
-    if (sets.length) await cli.query(`UPDATE tienda.productos SET ${sets.join(", ")}, actualizado_en = now() WHERE id = ANY($1::int[])`, params);
+    // Un producto eliminado no se edita (ni se publica): primero se restaura.
+    if (sets.length) await cli.query(`UPDATE tienda.productos SET ${sets.join(", ")}, actualizado_en = now() WHERE id = ANY($1::int[]) AND eliminado_en IS NULL`, params);
     if (c.categorias) {
       const validas = (await cli.query<{ id: number }>("SELECT id FROM tienda.categorias WHERE id = ANY($1::int[])", [c.categorias])).rows.map((r) => r.id);
       if (validas.length !== new Set(c.categorias).size) throw new ErrorHttp(400, "categoria", "Alguna categoría no existe.");
@@ -364,6 +366,43 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     } catch (e) { await cli.query("ROLLBACK").catch(() => {}); throw e; } finally { cli.release(); }
     await invalidar(await slugsDe(ids));
     return { ok: true, productos: ids.length };
+  });
+
+  /*
+   * Eliminar productos (etapa 10). Baja suave: sale de la tienda y de las
+   * listas, la sincronización con Stocker no lo vuelve a publicar y los
+   * pedidos viejos lo siguen nombrando. Se restaura desde el filtro
+   * «Eliminados» (vuelve oculto: se publica a mano).
+   */
+  api.post("/v1/admin/productos/eliminar", { schema: { body: z.object({ ids: z.array(Id).min(1).max(500) }).strict() } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const ids = [...new Set(req.body.ids)];
+    const slugs = await slugsDe(ids);
+    const cli = await pool.connect();
+    let n: number;
+    try {
+      await cli.query("BEGIN");
+      n = (await cli.query(
+        `UPDATE tienda.productos SET eliminado_en = now(), eliminado_por = $2, visible = false, destacado = false, nuevo = false, pack = false, actualizado_en = now()
+          WHERE id = ANY($1::int[]) AND eliminado_en IS NULL`, [ids, a.email])).rowCount ?? 0;
+      await auditar(cli, a, "eliminar_productos", "producto", null, { ids }, ip(req));
+      await cli.query("COMMIT");
+    } catch (e) { await cli.query("ROLLBACK").catch(() => {}); throw e; } finally { cli.release(); }
+    await invalidar(slugs);
+    return { ok: true, productos: n };
+  });
+  api.post("/v1/admin/productos/restaurar", { schema: { body: z.object({ ids: z.array(Id).min(1).max(500) }).strict() } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const ids = [...new Set(req.body.ids)];
+    const cli = await pool.connect();
+    let n: number;
+    try {
+      await cli.query("BEGIN");
+      n = (await cli.query("UPDATE tienda.productos SET eliminado_en = NULL, eliminado_por = NULL, actualizado_en = now() WHERE id = ANY($1::int[]) AND eliminado_en IS NOT NULL", [ids])).rowCount ?? 0;
+      await auditar(cli, a, "restaurar_productos", "producto", null, { ids }, ip(req));
+      await cli.query("COMMIT");
+    } catch (e) { await cli.query("ROLLBACK").catch(() => {}); throw e; } finally { cli.release(); }
+    return { ok: true, productos: n };
   });
 
   // Color: el hex de la muestra y, si hace falta, otro nombre ("Único" → "Negro"). Un nombre puesto a mano

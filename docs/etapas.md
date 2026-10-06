@@ -14,6 +14,42 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
 | 8 | Inicio completo (carrusel de portada, packs, pestañas por categoría, números de la marca, opiniones al final), packs de 2 a 5 unidades con su dirección `pack-xN`, descripción y composición en la ficha, reseñas de compras verificadas con moderación | **Cerrada** (abajo) · guía en [`inicio-packs-resenas.md`](inicio-packs-resenas.md) |
 | 9 | Packs de 2 a 10 (configurable) armados sobre la prenda padre con el stock de cada variante, sección Packs y Liquidación en la barra divididas por Hombre / Mujer / Niños, menú del celular con subcategorías y 1–2 fotos por categoría, barra de envío gratis en la ficha | **Cerrada** (abajo) · guía en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md) |
+| 10 | El pack va aparte en el carrito (como Deliver), carrito con el precio por transferencia y por tarjeta/Mercado Pago, checkout de una página, «Comprar ahora» y WhatsApp sólo sin stock, eliminar productos, backoffice rediseñado, guías de talles con Excel (y las 40 de la fábrica), sólo productos padre desde Stocker | **Cerrada** (abajo) · guía en [`carrito-checkout-backoffice.md`](carrito-checkout-backoffice.md) |
+
+## Etapa 10 · resultados del cierre (06/10/2026)
+
+**Qué entró** (cómo se usa en [`carrito-checkout-backoffice.md`](carrito-checkout-backoffice.md))
+- **El pack va aparte en el carrito:** una línea «Pack x5 …» con lo que lleva y cuántos packs. La misma prenda suelta va a su precio y no suma para el pack. El stock se controla con lo suelto más lo de los packs. A Stocker va una línea por SKU.
+- **Carrito con dos botones de pago:** «Pagar con transferencia» (con el % ya aplicado y cuánto se ahorra) y «Tarjeta o Mercado Pago» (con las cuotas). Cada uno lleva al checkout con ese pago elegido.
+- **Checkout de una página, como Deliver:** a la izquierda los datos, la entrega, el envío y el pago (cada forma con su precio); a la derecha el resumen fijo con fotos, packs, cupón, el total y cuánto se ahorra. En el celular, el resumen va plegado arriba.
+- **Ficha:** con stock, «Agregar al carrito» y «Comprar ahora»; sin stock en el color, «Consultar por WhatsApp».
+- **Eliminar productos** (uno o varios). Es una baja suave: Stocker no los vuelve a publicar y se restauran desde el filtro «Eliminados».
+- **Backoffice rediseñado:** menú oscuro agrupado con íconos, tarjetas, tablas y campos con el mismo estilo, y el panel con indicadores.
+- **Guías de talles con Excel:** exportar e importar, con vista previa. Se agregan los talles propios y las medidas con nombre propio. La migración 0017 carga las 40 guías de la fábrica.
+- **Sólo productos padre desde Stocker:** se descarta lo marcado como evento, pack o combo.
+- **Migraciones 0016** (productos eliminados y guías con talles propios) **y 0017** (guías de la fábrica).
+
+**QA**
+- Pruebas unitarias: **489/489**, 13 más que en la entrega anterior.
+  - Carrito: el pack aparte, el mismo pack dos veces, 7 prendas, un pack que no se arma (prenda que no es pack, mezclado, fuera del rango, sin stock contando lo suelto), formas inválidas y la rebaja contra el pack.
+  - Stocker: las líneas para Stocker; sólo productos padre.
+  - Backoffice: eliminar y restaurar (no se puede publicar, la base no deja).
+  - Excel: el archivo real de la fábrica, la vuelta exportar → importar, valores, hojas mal armadas, zip inflado, nombres de hoja; importar, vista previa y exportar por la API; la migración con las 40 guías.
+- Pruebas en navegador: **135/135** (1 más que la entrega anterior).
+  - Nuevas o cambiadas: el pack aparte de la suelta en el carrito, «Comprar ahora» al checkout, y la ficha sin stock con WhatsApp (agota un color y lo devuelve).
+  - Los flujos de compra entran por «Pagar con transferencia», y el resumen del checkout se abre en el celular.
+- Hallazgos corregidos antes de entregar:
+  - Con algo sin stock en el carrito, los botones de pago mostraban «$ 0». Ahora dicen qué corregir.
+  - Un pack que no se podía armar también sumaba al control de stock y daba dos avisos.
+  - El aviso «falló /api/t/cuenta» en el navegador era de Chromium con las respuestas 204, no de la tienda: la prueba lo ignora.
+
+**Hacker**
+- Auditoría: **363/363**, con 15 chequeos nuevos (§ 7i, detalle en `seguridad.md`).
+- Decisiones:
+  - el % del pack nunca viaja desde el navegador;
+  - eliminado ⇒ oculto como restricción de la base;
+  - el Excel se lee con topes de tamaño, inflado, hojas, filas y columnas, y sin fórmulas;
+  - importar pide rol operador y queda en la auditoría.
 
 ## Etapa 9 · resultados del cierre (06/10/2026)
 

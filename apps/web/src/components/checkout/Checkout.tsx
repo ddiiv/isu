@@ -2,17 +2,24 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { formatearPesos, PedidoNuevo, type ConfigPublica, type MedioPago } from "@isu/shared";
-import { useCarrito } from "../carrito/Carrito";
+import { centavos, conDescuento, formatearPesos, PedidoNuevo, type ConfigPublica, type Cotizacion, type MedioPago } from "@isu/shared";
+import { itemDe, useCarrito } from "../carrito/Carrito";
+import { Foto } from "../Foto";
 import { CampoCupon, LineaCupon } from "../carrito/LineasCarrito";
 import { api, guardarAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 import { OpcionesEnvio, type EleccionEnvio } from "./OpcionesEnvio";
 
 /*
- * Checkout en una sola página: contacto, entrega, pago y resumen. El total
- * que se ve lo calcula la API con el medio y la entrega elegidos; al
- * confirmar se vuelve a calcular del lado del servidor.
+ * Checkout en una sola página, como el de las tiendas de referencia:
+ * contacto, entrega, envío y pago a la izquierda; el resumen (prendas,
+ * packs, cupón y total) a la derecha, fijo. En el celular el resumen va
+ * arriba, plegado, con el total a la vista.
+ *
+ * Cada forma de pago muestra cuánto sale con ella. El total lo calcula la
+ * API con el medio y la entrega elegidos; al confirmar se vuelve a calcular
+ * del lado del servidor. Del carrito se llega con el pago ya elegido
+ * (/checkout?pago=transferencia).
  */
 const MEDIOS: Array<{ id: MedioPago; titulo: string; detalle: (c: ConfigPublica) => string }> = [
   { id: "transferencia", titulo: "Transferencia bancaria", detalle: (c) => `${c.descuentoTransferencia}% OFF. Te damos los datos al confirmar y separamos tus prendas mientras transferís.` },
@@ -23,7 +30,7 @@ const MEDIOS: Array<{ id: MedioPago; titulo: string; detalle: (c: ConfigPublica)
 const PROVINCIAS = ["CABA", "Buenos Aires", "Catamarca", "Chaco", "Chubut", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán"];
 
 type Campos = { [k: string]: string };
-const campo = "w-full rounded-xl border border-linea bg-white px-4 py-3 text-base outline-none focus:border-tinta aria-[invalid=true]:border-oferta";
+const campo = "w-full rounded-lg border border-linea bg-white px-3.5 py-3 text-base outline-none transition focus:border-tinta focus:ring-2 focus:ring-tinta/10 aria-[invalid=true]:border-oferta";
 
 export function Checkout({ config }: { config: ConfigPublica }) {
   const router = useRouter();
@@ -50,6 +57,9 @@ export function Checkout({ config }: { config: ConfigPublica }) {
       .then((r) => { if (r) setC((x) => ({ ...x, email: r.cliente.email, nombre: r.cliente.nombre, apellido: r.cliente.apellido ?? "", telefono: r.cliente.telefono ?? "", dni: r.cliente.dni ?? "" })); })
       .catch(() => {});
     evento("begin_checkout", { currency: "ARS", value: pesos(lineas.reduce((a, l) => a + l.precio * l.cantidad, 0)) });
+    // Del carrito: "Pagar con transferencia" o "Tarjeta o Mercado Pago".
+    const pedido = new URLSearchParams(window.location.search).get("pago");
+    if (pedido && disponibles.some((m) => m.id === pedido)) setMedio(pedido as MedioPago);
     // Dependencias a propósito: sólo al entrar
   }, []);
   useEffect(() => {
@@ -64,10 +74,11 @@ export function Checkout({ config }: { config: ConfigPublica }) {
   const datosEnvio = () => (opcionId ? { cp: destino.cp.trim(), provincia: destino.provincia, localidad: destino.localidad.trim(), opcion: opcionId } : undefined);
   // Dependencias a propósito: se recotiza al cambiar entrega, medio, cantidades o la opción de envío
   useEffect(() => { void cotizar({ entrega, medioPago: medio, envio: datosEnvio() }); }, [entrega, medio, unidades, opcionId]);
-  const items = useMemo(() => lineas.map(({ sku, cantidad }) => ({ sku, cantidad })), [lineas]);
+  const items = useMemo(() => lineas.map(itemDe), [lineas]);
+  const [verResumen, setVerResumen] = useState(false);
 
   const cuerpo = useMemo(() => ({
-    items: lineas.map(({ sku, cantidad }) => ({ sku, cantidad })),
+    items: lineas.map(itemDe),
     contacto: { email: c.email, nombre: c.nombre, apellido: c.apellido, telefono: c.telefono, dni: c.dni },
     entrega: entrega === "envio"
       ? {
@@ -129,119 +140,190 @@ export function Checkout({ config }: { config: ConfigPublica }) {
     </label>
   );
 
+  const titulo = "mb-3 text-xl font-bold font-sans";
+  // Lo que sale con cada forma de pago (el envío aparte): transferencia con su %, el resto a precio de lista.
+  const base = cotizacion ? Math.max(0, cotizacion.subtotal - (cotizacion.descuentoCupon ?? 0)) : null;
+  const precioCon = (m: MedioPago) => (base === null ? null : m === "transferencia" ? conDescuento(centavos(base), config.descuentoTransferencia) : base);
+
   return (
-    <form onSubmit={confirmar} noValidate className="contenedor grid gap-10 py-10 lg:grid-cols-[1fr_400px]">
-      <div className="space-y-10">
-        <h1 className="text-[clamp(2.2rem,6vw,3.6rem)] leading-none">Finalizar compra</h1>
+    <form onSubmit={confirmar} noValidate className="lg:grid lg:min-h-[calc(100vh-5rem)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      {/* Celular: el resumen arriba, plegado, con el total a la vista. */}
+      <div className="border-b border-linea bg-fondo-suave lg:hidden">
+        <button type="button" onClick={() => setVerResumen((v) => !v)} aria-expanded={verResumen} aria-controls="resumen-pedido"
+          className="contenedor flex w-full items-center justify-between py-4 text-left">
+          <span className="text-sm font-bold text-marca">{verResumen ? "Ocultar resumen del pedido" : "Mostrar resumen del pedido"} <span aria-hidden="true">{verResumen ? "▴" : "▾"}</span></span>
+          <span className="font-display text-xl">{cotizacion ? formatearPesos(cotizacion.total) : "…"}</span>
+        </button>
+      </div>
 
-        <fieldset className="space-y-4">
-          <legend className="mb-4 font-display text-2xl">1. Tus datos</legend>
-          {inp("email", "Email", { type: "email", autoComplete: "email", inputMode: "email" })}
-          <div className="grid gap-4 sm:grid-cols-2">
-            {inp("nombre", "Nombre", { autoComplete: "given-name" })}
-            {inp("apellido", "Apellido", { autoComplete: "family-name" })}
-            {inp("telefono", "Celular", { type: "tel", autoComplete: "tel", placeholder: "11 5555-5555" })}
-            {inp("dni", "DNI o CUIT", { inputMode: "numeric", autoComplete: "off" })}
+      <div className="order-1 bg-white">
+        <div className="mx-auto max-w-[36rem] space-y-9 px-4 py-8 sm:px-6 lg:ml-auto lg:mr-0 lg:px-12 lg:py-12">
+          <div>
+            <p className="text-sm text-tinta-tenue"><Link href="/carrito" className="underline">Carrito</Link> › <b className="text-tinta">Datos, envío y pago</b></p>
+            <h1 className="mt-2 text-[clamp(2rem,5vw,2.8rem)] leading-none">Finalizar compra</h1>
           </div>
-        </fieldset>
 
-        <fieldset>
-          <legend className="mb-4 font-display text-2xl">2. Entrega</legend>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {([["envio", "Envío", "A domicilio o a sucursal, a todo el país. En CABA puede llegar hoy."], ["retiro", "Retiro en el local", "Gratis. Te avisamos cuando esté listo."]] as const).map(([v, t, d]) => (
-              <label key={v} className={`cursor-pointer rounded-2xl border-2 p-4 ${entrega === v ? "border-tinta" : "border-linea"}`}>
-                <input type="radio" name="entrega" value={v} checked={entrega === v} onChange={() => setEntrega(v)} className="sr-only" />
-                <span className="block font-bold">{t}</span><span className="text-sm text-tinta-suave">{d}</span>
-              </label>
-            ))}
-          </div>
-          {entrega === "envio" ? (
-            <div className="mt-4 grid gap-4 sm:grid-cols-6">
-              <div className="sm:col-span-4">{inp("calle", "Calle", { autoComplete: "address-line1" })}</div>
-              <div className="sm:col-span-2">{inp("numero", "Número")}</div>
-              <div className="sm:col-span-2">{inp("piso", "Piso / depto (opcional)", { autoComplete: "address-line2" })}</div>
-              <div className="sm:col-span-2">{inp("cp", "Código postal", { autoComplete: "postal-code" })}</div>
-              <div className="sm:col-span-2">{inp("localidad", "Localidad", { autoComplete: "address-level2" })}</div>
-              <label className="block sm:col-span-3">
-                <span className="mb-1 block text-sm font-bold">Provincia</span>
-                <select value={c.provincia} onChange={cambiar("provincia")} className={campo} autoComplete="address-level1">{PROVINCIAS.map((p) => <option key={p}>{p}</option>)}</select>
-              </label>
-              <div className="sm:col-span-3">{inp("indicaciones", "Indicaciones (opcional)", { placeholder: "Timbre, entre calles…" })}</div>
-              <div className="sm:col-span-6">
-                <OpcionesEnvio items={items} destino={destino} medioPago={medio} cupon={cupon}
-                  valor={envio} alCambiar={setEnvio} error={errores.opcionEnvio} recargar={recargarEnvio} />
-              </div>
-              <label className="flex gap-2 text-sm sm:col-span-6">
-                <input type="checkbox" checked={avisosWhatsapp} onChange={(e) => setAvisosWhatsapp(e.target.checked)} className="mt-0.5 size-4 accent-tinta" />
-                <span>Avisame por WhatsApp cuando salga, cuando esté por llegar y cuando se entregue (al número de arriba).</span>
-              </label>
+          <fieldset className="space-y-3">
+            <legend className={titulo}>Contacto</legend>
+            {inp("email", "Email", { type: "email", autoComplete: "email", inputMode: "email" })}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {inp("nombre", "Nombre", { autoComplete: "given-name" })}
+              {inp("apellido", "Apellido", { autoComplete: "family-name" })}
+              {inp("telefono", "Celular", { type: "tel", autoComplete: "tel", placeholder: "11 5555-5555" })}
+              {inp("dni", "DNI o CUIT", { inputMode: "numeric", autoComplete: "off" })}
             </div>
-          ) : (
-            <div className="mt-4 space-y-2" role="radiogroup" aria-label="Local de retiro">
-              {locales.map((l) => (
-                <label key={l.nombre} className={`flex cursor-pointer gap-3 rounded-2xl border p-4 ${local === l.nombre ? "border-tinta" : "border-linea"}`}>
-                  <input type="radio" name="local" checked={local === l.nombre} onChange={() => setLocal(l.nombre)} className="mt-1 accent-tinta" />
-                  <span><b>{l.nombre}</b><br /><span className="text-sm text-tinta-suave">{l.direccion}, {l.localidad} · {l.horario}</span></span>
+          </fieldset>
+
+          <fieldset>
+            <legend className={titulo}>Entrega</legend>
+            <div className="divide-y divide-linea overflow-hidden rounded-xl border border-linea">
+              {([["envio", "Envío", "A domicilio o a sucursal, a todo el país. En CABA puede llegar hoy."], ["retiro", "Retiro en el local", "Gratis. Te avisamos cuando esté listo."]] as const).map(([v, t, d]) => (
+                <label key={v} className={`flex cursor-pointer items-start gap-3 p-4 ${entrega === v ? "bg-marca-claro/40" : ""}`}>
+                  <input type="radio" name="entrega" value={v} checked={entrega === v} onChange={() => setEntrega(v)} className="mt-1 size-4 accent-tinta" />
+                  <span><span className="block font-bold">{t}</span><span className="text-sm text-tinta-suave">{d}</span></span>
                 </label>
               ))}
             </div>
-          )}
-        </fieldset>
+            {entrega === "envio" ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-6">
+                <div className="sm:col-span-4">{inp("calle", "Calle", { autoComplete: "address-line1" })}</div>
+                <div className="sm:col-span-2">{inp("numero", "Número")}</div>
+                <div className="sm:col-span-2">{inp("piso", "Piso / depto (opcional)", { autoComplete: "address-line2" })}</div>
+                <div className="sm:col-span-2">{inp("cp", "Código postal", { autoComplete: "postal-code" })}</div>
+                <div className="sm:col-span-2">{inp("localidad", "Localidad", { autoComplete: "address-level2" })}</div>
+                <label className="block sm:col-span-3">
+                  <span className="mb-1 block text-sm font-bold">Provincia</span>
+                  <select value={c.provincia} onChange={cambiar("provincia")} className={campo} autoComplete="address-level1">{PROVINCIAS.map((p) => <option key={p}>{p}</option>)}</select>
+                </label>
+                <div className="sm:col-span-3">{inp("indicaciones", "Indicaciones (opcional)", { placeholder: "Timbre, entre calles…" })}</div>
+                <div className="sm:col-span-6">
+                  <h3 className="mb-2 mt-4 text-lg font-bold font-sans">Métodos de envío</h3>
+                  <OpcionesEnvio items={items} destino={destino} medioPago={medio} cupon={cupon}
+                    valor={envio} alCambiar={setEnvio} error={errores.opcionEnvio} recargar={recargarEnvio} />
+                </div>
+                <label className="flex gap-2 text-sm sm:col-span-6">
+                  <input type="checkbox" checked={avisosWhatsapp} onChange={(e) => setAvisosWhatsapp(e.target.checked)} className="mt-0.5 size-4 accent-tinta" />
+                  <span>Avisame por WhatsApp cuando salga, cuando esté por llegar y cuando se entregue (al número de arriba).</span>
+                </label>
+              </div>
+            ) : (
+              <div className="mt-4 divide-y divide-linea overflow-hidden rounded-xl border border-linea" role="radiogroup" aria-label="Local de retiro">
+                {locales.map((l) => (
+                  <label key={l.nombre} className={`flex cursor-pointer gap-3 p-4 ${local === l.nombre ? "bg-marca-claro/40" : ""}`}>
+                    <input type="radio" name="local" checked={local === l.nombre} onChange={() => setLocal(l.nombre)} className="mt-1 size-4 accent-tinta" />
+                    <span><b>{l.nombre}</b><br /><span className="text-sm text-tinta-suave">{l.direccion}, {l.localidad} · {l.horario}</span></span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </fieldset>
 
-        <fieldset>
-          <legend className="mb-4 font-display text-2xl">3. Pago</legend>
-          <div className="space-y-2">
-            {disponibles.filter((m) => m.id !== "local" || entrega === "retiro").map((m) => (
-              <label key={m.id} className={`flex cursor-pointer gap-3 rounded-2xl border p-4 ${medio === m.id ? "border-tinta" : "border-linea"}`}>
-                <input type="radio" name="medio" checked={medio === m.id} onChange={() => setMedio(m.id)} className="mt-1 accent-tinta" />
-                <span><b>{m.titulo}</b>{m.id === "transferencia" && <span className="ml-2 rounded-full bg-ahorro px-2 py-0.5 text-xs font-bold text-white">{config.descuentoTransferencia}% OFF</span>}<br />
-                  <span className="text-sm text-tinta-suave">{m.detalle(config)}</span></span>
-              </label>
-            ))}
+          <fieldset>
+            <legend className={titulo}>Pago</legend>
+            <p className="-mt-2 mb-3 text-sm text-tinta-suave">Todas las transacciones son seguras y están cifradas.</p>
+            <div className="divide-y divide-linea overflow-hidden rounded-xl border border-linea">
+              {disponibles.filter((m) => m.id !== "local" || entrega === "retiro").map((m) => {
+                const precio = precioCon(m.id);
+                return (
+                  <div key={m.id}>
+                    <label className={`flex cursor-pointer items-start gap-3 p-4 ${medio === m.id ? "bg-marca-claro/40" : ""}`}>
+                      <input type="radio" name="medio" checked={medio === m.id} onChange={() => setMedio(m.id)} className="mt-1 size-4 accent-tinta" />
+                      <span className="flex-1">
+                        <b>{m.titulo}</b>{m.id === "transferencia" && config.descuentoTransferencia > 0 && <span className="ml-2 rounded-full bg-ahorro px-2 py-0.5 text-xs font-bold text-white">{config.descuentoTransferencia}% OFF</span>}
+                      </span>
+                      {precio !== null && <span className={`shrink-0 font-bold ${m.id === "transferencia" ? "text-ahorro" : ""}`}>{formatearPesos(precio)}</span>}
+                    </label>
+                    {medio === m.id && <p className="border-t border-linea bg-fondo-suave px-4 py-3 text-sm text-tinta-suave">{m.detalle(config)}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <label className="block">
+            <span className="mb-1 block text-sm font-bold">¿Algo que tengamos que saber? (opcional)</span>
+            <textarea value={c.notas} onChange={cambiar("notas")} maxLength={500} rows={2} className={campo} />
+          </label>
+
+          <div>
+            <label className="flex gap-2 text-sm">
+              <input type="checkbox" checked={acepta} onChange={(e) => setAcepta(e.target.checked)} aria-invalid={!!errores.aceptaTerminos} className="mt-0.5 size-4 accent-tinta" />
+              <span>Acepto los <Link href="/terminos" target="_blank" className="underline">términos y condiciones</Link> y la <Link href="/privacidad" target="_blank" className="underline">política de privacidad</Link>.</span>
+            </label>
+            {err("aceptaTerminos")}
+            {cotizacion?.problemas.map((p) => <p key={p.mensaje} className="mt-3 text-sm font-bold text-oferta" role="alert">{p.mensaje}</p>)}
+            {general && <p className="mt-4 rounded-xl bg-oferta/10 p-3 text-sm font-bold text-oferta" role="alert">{general}</p>}
+            <button type="submit" disabled={enviando || !!cotizacion?.problemas.length} className="boton mt-5 w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte disabled:cursor-not-allowed disabled:bg-linea disabled:text-tinta-tenue">
+              {enviando ? "Confirmando…" : medio === "mercadopago" || medio === "pagofacil" ? "Ir a pagar" : "Confirmar compra"}
+              {!enviando && cotizacion ? ` · ${formatearPesos(cotizacion.total)}` : ""}
+            </button>
+            <p className="mt-3 text-center text-xs text-tinta-tenue">Tus datos viajan cifrados. No guardamos datos de tarjetas: los maneja Mercado Pago.</p>
           </div>
-        </fieldset>
-
-        <label className="block">
-          <span className="mb-1 block text-sm font-bold">¿Algo que tengamos que saber? (opcional)</span>
-          <textarea value={c.notas} onChange={cambiar("notas")} maxLength={500} rows={2} className={campo} />
-        </label>
+        </div>
       </div>
 
-      <aside className="self-start rounded-[var(--radius-foto)] border border-linea p-5 lg:sticky lg:top-28">
-        <h2 className="text-2xl">Resumen</h2>
-        <ul className="mt-4 space-y-2 text-sm">
-          {cotizacion?.lineas.map((l) => (
-            <li key={l.sku} className="flex justify-between gap-3"><span>{l.cantidad} × {l.nombre}{l.talle ? ` · ${l.talle}` : ""}</span><span className="shrink-0">{formatearPesos(l.subtotal)}</span></li>
-          ))}
-        </ul>
-        {cotizacion && (
-          <dl className="mt-4 space-y-1 border-t border-linea pt-4 text-[15px]">
-            <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatearPesos(cotizacion.subtotal)}</dd></div>
-            <LineaCupon c={cotizacion} Etiqueta="dt" />
-            {cotizacion.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento transferencia</dt><dd>−{formatearPesos(cotizacion.descuento)}</dd></div>}
-            <div className="flex justify-between gap-3">
-              <dt>Envío{entrega === "envio" && envio.opcion ? <span className="block text-xs text-tinta-suave">{envio.opcion.nombre}</span> : null}</dt>
-              <dd className="shrink-0 text-right">{entrega === "retiro" ? "Gratis"
-                : !envio.opcion ? "—"
-                : envio.opcion.soloMercadoPago ? <span className="text-sm">Se paga en Mercado Pago</span>
-                : cotizacion.envio ? formatearPesos(cotizacion.envio) : "Gratis"}</dd>
-            </div>
-            <div className="flex justify-between pt-2 font-display text-2xl"><dt>Total</dt><dd>{formatearPesos(cotizacion.total)}</dd></div>
-          </dl>
-        )}
-        {cotizacion?.problemas.map((p) => <p key={p.mensaje} className="mt-2 text-sm font-bold text-oferta" role="alert">{p.mensaje}</p>)}
-        <div className="mt-4"><CampoCupon /></div>
-        <label className="mt-5 flex gap-2 text-sm">
-          <input type="checkbox" checked={acepta} onChange={(e) => setAcepta(e.target.checked)} aria-invalid={!!errores.aceptaTerminos} className="mt-0.5 size-4 accent-tinta" />
-          <span>Acepto los <Link href="/terminos" target="_blank" className="underline">términos y condiciones</Link> y la <Link href="/privacidad" target="_blank" className="underline">política de privacidad</Link>.</span>
-        </label>
-        {err("aceptaTerminos")}
-        {general && <p className="mt-4 rounded-xl bg-oferta/10 p-3 text-sm font-bold text-oferta" role="alert">{general}</p>}
-        <button type="submit" disabled={enviando || !!cotizacion?.problemas.length} className="boton mt-5 w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte disabled:cursor-not-allowed disabled:bg-linea disabled:text-tinta-tenue">
-          {enviando ? "Confirmando…" : medio === "mercadopago" || medio === "pagofacil" ? "Ir a pagar" : "Confirmar compra"}
-        </button>
-        <p className="mt-3 text-center text-xs text-tinta-tenue">Tus datos viajan cifrados. No guardamos datos de tarjetas: los maneja Mercado Pago.</p>
+      <aside id="resumen-pedido" aria-label="Resumen del pedido"
+        className={`${verResumen ? "block" : "hidden"} order-2 border-linea bg-fondo-suave lg:order-2 lg:block lg:border-l`}>
+        <div className="mx-auto max-w-[36rem] px-4 py-6 sm:px-6 lg:sticky lg:top-20 lg:mx-0 lg:px-12 lg:py-12">
+          <ResumenPedido c={cotizacion} />
+          <div className="mt-5"><CampoCupon /></div>
+          {cotizacion && (
+            <dl className="mt-5 space-y-1.5 text-[15px]">
+              <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatearPesos(cotizacion.subtotal)}</dd></div>
+              <LineaCupon c={cotizacion} Etiqueta="dt" />
+              {cotizacion.descuento > 0 && <div className="flex justify-between text-ahorro"><dt>Descuento transferencia</dt><dd>−{formatearPesos(cotizacion.descuento)}</dd></div>}
+              <div className="flex justify-between gap-3">
+                <dt>Envío{entrega === "envio" && envio.opcion ? <span className="block text-xs text-tinta-suave">{envio.opcion.nombre}</span> : null}</dt>
+                <dd className="shrink-0 text-right">{entrega === "retiro" ? "Gratis"
+                  : !envio.opcion ? <span className="text-sm text-tinta-suave">Ingresá tu dirección</span>
+                  : envio.opcion.soloMercadoPago ? <span className="text-sm">Se paga en Mercado Pago</span>
+                  : cotizacion.envio ? formatearPesos(cotizacion.envio) : "Gratis"}</dd>
+              </div>
+              <div className="flex items-baseline justify-between pt-3 text-lg font-bold"><dt>Total</dt><dd><span className="mr-1.5 text-xs font-normal text-tinta-tenue">ARS</span><span className="font-display text-3xl">{formatearPesos(cotizacion.total)}</span></dd></div>
+              {ahorro(cotizacion) > 0 && <p className="pt-1 text-sm font-bold text-ahorro">Ahorrás {formatearPesos(ahorro(cotizacion))}</p>}
+            </dl>
+          )}
+        </div>
       </aside>
     </form>
+  );
+}
+
+/** Lo que se ahorra entre rebajas, packs, cupón y transferencia. */
+const ahorro = (c: Cotizacion) =>
+  c.lineas.reduce((a, l) => a + (l.precioLista ? (l.precioLista - l.precio) * l.cantidad : 0), 0) + (c.descuentoCupon ?? 0) + c.descuento;
+
+/* Las prendas del pedido con su foto y la cantidad encima; los packs con lo que llevan. */
+function ResumenPedido({ c }: { c: Cotizacion | null }) {
+  if (!c) return <p className="text-sm text-tinta-suave">Calculando…</p>;
+  const miniatura = (foto: string | null, n: number, alt: string) => (
+    <span className="relative block size-16 shrink-0">
+      <span className="block size-16 overflow-hidden rounded-lg border border-linea bg-white">
+        <Foto foto={foto ? { clave: foto, ancho: 400, alto: 500, alt: null } : null} alt={alt} sizes="64px" />
+      </span>
+      <span className="absolute -right-2 -top-2 grid min-w-5 place-items-center rounded-full bg-tinta-suave px-1.5 text-xs font-bold leading-5 text-white" aria-label={`${n} ${n === 1 ? "unidad" : "unidades"}`}>{n}</span>
+    </span>
+  );
+  return (
+    <ul className="space-y-4 text-sm" aria-label="Prendas del pedido">
+      {c.lineas.filter((l) => !l.pack).map((l) => (
+        <li key={l.clave} className="flex items-center gap-4">
+          {miniatura(l.foto, l.cantidad, l.nombre)}
+          <span className="min-w-0 flex-1"><span className="block font-bold">{l.nombre}</span><span className="text-tinta-suave">{[l.talle, l.color].filter(Boolean).join(" / ")}</span></span>
+          <span className="shrink-0 text-right">{formatearPesos(l.subtotal)}{l.precioLista ? <s className="block text-xs text-tinta-tenue">{formatearPesos(l.precioLista * l.cantidad)}</s> : null}</span>
+        </li>
+      ))}
+      {(c.packs ?? []).map((p) => (
+        <li key={p.clave} className="flex items-start gap-4">
+          {miniatura(p.foto, p.cantidad, `Pack x${p.unidades} ${p.nombre}`)}
+          <span className="min-w-0 flex-1">
+            <span className="block font-bold">Pack x{p.unidades} {p.nombre}</span>
+            <span className="block text-xs font-bold text-ahorro">−{p.porcentaje}%</span>
+            {p.prendas.map((x) => <span key={x.sku} className="block text-tinta-suave">{x.cantidad}× {[x.talle, x.color].filter(Boolean).join(" / ")}</span>)}
+          </span>
+          <span className="shrink-0 text-right">{formatearPesos(p.subtotal)}{p.precioLista > p.precio ? <s className="block text-xs text-tinta-tenue">{formatearPesos(p.precioLista * p.cantidad)}</s> : null}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

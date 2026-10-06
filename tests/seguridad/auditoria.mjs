@@ -719,6 +719,53 @@ async function respirar() {
   }
 }
 
+// ── 7i. Etapa 10: packs aparte en el carrito, eliminar productos, guías desde Excel ──
+{
+  await respirar();
+  const G = "etapa 10";
+  const json = (url, body, h = {}) => pedir(url, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) });
+  // El pack: el navegador dice qué lleva, nunca el %; formas raras → 400.
+  const sku = (await (await pedir(`${API}/v1/productos/remera-basica-cuello-redondo`)).json().catch(() => ({}))).variantes?.find((v) => v.stock > 0)?.sku ?? "X";
+  for (const [nombre, items] of [
+    ["pack con % propio", [{ pack: [{ sku, cantidad: 2 }], cantidad: 1, porcentaje: 90 }]],
+    ["prenda del pack con %", [{ pack: [{ sku, cantidad: 2, porcentaje: 90 }], cantidad: 1 }]],
+    ["suelta y pack a la vez", [{ sku, cantidad: 1, pack: [{ sku, cantidad: 2 }] }]],
+    ["pack vacío", [{ pack: [], cantidad: 1 }]],
+    ["pack de 50 prendas iguales", [{ pack: [{ sku, cantidad: 50 }], cantidad: 1 }]],
+    ["21 packs iguales", [{ pack: [{ sku, cantidad: 2 }], cantidad: 21 }]],
+    ["pack con SKU que no es texto", [{ pack: [{ sku: { $ne: null }, cantidad: 2 }], cantidad: 1 }]],
+  ]) {
+    const r = await json(`${API}/v1/carrito`, { items });
+    chk(G, `carrito: ${nombre} → 400`, r.status === 400, String(r.status));
+  }
+  {
+    // Un "pack" de una prenda que no se vende en pack no descuenta nada.
+    const noPack = (await (await pedir(`${API}/v1/productos/jogger-rustico-puno`)).json().catch(() => ({}))).variantes?.find((v) => v.stock > 1)?.sku;
+    if (noPack) {
+      const c = await (await json(`${API}/v1/carrito`, { items: [{ pack: [{ sku: noPack, cantidad: 2 }], cantidad: 1 }] })).json().catch(() => ({}));
+      chk(G, "carrito: un pack de una prenda que no es pack no descuenta (y se avisa)", (c.packs ?? []).length === 0 && (c.subtotal ?? 1) === 0 && (c.problemas ?? []).some((p) => p.tipo === "pack"), JSON.stringify(c.problemas ?? null));
+    }
+  }
+  // Backoffice: eliminar/restaurar productos y las guías en Excel piden sesión.
+  for (const [metodo, ruta, body] of [
+    ["POST", "/v1/admin/productos/eliminar", { ids: [1] }], ["POST", "/v1/admin/productos/restaurar", { ids: [1] }],
+    ["GET", "/v1/admin/guias-talles/excel"],
+  ]) {
+    const r = await pedir(API + ruta, { method: metodo, headers: { ...(body ? { "content-type": "application/json" } : {}), "x-isu-admin": "a".repeat(43) }, body: body ? JSON.stringify(body) : undefined });
+    chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
+  }
+  {
+    const r = await pedir(`${API}/v1/admin/guias-talles/excel`, { method: "POST", headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x-isu-admin": "a".repeat(43) }, body: new Uint8Array(100) });
+    chk(G, "POST guías en Excel con token inventado → 401", r.status === 401, String(r.status));
+    const g = await pedir(`${API}/v1/admin/guias-talles/excel`, { method: "POST", headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, body: new Uint8Array(7 * 1024 * 1024) });
+    chk(G, "POST guías en Excel de 7 MB → rechazado antes de leerlo", [401, 413].includes(g.status), String(g.status));
+  }
+  for (const [ruta, metodo] of [["/api/a/guias-talles/excel", "GET"], ["/api/a/productos/eliminar", "POST"]]) {
+    const r = await pedir(ADMIN + ruta, { method: metodo, headers: metodo === "POST" ? { "content-type": "application/json", "x-isu": "1", origin: ADMIN } : {}, body: metodo === "POST" ? JSON.stringify({ ids: [1] }) : undefined });
+    chk(G, `backoffice: ${metodo} ${ruta} sin sesión → 401/403`, [401, 403].includes(r.status), String(r.status));
+  }
+}
+
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────
 let bloqueado = false;
 for (let i = 0; i < 400 && !bloqueado; i++) {

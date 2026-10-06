@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { APIRequestContext } from "@playwright/test";
-import { expect, test, type Page } from "./base";
+import { expect, test, verResumen, type Page } from "./base";
 
 /*
  * Etapa 4 en un navegador real, de punta a punta:
@@ -53,7 +53,7 @@ test.describe("checkout con transportes", () => {
   test("a sucursal: elige transporte y sucursal, el total suma el envío y el pedido muestra 'Tu envío'", async ({ page, request }, info) => {
     const errores = vigilar(page);
     await agregar(page, "jogger-rustico-puno");
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await page.getByLabel("Email").fill(`e2e-envio-${info.project.name}-${Date.now()}@test.com`);
     await page.getByLabel("Nombre", { exact: true }).fill("Ana");
     await page.getByLabel("Apellido").fill("Prueba");
@@ -79,6 +79,7 @@ test.describe("checkout con transportes", () => {
     await expect(page.getByText("Elegí la sucursal donde lo vas a retirar.")).toBeVisible();
     await sucursales.getByRole("radio").first().check();
     // El resumen muestra el envío elegido con su precio.
+    await verResumen(page);
     const resumen = page.locator("aside");
     await expect(resumen.getByText("Andreani a sucursal")).toBeVisible();
     await expect(resumen.locator("dd").filter({ hasText: /^\$/ }).nth(1)).toBeVisible();

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "./base";
+import { expect, test, verResumen, type Page } from "./base";
 
 /*
  * Etapa 2 en un navegador real: carrito, checkout, pagos y cuenta.
@@ -77,10 +77,11 @@ test.describe("checkout", () => {
   test("transferencia: 20% OFF, datos para transferir y pantalla que se actualiza sola al acreditarse", async ({ page, request }, info) => {
     const errores = vigilar(page);
     await agregar(page, "remera-oversize-algodon-peinado");
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await datos(page, email("transf", info));
     await page.getByText("Retiro en el local").click();
     await page.getByText("Transferencia bancaria").click();
+    await verResumen(page);
     await expect(page.getByText("Descuento transferencia")).toBeVisible();
     await page.getByRole("button", { name: "Confirmar compra" }).click();
     // Sin aceptar términos no pasa.
@@ -104,7 +105,7 @@ test.describe("checkout", () => {
 
   test("Mercado Pago: va a pagar, aprueba y vuelve con el pago confirmado", async ({ page }, info) => {
     await agregar(page, "jogger-rustico-puno");
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await datos(page, email("mp", info));
     await page.getByText("Retiro en el local").click();
     await page.getByText("Mercado Pago", { exact: true }).click();
@@ -118,7 +119,7 @@ test.describe("checkout", () => {
 
   test("Mercado Pago rechazado: el pedido sigue reservado y se puede reintentar", async ({ page }, info) => {
     await agregar(page, "jogger-rustico-puno");
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await datos(page, email("mprech", info));
     await page.getByText("Retiro en el local").click();
     await page.getByText("Mercado Pago", { exact: true }).click();
@@ -134,7 +135,7 @@ test.describe("checkout", () => {
 
   test("pagar en el local sólo aparece con retiro; envío a domicilio pide la dirección", async ({ page }, info) => {
     await agregar(page, "calza-deportiva-tiro-alto");
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await expect(page.getByText("Pagar al retirar en el local")).toBeHidden();
     await page.getByText("Retiro en el local").click();
     await expect(page.getByText("Pagar al retirar en el local")).toBeVisible();
@@ -177,7 +178,7 @@ test.describe("arrepentimiento", () => {
   test("con número y email del pedido: código de trámite y pedido cancelado", async ({ page }, info) => {
     const correo = email("arr", info);
     await agregar(page, "remera-basica-cuello-redondo");
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await datos(page, correo);
     await page.getByText("Retiro en el local").click();
     await page.getByText("Pagar al retirar en el local").click();

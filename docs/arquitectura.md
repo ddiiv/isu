@@ -77,3 +77,21 @@ Ver [contrato-stocker.md](contrato-stocker.md).
   - `MenuMovil` va por paneles; los accesos del header (`MenuAcceso`) lo abren en un panel con un evento `isu:menu`.
   - `BarraEnvioGratis` en la ficha usa la cotización del carrito.
 - **Caché corta** (`apps/api/src/lib/cache.ts`): con tope de 5000 claves (poda vencidas y, si no alcanza, las más viejas).
+
+## Carrito, checkout y backoffice (etapa 10)
+
+- **Packs aparte:** `ItemCarrito` es `{ sku, cantidad }` o `{ pack: [{ sku, cantidad }], cantidad }` (shared `checkout.ts`). `cotizar.ts` agrupa los packs por `clavePack` y arma cada uno.
+  - `Cotizacion.lineas` trae todas las prendas, cada una con su `clave`; `Cotizacion.packs` las agrupa para mostrarlas.
+  - Cupón y "cobrado" van por `clave`.
+  - `paraStocker` junta por SKU para Stocker.
+- **Tienda:**
+  - `LineaCarrito.pack` guarda lo que lleva; `OpcionesPago` muestra transferencia vs. tarjeta/MP.
+  - El checkout es de una página con el resumen fijo y `?pago=` para elegir el medio desde el carrito.
+  - En la ficha, «Comprar ahora» agrega sin abrir el cajón y va a `/checkout`.
+- **Eliminar productos:** columnas `eliminado_en` y `eliminado_por`, y la restricción `productos_eliminado_oculto` (migración `0016`). Rutas `POST /v1/admin/productos/eliminar` y `/restaurar`, y filtro `eliminados`.
+- **Guías de talles:**
+  - tipo `otro` (talles propios) y medidas con nombre propio (`infoMedida`), de la migración `0016`;
+  - `lib/xlsx.ts` (leer y escribir .xlsx) y `admin/guias-excel.ts` (hoja ↔ guía);
+  - `GET/POST /v1/admin/guias-talles/excel` (`?vista=1` para la vista previa);
+  - migración `0017`: las 40 guías de la fábrica.
+- **Stocker:** `CatalogoStocker` descarta productos de evento, pack o combo y variantes de pack o combo, si vinieran marcados.

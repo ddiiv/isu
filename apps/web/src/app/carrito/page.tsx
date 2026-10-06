@@ -6,5 +6,5 @@ export const metadata: Metadata = { title: "Carrito", robots: { index: false, fo
 
 export default async function Carrito() {
   const config = await obtenerConfig();
-  return <PaginaCarrito descuento={config.descuentoTransferencia} />;
+  return <PaginaCarrito descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} medios={config.mediosPago} />;
 }
