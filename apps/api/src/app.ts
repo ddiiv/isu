@@ -23,6 +23,7 @@ import { rutasOutfits } from "./modulos/outfits/rutas.js";
 import { crearServicioPedidos } from "./modulos/pedidos/servicio.js";
 import { crearColas, type Colas } from "./lib/colas.js";
 import { crearMercadoPago } from "./lib/mercadopago.js";
+import { crearTalo } from "./lib/talo.js";
 import { crearClienteStocker } from "@isu/stocker";
 import { almacenDeBanners, almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, type Almacen } from "@isu/almacen";
 import { rutasEnviosAdmin } from "./modulos/admin/envios.js";
@@ -39,6 +40,7 @@ import { rutasEnvios } from "./modulos/envios/rutas.js";
 import { rutasSeo } from "./modulos/seo/rutas.js";
 import { rutasResenas } from "./modulos/resenas/rutas.js";
 import { rutasResenasAdmin } from "./modulos/admin/resenas.js";
+import { rutasTransferenciasAdmin } from "./modulos/admin/transferencias.js";
 
 export interface Dependencias {
   env: Entorno;
@@ -123,10 +125,14 @@ export async function construirApp(deps: Dependencias) {
   if (!colasDadas) app.addHook("onClose", async () => { await colas.cerrar(); });
   const stocker = env.STOCKER_API_URL && env.STOCKER_TOKEN ? crearClienteStocker({ url: env.STOCKER_API_URL, token: env.STOCKER_TOKEN }) : null;
   const mp = env.MP_ACCESS_TOKEN ? crearMercadoPago({ url: env.MP_API_URL, token: env.MP_ACCESS_TOKEN }) : null;
+  // Transferencias con un CVU por pedido (las tres variables juntas; si falta una, no se usa).
+  const talo = env.TALO_USER_ID && env.TALO_CLIENT_ID && env.TALO_CLIENT_SECRET
+    ? crearTalo({ url: env.TALO_API_URL, userId: env.TALO_USER_ID, clientId: env.TALO_CLIENT_ID, clientSecret: env.TALO_CLIENT_SECRET })
+    : null;
   // ── Etapa 4: envíos (cada transporte se prende con sus credenciales) ──
   const transportes = deps.transportes ?? crearTransportes(process.env);
   const cotizador = crearCotizadorEnvios({ pool, redis, transportes, log: app.log });
-  const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador, secreto: env.INTERNO_TOKEN });
+  const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador, secreto: env.INTERNO_TOKEN, talo });
   await rutasCuentas(app, { pool, redis, env, colas });
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
@@ -157,6 +163,9 @@ export async function construirApp(deps: Dependencias) {
   await rutasResenas(app, { pool, redis, cache, colas, canalInvalidar: CANAL_INVALIDAR, secreto: env.INTERNO_TOKEN });
   const banners: Almacen | null = (() => { try { return almacenDeBanners({ ...process.env, FOTOS_DIR: env.FOTOS_DIR }); } catch { return null; } })();
   await rutasResenasAdmin(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR, banners });
+
+  // ── Transferencias que se confirman solas: lo que entró y no se pudo asignar solo ──
+  await rutasTransferenciasAdmin(app, { pool, env, transferencias: servicio.transferencias, mpConfigurado: !!mp });
 
   return app;
 }

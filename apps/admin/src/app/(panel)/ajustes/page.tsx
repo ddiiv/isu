@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { Local } from "@isu/shared";
+import { leerPacks, PACK_TOPE, type AjustePacks, type Local } from "@isu/shared";
 import { api, fecha, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, EntradaPesos, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
 import { AjustesEnvios, type ValoresEnvios } from "@/components/AjustesEnvios";
@@ -15,11 +15,14 @@ type Valores = Record<string, unknown> & {
   chatbot?: { activo: boolean; saludo: string };
   chatbotIa?: { activo: boolean; topeDiario: number };
   // Etapa 8
-  packs?: number[];
+  packs?: AjustePacks;
   resenas?: { publicarSolas: boolean; pedirDias: number };
   cuidados?: string;
   cifras?: Array<{ valor: string; texto: string }>;
+  // Transferencias que se confirman solas
+  transferenciasAuto?: { talo: boolean; mercadoPago: boolean };
 } & ValoresEnvios;
+type EstadoTransferencias = { talo: { prendido: boolean; configurado: boolean }; mercadoPago: { prendido: boolean; configurado: boolean } };
 const HORAS: Array<[keyof Valores, string, number, number]> = [
   ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 240],
   ["horasTransferencia", "Transferencia", 2, 240], ["horasPagoLocal", "Pagar al retirar en el local", 24, 720],
@@ -28,9 +31,12 @@ const HORAS: Array<[keyof Valores, string, number, number]> = [
 export default function Ajustes() {
   const { datos, error, recargar } = useDatos<{ ajustes: Array<{ clave: string; valor: unknown; actualizadoPor: string | null; actualizadoEn: string }> }>("ajustes");
   const [v, setV] = useState<Valores | null>(null);
+  // Qué tiene credenciales en el servidor (Talo, Mercado Pago).
+  const { datos: tr } = useDatos<{ estado: EstadoTransferencias }>("transferencias");
   const aviso = useAviso();
   const original = datos ? Object.fromEntries(datos.ajustes.map((a) => [a.clave, a.valor])) as Valores : null;
-  useEffect(() => { if (original) setV(structuredClone(original)); }, [datos]);
+  // Packs: el formato viejo ([x2…x5]) se muestra ya pasado al nuevo (al guardar queda así).
+  useEffect(() => { if (original) setV(structuredClone({ ...original, ...(original.packs ? { packs: leerPacks(original.packs) } : {}) })); }, [datos]);
   if (error) return <Mensaje>{error}</Mensaje>;
   if (!v || !original) return <Cargando />;
   const poner = <K extends keyof Valores>(k: K, x: Valores[K]) => setV({ ...v, [k]: x });
@@ -73,6 +79,24 @@ export default function Ajustes() {
             ))}
           </div>
         </Tarjeta>
+        {v.transferenciasAuto && (
+          <Tarjeta titulo="Transferencias que se confirman solas">
+            <p className="mb-3 text-xs text-tinta-tenue">El pedido se confirma solo cuando llega la plata, sin esperar el comprobante. Lo que no se pueda asignar solo (por ejemplo, si transfirieron sin los centavos) aparece en Transferencias para asignarlo a mano.</p>
+            <div className="space-y-3">
+              <Casilla etiqueta="Un CVU por pedido (Talo)"
+                ayuda={tr && !tr.estado.talo.configurado
+                  ? "Faltan las credenciales de Talo en el servidor (TALO_USER_ID, TALO_CLIENT_ID y TALO_CLIENT_SECRET): mientras tanto se usa lo de abajo."
+                  : "Cada pedido tiene su propia cuenta por el monto exacto y Talo avisa al instante. Talo cobra una comisión por cada transferencia."}
+                marcada={v.transferenciasAuto.talo} onChange={(x) => poner("transferenciasAuto", { ...v.transferenciasAuto!, talo: x })} />
+              <Casilla etiqueta="Mis datos para transferir son de mi cuenta de Mercado Pago"
+                ayuda={tr && !tr.estado.mercadoPago.configurado
+                  ? "Falta MP_ACCESS_TOKEN en el servidor."
+                  : "Cada pedido pide un monto con centavos únicos ($ 45.000,37) y se reconoce entre lo que entra a la cuenta. Recibir transferencias en Mercado Pago no tiene costo."}
+                marcada={v.transferenciasAuto.mercadoPago} onChange={(x) => poner("transferenciasAuto", { ...v.transferenciasAuto!, mercadoPago: x })} />
+            </div>
+            <p className="mt-3 text-xs text-tinta-tenue">Con las dos prendidas va Talo; si Talo no responde, la cuenta de Mercado Pago. Con ninguna, como siempre: se confirma a mano.</p>
+          </Tarjeta>
+        )}
         <Tarjeta titulo="Tiempo para pagar (horas)">
           <p className="mb-3 text-xs text-tinta-tenue">Mientras tanto la mercadería queda apartada en Stocker. Si no paga, se libera sola.</p>
           <div className="grid grid-cols-2 gap-3">
@@ -86,23 +110,36 @@ export default function Ajustes() {
             <Campo etiqueta={'Avisar "¡Últimas!" desde'}><input type="number" min={0} max={20} className={`${claseEntrada} w-28`} value={v.avisoUltimas} onChange={(e) => poner("avisoUltimas", Number(e.target.value) || 0)} /></Campo>
           </div>
         </Tarjeta>
-        {v.packs && (
-          <Tarjeta titulo="Packs (llevá más, pagá menos)">
-            <p className="mb-3 text-sm text-tinta-suave">% de descuento por llevar 2, 3, 4 y 5 unidades de una prenda marcada «Se vende en pack» (cualquier talle y color). No se suma a la rebaja de la prenda: gana el mayor. Con más de 5, vale el de 5.</p>
-            <div className="grid grid-cols-4 gap-2">
-              {[2, 3, 4, 5].map((n, i) => (
-                <Campo key={n} etiqueta={`x${n}`}>
-                  <span className="relative block">
-                    <input type="number" min={0} max={60} className={`${claseEntrada} pr-7`} value={v.packs![i] ?? 0}
-                      onChange={(e) => poner("packs", v.packs!.map((x, j) => (j === i ? Math.max(0, Math.min(60, Math.trunc(Number(e.target.value)) || 0)) : x)))} />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-tinta-tenue">%</span>
-                  </span>
-                </Campo>
-              ))}
-            </div>
-            {v.packs.some((x, i) => i > 0 && x < v.packs![i - 1]!) && <p className="mt-2 text-sm font-bold text-oferta">Llevando más, el descuento no puede ser menor.</p>}
-          </Tarjeta>
-        )}
+        {v.packs && (() => {
+          const pk = v.packs;
+          // Cambiar el rango conserva el % de las cantidades que siguen; las nuevas arrancan con el del extremo más cercano.
+          const rango = (minimo: number, maximo: number) => {
+            const pctDe = (q: number) => pk.porcentajes[Math.min(Math.max(q, pk.minimo), pk.maximo) - pk.minimo] ?? 0;
+            poner("packs", { minimo, maximo, porcentajes: Array.from({ length: maximo - minimo + 1 }, (_, i) => pctDe(minimo + i)) });
+          };
+          const entero = (x: string, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(Number(x)) || min));
+          return (
+            <Tarjeta titulo="Packs (llevá más, pagá menos)">
+              <p className="mb-3 text-sm text-tinta-suave">Una prenda marcada «Se vende en pack» se arma de un mínimo a un máximo de unidades, cada una con su talle y su color (siempre con el stock que hay de cada variante). El % sale de cuántas lleva de esa prenda, en cualquier talle y color. No se suma a la rebaja de la prenda: gana el mayor. Con más del máximo, vale el del máximo.</p>
+              <div className="flex flex-wrap gap-3">
+                <Campo etiqueta="Mínimo"><input type="number" min={2} max={pk.maximo} className={`${claseEntrada} w-24`} value={pk.minimo} onChange={(e) => rango(entero(e.target.value, 2, pk.maximo), pk.maximo)} /></Campo>
+                <Campo etiqueta="Máximo"><input type="number" min={pk.minimo} max={PACK_TOPE} className={`${claseEntrada} w-24`} value={pk.maximo} onChange={(e) => rango(pk.minimo, entero(e.target.value, pk.minimo, PACK_TOPE))} /></Campo>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                {pk.porcentajes.map((x, i) => (
+                  <Campo key={pk.minimo + i} etiqueta={`x${pk.minimo + i}`}>
+                    <span className="relative block">
+                      <input type="number" min={0} max={60} className={`${claseEntrada} pr-7`} value={x}
+                        onChange={(e) => poner("packs", { ...pk, porcentajes: pk.porcentajes.map((y, j) => (j === i ? entero(e.target.value, 0, 60) : y)) })} />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-tinta-tenue">%</span>
+                    </span>
+                  </Campo>
+                ))}
+              </div>
+              {pk.porcentajes.some((x, i) => i > 0 && x < pk.porcentajes[i - 1]!) && <p className="mt-2 text-sm font-bold text-oferta">Llevando más, el descuento no puede ser menor.</p>}
+            </Tarjeta>
+          );
+        })()}
         {v.resenas && (
           <Tarjeta titulo="Reseñas">
             <div className="space-y-3">

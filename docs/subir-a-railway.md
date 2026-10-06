@@ -208,6 +208,14 @@ El log avisa cuáles faltan, pero no frena.
 
 Las cuotas sin interés se configuran en la cuenta de Mercado Pago; la tienda sólo las anuncia.
 
+**Transferencias que se confirman solas** (opcional, guía en [`transferencias.md`](transferencias.md))
+
+| Variable | Valor |
+|---|---|
+| `TALO_USER_ID`, `TALO_CLIENT_ID`, `TALO_CLIENT_SECRET` | Sólo para el CVU por pedido con Talo: panel de Talo → *Usuario* → *Credenciales*. Las tres juntas. Después se prende en Ajustes |
+
+Con la cuenta de Mercado Pago no hace falta ninguna variable más: usa `MP_ACCESS_TOKEN`.
+
 **Mails**
 
 | Variable | Valor |

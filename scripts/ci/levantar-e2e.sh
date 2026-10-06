@@ -34,6 +34,7 @@ pnpm --filter @isu/api --filter @isu/worker build
 
 nohup node --env-file=.env scripts/demo/stocker-simulado.mjs > registros/stocker.log 2>&1 &
 nohup node --env-file=.env scripts/demo/mercadopago-simulado.mjs > registros/mercadopago.log 2>&1 &
+nohup node --env-file=.env scripts/demo/talo-simulado.mjs > registros/talo.log 2>&1 &
 nohup node --env-file=.env scripts/demo/transportes-simulado.mjs > registros/transportes.log 2>&1 &
 (cd apps/api && nohup node --env-file=../../.env dist/servidor.js > ../../registros/api.log 2>&1 &)
 esperar "http://127.0.0.1:${PORT:-4000}/readyz" 60

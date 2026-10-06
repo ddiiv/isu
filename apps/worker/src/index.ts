@@ -123,6 +123,8 @@ const colaPagos = new Queue(COLAS.pagos, { connection: conexion, prefix: "isu", 
 if (api) {
   await colaPagos.upsertJobScheduler("vencer", { every: 60_000 }, { name: "vencer" });
   await colaPagos.upsertJobScheduler("conciliar-mp", { every: 10 * 60_000 }, { name: "conciliar-mp" });
+  // Transferencias que se confirman solas (Talo y la cuenta de Mercado Pago), por si se perdió un aviso.
+  await colaPagos.upsertJobScheduler("conciliar-transferencias", { every: 2 * 60_000 }, { name: "conciliar-transferencias" });
 } else {
   console.warn("Sin API_URL / INTERNO_TOKEN: los pedidos sin pagar no vencen solos.");
 }

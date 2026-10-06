@@ -11,7 +11,7 @@ import { IconoBanco, IconoCamion, IconoFlecha, IconoLocal, IconoTarjeta } from "
 import { SITIO } from "@/lib/sitio";
 import { JsonLd } from "@/components/JsonLd";
 import { contextoSeo } from "@/lib/seo";
-import { envioYDevolucion } from "@isu/shared";
+import { maxPorcentajePack, envioYDevolucion } from "@isu/shared";
 
 export const revalidate = 300;
 
@@ -24,7 +24,7 @@ export default async function Inicio() {
   // Unas prendas de cada categoría de arriba (las pestañas y la foto de cada tarjeta de categoría).
   const grupos = await Promise.all(categorias.slice(0, 4).map(async (c) => ({ slug: c.slug, nombre: c.nombre, productos: (await obtenerDeCategoria(c.slug, 8)).productos })));
   const fotoDe = (slug: string) => grupos.find((g) => g.slug === slug)?.productos.find((p) => p.foto)?.foto ?? null;
-  const maxPack = Math.max(...config.packs);
+  const maxPack = maxPorcentajePack(config.packs);
   // Los números de la marca (Ajustes) + los que salen solos: opiniones y locales.
   const cifras = [
     ...config.cifras,
@@ -93,7 +93,7 @@ export default async function Inicio() {
               <div>
                 <p className="text-sm font-bold uppercase tracking-widest text-ahorro">📦 Packs</p>
                 <h2 id="titulo-packs" className="mt-1 text-[clamp(2rem,5vw,3.6rem)] leading-none">Llevá más, pagá menos</h2>
-                <p className="mt-3 max-w-2xl text-lg text-tinta-suave">Elegí <b>2, 3, 4 o 5 unidades</b> y armalas con tus colores y talles. Hasta <b className="text-ahorro">{maxPack}% OFF</b> en cada una.</p>
+                <p className="mt-3 max-w-2xl text-lg text-tinta-suave">Elegí <b>de {config.packs.minimo} a {config.packs.maximo} unidades</b> y armalas con tus colores y talles. Hasta <b className="text-ahorro">{maxPack}% OFF</b> en cada una.</p>
               </div>
               <Link href="/packs" className="inline-flex shrink-0 items-center gap-1 text-[15px] font-bold text-ahorro hover:underline">Ver todos los packs <IconoFlecha /></Link>
             </div>

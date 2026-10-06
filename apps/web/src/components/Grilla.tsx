@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { compararTalles, esClaro, type ProductoTarjeta } from "@isu/shared";
+import { compararTalles, esClaro, type AjustePacks, type ProductoTarjeta } from "@isu/shared";
 import { TarjetaProducto } from "./TarjetaProducto";
 import { evento, item } from "@/lib/ga";
 
@@ -17,7 +17,7 @@ const ORDENES: Array<[Orden, string]> = [["destacados", "Destacados"], ["precio"
 
 export function Grilla({
   productos, lista, descuento, cuotas, filtros = true, packs,
-}: { productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean; packs?: number[] }) {
+}: { productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean; packs?: AjustePacks }) {
   const [talles, setTalles] = useState<string[]>([]);
   const [colores, setColores] = useState<string[]>([]);
   const [orden, setOrden] = useState<Orden>("destacados");

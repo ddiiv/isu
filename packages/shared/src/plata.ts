@@ -32,6 +32,17 @@ export function formatearPesos(c: number): string {
   return formato.format(Math.round(c / 100));
 }
 
+const conCentavos = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * El monto exacto a transferir: 1600037 → "$ 16.000,37" (y 1600000 → "$ 16.000").
+ * Con la cuenta de Mercado Pago los centavos identifican el pedido: no se pueden redondear.
+ */
+export function formatearPesosExactos(c: number): string {
+  const n = Math.round(c);
+  return n % 100 === 0 ? formatearPesos(n) : conCentavos.format(n / 100);
+}
+
 /** Aplica un porcentaje de descuento (0–100) y redondea al peso entero hacia abajo. */
 export function conDescuento(c: Centavos, porcentaje: number): Centavos {
   if (!(porcentaje >= 0 && porcentaje <= 100)) throw new RangeError("Porcentaje fuera de rango");

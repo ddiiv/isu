@@ -42,8 +42,8 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       [ids],
     ),
     // Etapa 8: si se vende en pack y el resumen de sus reseñas.
-    pool.query<{ id: number; pack: boolean; resenas_cantidad: number; resenas_promedio: string | null }>(
-      "SELECT id, pack, resenas_cantidad, resenas_promedio FROM tienda.productos WHERE id = ANY($1::int[])", [ids],
+    pool.query<{ id: number; pack: boolean; liquidacion: boolean; resenas_cantidad: number; resenas_promedio: string | null }>(
+      `SELECT p.id, p.pack, ${EN_LIQUIDACION} AS liquidacion, p.resenas_cantidad, p.resenas_promedio FROM tienda.productos p WHERE p.id = ANY($1::int[])`, [ids],
     ),
   ]);
   const E = new Map(extra.rows.map((r) => [r.id, r]));
@@ -99,6 +99,7 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       nuevo: p.nuevo,
       creadoEn: p.creado_en.toISOString(),
       pack: E.get(p.id)?.pack ?? false,
+      liquidacion: E.get(p.id)?.liquidacion ?? false,
       resenas: resumen(E.get(p.id)),
     });
   }
@@ -107,6 +108,20 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
 }
 
 const PUBLICABLE = "p.visible AND p.en_stocker";
+/** El producto `p` tiene alguna variante a la venta. */
+export const CON_STOCK = "EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0)";
+/**
+ * Etapa 9: el producto `p` está en Liquidación (le toca un descuento vigente marcado como liquidación).
+ * Mismas reglas que lib/descuentos.ts: una categoría de arriba incluye sus subcategorías.
+ */
+export const EN_LIQUIDACION = `EXISTS (SELECT 1 FROM tienda.descuentos d
+  WHERE d.liquidacion AND d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
+    AND (d.alcance = 'todo' OR (d.alcance = 'productos' AND p.id = ANY(d.producto_ids))
+      OR (d.alcance = 'categorias' AND EXISTS (SELECT 1 FROM tienda.producto_categorias pcl JOIN tienda.categorias cl ON cl.id = pcl.categoria_id
+            WHERE pcl.producto_id = p.id AND (cl.id = ANY(d.categoria_ids) OR cl.padre_id = ANY(d.categoria_ids))))))`;
+/** El producto `p` está en la categoría $N o en alguna de sus hijas. */
+const EN_CATEGORIA = (n: number) => `EXISTS (SELECT 1 FROM tienda.producto_categorias pcc JOIN tienda.categorias cc ON cc.id = pcc.categoria_id AND cc.visible
+  WHERE pcc.producto_id = p.id AND (cc.id = $${n} OR cc.padre_id = $${n}))`;
 
 /** numeric de Postgres llega como texto: "4.67" → 4.7 (una decimal alcanza). */
 export const resumen = (r: { resenas_cantidad: number; resenas_promedio: string | null } | undefined) => ({
@@ -133,20 +148,53 @@ export async function productosDeCategoria(pool: pg.Pool, categoriaId: number, l
 /*
  * Colecciones elegidas a mano en el backoffice. "Nuevos": lo marcado como
  * nuevo, lo último marcado primero. "Destacados": por el orden que le dieron.
+ * Etapa 9: "Packs" y "Liquidación" se pueden pedir de una categoría de arriba
+ * (/packs/hombre, /liquidacion/mujer); Liquidación, sólo lo que tiene stock.
  */
-export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs", limite: number): Promise<FilaProducto[]> {
+export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite: number, categoriaId: number | null = null): Promise<FilaProducto[]> {
+  const enCategoria = categoriaId === null ? "" : ` AND ${EN_CATEGORIA(2)}`;
+  const params = categoriaId === null ? [limite] : [limite, categoriaId];
   const { rows } = await pool.query<FilaProducto>(
     cual === "packs"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
-          WHERE p.pack AND p.visible AND p.en_stocker ORDER BY p.pack_orden, p.id DESC LIMIT $1`
+          WHERE p.pack AND p.visible AND p.en_stocker${enCategoria} ORDER BY p.pack_orden, p.id DESC LIMIT $1`
+      : cual === "liquidacion"
+      ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
+          WHERE ${PUBLICABLE} AND ${EN_LIQUIDACION} AND ${CON_STOCK}${enCategoria} ORDER BY p.creado_en DESC, p.id DESC LIMIT $1`
       : cual === "nuevos"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
-          WHERE p.nuevo AND p.visible AND p.en_stocker ORDER BY p.nuevo_desde DESC NULLS LAST, p.id DESC LIMIT $1`
+          WHERE p.nuevo AND p.visible AND p.en_stocker${enCategoria} ORDER BY p.nuevo_desde DESC NULLS LAST, p.id DESC LIMIT $1`
       : `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
-          WHERE p.destacado AND p.visible AND p.en_stocker ORDER BY p.destacado_orden, p.id DESC LIMIT $1`,
-    [limite],
+          WHERE p.destacado AND p.visible AND p.en_stocker${enCategoria} ORDER BY p.destacado_orden, p.id DESC LIMIT $1`,
+    params,
   );
   return rows;
+}
+
+/*
+ * Etapa 9: las fotos del menú. Para cada categoría de arriba (Hombre, Mujer,
+ * Niños), una o dos prendas que la representen: las destacadas de esa
+ * categoría primero, después las marcadas como nuevas y si no, lo último que
+ * entró. Sólo con stock y con foto.
+ */
+export async function fotosDelMenu(pool: pg.Pool): Promise<Array<{ categoria: string; productos: Array<{ slug: string; nombre: string; foto: { clave: string; ancho: number | null; alto: number | null; alt: string | null } }> }>> {
+  const { rows } = await pool.query<{ categoria: string; slug: string; nombre: string; clave: string; ancho: number | null; alto: number | null }>(
+    `SELECT arriba.slug AS categoria, x.slug, x.nombre, x.clave, x.ancho, x.alto
+       FROM tienda.categorias arriba
+       CROSS JOIN LATERAL (
+         SELECT p.slug, p.nombre, f.clave, f.ancho, f.alto
+           FROM tienda.productos p
+           JOIN LATERAL (SELECT clave, ancho, alto FROM tienda.fotos WHERE producto_id = p.id ORDER BY (tipo = 'exhibicion') DESC, orden, id LIMIT 1) f ON true
+          WHERE ${PUBLICABLE} AND ${CON_STOCK}
+            AND EXISTS (SELECT 1 FROM tienda.producto_categorias pcm JOIN tienda.categorias cm ON cm.id = pcm.categoria_id AND cm.visible
+                         WHERE pcm.producto_id = p.id AND (cm.id = arriba.id OR cm.padre_id = arriba.id))
+          ORDER BY p.destacado DESC, p.destacado_orden, p.nuevo DESC, p.creado_en DESC, p.id DESC
+          LIMIT 2) x
+      WHERE arriba.padre_id IS NULL AND arriba.visible
+      ORDER BY arriba.orden, arriba.id`);
+  const salida = new Map<string, Array<{ slug: string; nombre: string; foto: { clave: string; ancho: number | null; alto: number | null; alt: string | null } }>>();
+  for (const r of rows) salida.set(r.categoria, [...(salida.get(r.categoria) ?? []), { slug: r.slug, nombre: r.nombre, foto: { clave: r.clave, ancho: r.ancho, alto: r.alto, alt: r.nombre } }]);
+  return [...salida].map(([categoria, productos]) => ({ categoria, productos }));
 }
 
 export async function productosNuevos(pool: pg.Pool, limite: number): Promise<FilaProducto[]> {
@@ -189,10 +237,10 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     id: number; slug: string; nombre: string; descripcion: string | null; seo_titulo: string | null; seo_descripcion: string | null;
     stocker_padre: string; categoria_id: number | null; actualizado_en: Date;
     guia: Record<string, unknown> | null; guia_en: Date | null;
-    pack: boolean; composicion: string | null; resenas_cantidad: number; resenas_promedio: string | null;
+    pack: boolean; liquidacion: boolean; composicion: string | null; resenas_cantidad: number; resenas_promedio: string | null;
   }>(
     `SELECT p.id, p.slug, p.nombre, COALESCE(p.descripcion, p.stocker_descripcion) AS descripcion, p.seo_titulo, p.seo_descripcion,
-            p.stocker_padre, p.categoria_id, p.actualizado_en, p.pack, p.composicion, p.resenas_cantidad, p.resenas_promedio,
+            p.stocker_padre, p.categoria_id, p.actualizado_en, p.pack, ${EN_LIQUIDACION} AS liquidacion, p.composicion, p.resenas_cantidad, p.resenas_promedio,
             CASE WHEN g.id IS NULL THEN NULL ELSE jsonb_build_object('nombre', g.nombre, 'tipo', g.tipo, 'medidas', g.medidas, 'filas', g.filas, 'nota', g.nota) END AS guia,
             g.actualizado_en AS guia_en
        FROM tienda.productos p LEFT JOIN tienda.guias_talles g ON g.id = p.guia_talles_id
@@ -261,6 +309,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     guiaTalles: guiaDe(p.guia),
     actualizadoEn: new Date(ultimo).toISOString(),
     pack: p.pack,
+    liquidacion: p.liquidacion,
     composicion: p.composicion,
     resenas: resumen(p),
   };

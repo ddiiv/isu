@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatearPesos, type PedidoPublico } from "@isu/shared";
+import { formatearPesos, formatearPesosExactos, type PedidoPublico } from "@isu/shared";
 import { api, guardarAcceso, leerAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 import { SeguimientoEnvio } from "./SeguimientoEnvio";
@@ -112,7 +112,10 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
   if (!p) return <div className="contenedor py-24 text-center text-tinta-tenue" aria-busy="true">Cargando tu pedido…</div>;
 
   const esperandoMp = p.estado === "esperando_pago" && volviendoDeMp;
-  const [titulo, bajada] = esperandoMp ? ["Aguardá un momento…", "Estamos confirmando tu pago con Mercado Pago. Esta pantalla se actualiza sola."] : (TEXTO[p.estado] ?? [p.estado, ""]);
+  const t = p.pago.transferencia;
+  const [titulo, bajada] = esperandoMp ? ["Aguardá un momento…", "Estamos confirmando tu pago con Mercado Pago. Esta pantalla se actualiza sola."]
+    : p.estado === "esperando_transferencia" && t?.automatica ? ["Esperamos tu transferencia", "Tus prendas están separadas. Transferí el monto exacto: cuando llegue, esta pantalla se actualiza sola."]
+      : (TEXTO[p.estado] ?? [p.estado, ""]);
   const girando = esperandoMp || p.estado === "transferencia_informada";
   const vence = p.venceEn ? new Date(p.venceEn).toLocaleString("es-AR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : null;
 
@@ -136,19 +139,41 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
           </button>
         )}
 
-        {p.pago.transferencia && (
+        {t && (
           <div className="mt-6 rounded-[var(--radius-foto)] bg-ahorro-claro p-5">
-            <p className="text-lg">Transferí <b className="text-ahorro">{formatearPesos(p.total)}</b></p>
+            <p className="flex flex-wrap items-center gap-2 text-lg">
+              Transferí <b className="text-ahorro">{formatearPesosExactos(t.monto)}</b>
+              <Copiar valor={(t.monto / 100).toFixed(2).replace(".", ",")} />
+            </p>
+            {t.via === "mercadopago" && (
+              <p className="mt-2 text-[15px]"><b>Con los centavos, el monto exacto:</b> así reconocemos tu pago y se confirma solo.</p>
+            )}
+            {t.via === "talo" && (
+              <p className="mt-2 text-[15px]">Esta cuenta es <b>sólo para tu pedido</b>. Transferí desde tu banco o billetera y se confirma solo.</p>
+            )}
             <dl className="mt-3 space-y-2 text-[15px]">
-              {([["Titular", p.pago.transferencia.titular], ["CUIT", p.pago.transferencia.cuit], ["Banco", p.pago.transferencia.banco], ["CBU", p.pago.transferencia.cbu], ["Alias", p.pago.transferencia.alias]] as const).filter(([, v]) => v).map(([k, v]) => (
-                <div key={k} className="flex flex-wrap items-center justify-between gap-2"><dt className="text-tinta-suave">{k}</dt><dd className="flex items-center gap-2 font-bold">{v}{(k === "CBU" || k === "Alias") && <Copiar valor={v} />}</dd></div>
+              {([["Titular", t.titular], ["CUIT", t.cuit], ["Banco", t.banco], [t.via === "talo" ? "CVU" : "CBU / CVU", t.cbu], ["Alias", t.alias]] as const).filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} className="flex flex-wrap items-center justify-between gap-2"><dt className="text-tinta-suave">{k}</dt><dd className="flex items-center gap-2 font-bold break-all">{v}{(k !== "Titular" && k !== "Banco") && <Copiar valor={v} />}</dd></div>
               ))}
             </dl>
-            <label className="boton mt-5 cursor-pointer bg-tinta text-white hover:bg-marca-fuerte">
-              {subiendo ? "Subiendo…" : p.pago.comprobanteSubido ? "Subir otro comprobante" : "Subir el comprobante"}
-              <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,application/pdf" className="sr-only" disabled={subiendo} onChange={(e) => subir(e.target.files?.[0])} />
-            </label>
-            <p className="mt-2 text-xs text-tinta-suave">Foto o PDF, hasta 6 MB. También podés mandarlo por <a className="underline" href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hola! Te mando el comprobante del pedido ${p.numero}`)}`} target="_blank" rel="noopener noreferrer">WhatsApp</a>.</p>
+            {t.automatica ? (
+              <details className="mt-4 text-sm">
+                <summary className="cursor-pointer text-tinta-suave underline">¿Pasaron más de 15 minutos y no se confirmó?</summary>
+                <p className="mt-2 text-tinta-suave">Subí el comprobante o mandalo por <a className="underline" href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hola! Te mando el comprobante del pedido ${p.numero}`)}`} target="_blank" rel="noopener noreferrer">WhatsApp</a> y lo revisamos.</p>
+                <label className="boton-borde mt-3 cursor-pointer">
+                  {subiendo ? "Subiendo…" : p.pago.comprobanteSubido ? "Subir otro comprobante" : "Subir el comprobante"}
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,application/pdf" className="sr-only" disabled={subiendo} onChange={(e) => subir(e.target.files?.[0])} />
+                </label>
+              </details>
+            ) : (
+              <>
+                <label className="boton mt-5 cursor-pointer bg-tinta text-white hover:bg-marca-fuerte">
+                  {subiendo ? "Subiendo…" : p.pago.comprobanteSubido ? "Subir otro comprobante" : "Subir el comprobante"}
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,application/pdf" className="sr-only" disabled={subiendo} onChange={(e) => subir(e.target.files?.[0])} />
+                </label>
+                <p className="mt-2 text-xs text-tinta-suave">Foto o PDF, hasta 6 MB. También podés mandarlo por <a className="underline" href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hola! Te mando el comprobante del pedido ${p.numero}`)}`} target="_blank" rel="noopener noreferrer">WhatsApp</a>.</p>
+              </>
+            )}
           </div>
         )}
         {aviso && <p className="mt-4 text-sm font-bold" role="status">{aviso}</p>}

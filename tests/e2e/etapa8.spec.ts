@@ -40,7 +40,7 @@ test.describe("inicio", () => {
     await expect(carrusel).toBeVisible();
     await expect(carrusel.getByRole("img").first()).toHaveAttribute("alt", /\(demo\)/);
     const packs = page.locator("section", { has: page.getByRole("heading", { name: "Llevá más, pagá menos" }) });
-    await expect(packs.getByText(/Elegí 2, 3, 4 o 5 unidades/).first()).toBeVisible();
+    await expect(packs.getByText(/Elegí de 2 a 10 unidades/).first()).toBeVisible();
     // Las tarjetas de la sección llevan a la página del pack.
     await expect(packs.locator(`a[href="/producto/pack-x2-${PACK}"]`).first()).toBeAttached();
     // Pestañas: Mujer muestra prendas de mujer.

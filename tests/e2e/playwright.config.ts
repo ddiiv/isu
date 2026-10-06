@@ -18,7 +18,9 @@ export default defineConfig({
     launchOptions: ejecutable ? { executablePath: ejecutable } : {},
   },
   projects: [
-    { name: "escritorio", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
-    { name: "celular", use: { ...devices["Pixel 7"] } },
+    { name: "escritorio", testIgnore: /transferencias\.spec/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
+    { name: "celular", testIgnore: /transferencias\.spec/, use: { ...devices["Pixel 7"] } },
+    // Cambia un ajuste de toda la tienda (transferencias que se confirman solas): corre cuando terminaron las demás.
+    { name: "transferencias", testMatch: /transferencias\.spec/, dependencies: ["escritorio", "celular"], use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
   ],
 });

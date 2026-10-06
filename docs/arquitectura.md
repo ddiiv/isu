@@ -40,7 +40,7 @@
 |---|---|
 | Mercado Pago (tarjeta, cuotas, dinero en cuenta) | Checkout de MP. El pedido se confirma sólo con el webhook firmado (se verifica la firma y se consulta el pago a MP; nunca se confía en la redirección del navegador). Idempotente por `payment_id`. |
 | Pago Fácil / Rapipago | Medios en efectivo de Mercado Pago (ticket). El pedido queda "esperando pago" hasta que MP avisa la acreditación; vence a los N días y libera el stock. |
-| Transferencia | El cliente ve CBU/alias y el total con descuento; **API para registrar el pago** (`POST /v1/pedidos/:id/transferencia` con comprobante e importe) → el pedido pasa a "verificando pago" y el cliente ve "Aguardá un momento, estamos confirmando tu transferencia". Se confirma desde el backoffice o por conciliación automática; vence a las 48 h sin comprobante. |
+| Transferencia | El cliente ve CBU/alias y el total con descuento; **API para registrar el pago** (`POST /v1/pedidos/:id/transferencia` con comprobante e importe) → el pedido pasa a "verificando pago" y el cliente ve "Aguardá un momento, estamos confirmando tu transferencia". Se confirma desde el backoffice o por conciliación automática; vence a las 48 h sin comprobante. **Confirmación automática** (migración 0014, ver [transferencias.md](transferencias.md)): un CVU por pedido con Talo, o el alias de la cuenta de Mercado Pago con centavos únicos. |
 | Pago en el local | Reserva con vencimiento; se cobra al retirar (Stocker registra la venta en el local). |
 
 En todos los casos el stock se aparta en Stocker al confirmar el pedido (cola de ventas online) y se libera si vence o se cancela.
@@ -64,3 +64,16 @@ Ver [contrato-stocker.md](contrato-stocker.md).
 - Contadores (temas por día, usos de cada pregunta) en memoria, guardados cada 10 s y al apagar: nada de escribir en la misma fila en cada consulta.
 - **Tienda**: `components/chat/Asistente.tsx` (panel no modal, `role="log"` para lectores de pantalla, charla en `sessionStorage`), puente `/api/t/chat*`.
 - Tablas: `tienda.faq`, `tienda.chat_sin_respuesta`, `tienda.chat_temas`; ajustes `chatbot` y `chatbotIa` (migración `0009`).
+
+## Packs, Liquidación y menú (etapa 9)
+
+- **Packs** (`packages/shared/src/packs.ts`): ajuste `packs` = `{ minimo, maximo, porcentajes[] }`, validado entero (2 a 20 unidades, un % por cantidad, que no baje). `leerPacks` acepta el formato viejo (`[x2…x5]`). La página `/producto/pack-xN-<slug>` es la prenda padre con `FichaPack`: arma cada unidad con sus variantes y nunca ofrece más que el stock (por variante y en total). El % lo sigue calculando `pedidos/cotizar.ts`.
+- **Liquidación**: columna `liquidacion` en `tienda.descuentos` (migración `0015`). `EN_LIQUIDACION` (en `productos/consultas.ts`) repite las reglas de vigencia y alcance de `lib/descuentos`. Las tarjetas y la ficha traen `liquidacion: boolean`.
+- **API**:
+  - `GET /v1/productos?coleccion=packs|liquidacion[&categoria=<slug de arriba>]`: la categoría incluye sus hijas, y la de liquidación sólo trae prendas con stock;
+  - `GET /v1/menu`: 1 o 2 prendas con foto y stock por categoría de arriba, destacadas primero;
+  - `GET /v1/config` suma `packsEn`, `hayLiquidacion` y `liquidacionEn` (en qué categorías hay algo).
+- **Tienda**: `PaginaSeccion` (`/packs`, `/packs/[categoria]`, `/liquidacion`, `/liquidacion/[categoria]`) y el `Header` con desplegables por categoría.
+  - `MenuMovil` va por paneles; los accesos del header (`MenuAcceso`) lo abren en un panel con un evento `isu:menu`.
+  - `BarraEnvioGratis` en la ficha usa la cotización del carrito.
+- **Caché corta** (`apps/api/src/lib/cache.ts`): con tope de 5000 claves (poda vencidas y, si no alcanza, las más viejas).

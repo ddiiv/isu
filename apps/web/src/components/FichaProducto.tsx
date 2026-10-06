@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
+import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
 import Link from "next/link";
 import { ResumenEstrellas } from "./Estrellas";
 import { BotonGuiaTalles, useRecomendado } from "./GuiaTalles";
@@ -10,6 +10,7 @@ import { IconoBanco, IconoCamion, IconoLocal, IconoWhatsapp } from "./iconos";
 import { evento, item } from "@/lib/ga";
 import { useCarrito } from "./carrito/Carrito";
 import { SITIO } from "@/lib/sitio";
+import { BarraEnvioGratis } from "./BarraEnvioGratis";
 
 /*
  * Ficha de producto: galería, color (con la foto de la prenda sola), talle,
@@ -85,6 +86,9 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
       </section>
 
       <section aria-label="Comprar" className="lg:sticky lg:top-28 lg:self-start">
+        {p.liquidacion && (
+          <Link href="/liquidacion" className="mb-2 inline-block rounded-full bg-tinta px-3 py-1 text-xs font-bold uppercase tracking-wider text-white hover:bg-marca-fuerte">Liquidación</Link>
+        )}
         <h1 className="text-[clamp(1.9rem,4vw,2.8rem)] leading-[1.05]">{p.nombre}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
           <p className="text-sm text-tinta-tenue">Art. {p.sku}</p>
@@ -97,11 +101,11 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
         <div className="mt-5"><Precio precio={precio} precioLista={precioLista} rebaja={p.descuento} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} grande /></div>
 
         {p.pack && (
-          <Link href={rutaPack(p.slug, 2)} className="mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ahorro bg-ahorro-claro p-4 hover:bg-white">
+          <Link href={rutaPack(p.slug, config.packs.minimo)} className="mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ahorro bg-ahorro-claro p-4 hover:bg-white">
             <span>
               <span className="block font-bold text-ahorro">📦 Llevá más, pagá menos</span>
               <span className="block text-sm">
-                Armá un pack de 2 a 5 con tus talles y colores: desde {formatearPesos(conDescuento(centavos(precio), Math.max(...config.packs)))} c/u ({Math.max(...config.packs)}% OFF).
+                Armá un pack de {config.packs.minimo} a {config.packs.maximo} con tus talles y colores: desde {formatearPesos(conDescuento(centavos(precio), maxPorcentajePack(config.packs)))} c/u ({maxPorcentajePack(config.packs)}% OFF).
               </span>
             </span>
             <span className="shrink-0 text-sm font-bold text-ahorro">Armar pack →</span>
@@ -190,6 +194,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             <IconoWhatsapp /> Consultar por WhatsApp
           </a>
         </div>
+        <BarraEnvioGratis desde={config.envioGratisDesde} className="mt-4" />
 
         <ul className="mt-7 divide-y divide-linea rounded-[var(--radius-foto)] border border-linea text-sm">
           <li className="flex gap-3 p-4"><IconoCamion className="size-5 shrink-0 text-marca" />

@@ -44,8 +44,11 @@ test.describe("grilla", () => {
     await page.getByRole("button", { name: "Limpiar filtros" }).click();
     await expect(page.locator("main article")).toHaveCount(antes);
     await page.getByLabel(/Ordenar/).selectOption("precio");
-    const precios = await page.locator("main article h3 + div p:first-child").allInnerTexts();
-    const n = precios.map((t) => Number(t.replace(/\D/g, "")));
+    // El precio que se cobra: en una prenda rebajada, el de antes va tachado arriba.
+    const n = await page.locator("main article").evaluateAll((tarjetas) => tarjetas.map((a) => {
+      const p = [...a.querySelectorAll("h3 ~ div > p")].find((x) => !x.querySelector("s"));
+      return Number((p?.textContent ?? "").replace(/\D/g, ""));
+    }));
     expect(n).toEqual([...n].sort((a, b) => a - b));
     await expect(page).toHaveURL(/orden=precio/);
     // Un enlace con filtros abre ya filtrado.

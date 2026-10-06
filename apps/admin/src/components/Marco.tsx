@@ -18,6 +18,7 @@ export const puede = (yo: Yo, rol: Rol) => ({ lectura: 0, operador: 1, dueno: 2 
 const MENU: Array<{ href: string; texto: string; rol: Rol }> = [
   { href: "/", texto: "Panel", rol: "lectura" },
   { href: "/pedidos", texto: "Pedidos", rol: "lectura" },
+  { href: "/transferencias", texto: "Transferencias", rol: "lectura" },
   { href: "/envios", texto: "Envíos", rol: "lectura" },
   { href: "/productos", texto: "Productos", rol: "lectura" },
   { href: "/portada", texto: "Portada", rol: "lectura" },

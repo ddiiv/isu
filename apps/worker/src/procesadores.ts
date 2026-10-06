@@ -26,7 +26,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/revisar-despachos  repaso por si se perdió un aviso de Stocker.
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
- * pagos/vencer · pagos/conciliar-mp   los corre la API (tiene la lógica del pedido);
+ * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
  *                   el worker sólo marca el ritmo (cada 1 y 10 minutos).
  */
 export type Procesador = (trabajo: Job) => Promise<unknown>;
@@ -211,6 +211,10 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
       "conciliar-mp": async () => {
         if (!extras.api) throw Object.assign(new Error("Falta API_URL / INTERNO_TOKEN en el worker"), { sinReintento: true });
         return extras.api("/v1/interno/conciliar-mp");
+      },
+      "conciliar-transferencias": async () => {
+        if (!extras.api) throw Object.assign(new Error("Falta API_URL / INTERNO_TOKEN en el worker"), { sinReintento: true });
+        return extras.api("/v1/interno/conciliar-transferencias");
       },
     },
   };
