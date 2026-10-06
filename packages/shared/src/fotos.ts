@@ -71,8 +71,12 @@ export function puedeAgregarFoto(
 export const ANCHOS_FOTO = [400, 800, 1200] as const;
 export type AnchoFoto = (typeof ANCHOS_FOTO)[number];
 
+/** Banners de la portada (etapa 8): más anchos, para pantallas grandes. */
+export const ANCHOS_BANNER = [800, 1600, 2400] as const;
+export type AnchoBanner = (typeof ANCHOS_BANNER)[number];
+
 /** clave "p/12/ab12cd34" → "<base>/p/12/ab12cd34-800.webp" */
-export function urlFoto(base: string, clave: string, ancho: AnchoFoto): string {
+export function urlFoto(base: string, clave: string, ancho: AnchoFoto | AnchoBanner): string {
   return `${base.replace(/\/+$/, "")}/${clave}-${ancho}.webp`;
 }
 

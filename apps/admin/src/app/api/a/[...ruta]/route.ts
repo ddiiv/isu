@@ -7,7 +7,8 @@ import { aLaApi, COOKIE_ADMIN, cookieAdmin, mismoOrigen } from "@/lib/bff";
  * caracteres raros que la API pudiera interpretar distinto.
  */
 const TRAMO = /^[A-Za-z0-9_-]{1,80}$/;
-const FOTOS = /^productos\/\d{1,10}\/fotos$/;
+// Fotos de productos y de los banners de la portada (etapa 8).
+const FOTOS = /^(productos\/\d{1,10}\/fotos|banners\/\d{1,10}\/foto)$/;
 const IMAGENES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif"]);
 const MAX_JSON = 256 * 1024;
 const MAX_FOTO = 25 * 1024 * 1024;

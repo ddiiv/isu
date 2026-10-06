@@ -1,6 +1,8 @@
 export interface FilaProducto {
   id: number; slug: string; nombre: string; sku: string; visible: boolean; enStocker: boolean; destacado: boolean; destacadoOrden: number; nuevo: boolean;
   categoriaStocker: string | null; stock: number; precio: number | null; fotos: number; colores: number; foto: string | null; categorias: number[];
+  /** Etapa 8: se vende en pack; cuántas reseñas publicadas y su promedio. */
+  pack: boolean; resenas: number; estrellas: number | null;
 }
 export interface Categoria { id: number; nombre: string; slug: string; padreId: number | null; orden: number; visible: boolean; productos: number; seoTitulo: string | null; seoDescripcion: string | null; texto: string | null }
 export interface GuiaResumen { id: number; nombre: string; tipo: "nino" | "adulto"; medidas: string[]; talles: number; productos: number; actualizadoEn: string; actualizadoPor: string | null }

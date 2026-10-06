@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
-import { ConfigPublica } from "@isu/shared";
+import type pg from "pg";
+import { ConfigPublica, PACKS_POR_DEFECTO } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
 import type { CacheCorta } from "../../lib/cache.js";
 
@@ -26,9 +27,13 @@ const POR_DEFECTO: ConfigPublica = {
   costoEnvio: 790_000,
   locales: [],
   chatbot: { activo: false, saludo: "" },
+  packs: PACKS_POR_DEFECTO,
+  hayPacks: false,
+  cuidados: "",
+  cifras: [],
 };
 
-export async function rutasConfig(app: FastifyInstance, deps: { db: Db; cache: CacheCorta; pagoOnline: boolean }) {
+export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg.Pool; cache: CacheCorta; pagoOnline: boolean }) {
   const cargar = async (): Promise<ConfigPublica> => {
     const filas = await deps.db.select({ clave: esquema.ajustes.clave, valor: esquema.ajustes.valor }).from(esquema.ajustes);
     const salida: Record<string, unknown> = { ...POR_DEFECTO };
@@ -47,6 +52,8 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; cache: C
       if (r.success) salida[clave] = r.data;
       else app.log.warn({ clave }, "ajuste inválido: se usa el valor por defecto");
     }
+    // Hay packs si alguna prenda publicada se vende en pack (el menú muestra "Packs").
+    salida.hayPacks = !!(await deps.pool.query("SELECT 1 FROM tienda.productos WHERE pack AND visible AND en_stocker LIMIT 1")).rowCount;
     return ConfigPublica.parse(salida);
   };
 

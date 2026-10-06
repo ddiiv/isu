@@ -13,7 +13,7 @@ export { codigoProvincia } from "./provincias.js";
 export { telefonoWhatsapp, type Whatsapp } from "./whatsapp.js";
 export type { MercadoEnvios } from "./mercado-envios.js";
 export { pdfSimple } from "./pdf.js";
-export { firmaSeguimiento, firmaSeguimientoValida, enlaceSeguimiento } from "./firma.js";
+export { firmaSeguimiento, firmaSeguimientoValida, enlaceSeguimiento, firmaOpinar, firmaOpinarValida, enlaceOpinar } from "./firma.js";
 
 /*
  * Qué transportes están disponibles: cada uno se activa sólo si tiene sus

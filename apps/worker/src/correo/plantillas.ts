@@ -11,6 +11,8 @@ export const PLANTILLAS = [
   "bienvenida", "restablecer", "pedido_recibido", "pago_confirmado", "pedido_vencido", "arrepentimiento", "transferencia_informada",
   // Etapa 4: cómo viene el envío.
   "envio_en_camino", "envio_en_sucursal", "envio_llega_hoy", "envio_entregado", "envio_no_entregado",
+  // Etapa 8: pedir la opinión de la compra.
+  "pedir_resena",
 ] as const;
 export type Plantilla = (typeof PLANTILLAS)[number];
 
@@ -115,6 +117,20 @@ export function armar(plantilla: Plantilla, datos: Record<string, unknown>): { a
         html: marco("Recibimos tu comprobante", `<p>Hola, ${esc(datos.nombre)}. Estamos verificando la transferencia del pedido <b>${esc(datos.numero)}</b>. Te avisamos apenas se acredite.</p>`),
         texto: `Recibimos el comprobante del pedido ${datos.numero}. Te avisamos cuando se acredite.`,
       };
+    case "pedir_resena": {
+      const d = datos as { numero: string; nombre: string; prendas: string[]; enlace: string; estrellas: Array<{ estrellas: number; enlace: string }> };
+      const prendas = (Array.isArray(d.prendas) ? d.prendas : []).slice(0, 10);
+      // Cinco estrellas tocables: cada una abre la página para opinar con esas estrellas ya marcadas.
+      const estrellas = (Array.isArray(d.estrellas) ? d.estrellas : []).slice(0, 5)
+        .map((e) => `<a href="${esc(enlaceSeguro(e.enlace))}" style="text-decoration:none;color:#f5a623;font-size:30px;padding:0 2px" title="${esc(e.estrellas)} de 5">${"★".repeat(Math.min(5, Math.max(1, Number(e.estrellas) || 1)))}</a>`)
+        .join("<br>");
+      const lista = prendas.length ? `<ul style="padding-left:18px;margin:12px 0">${prendas.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
+      return {
+        asunto: `¿Qué te pareció tu compra, ${d.nombre}?`,
+        html: marco(`¿Qué te pareció, ${d.nombre}?`, `<p>Ya tenés tu pedido <b>${esc(d.numero)}</b>. Contanos cómo te quedó: tu opinión ayuda a otras personas a elegir el talle y a nosotros a hacer mejor la ropa.</p>${lista}${estrellas ? `<p style="margin:20px 0 4px;color:#6b6b6b;font-size:13px">Tocá las estrellas:</p><p style="margin:0;line-height:1.3">${estrellas}</p>` : ""}${boton("Dejar mi opinión", d.enlace)}<p style="color:#6b6b6b;font-size:13px">Te lleva un minuto. Si algo no te quedó bien, respondé este mail y lo resolvemos.</p>`),
+        texto: `¿Qué te pareció tu compra, ${d.nombre}? Contanos cómo te quedó el pedido ${d.numero}: ${d.enlace}`,
+      };
+    }
     case "envio_en_camino":
     case "envio_en_sucursal":
     case "envio_llega_hoy":

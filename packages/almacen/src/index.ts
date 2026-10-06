@@ -21,6 +21,7 @@ export interface Almacen {
 }
 
 export const PATRON_FOTOS = /^p\/\d{1,9}\/[a-z0-9]{8,40}-(400|800|1200)\.webp$/;
+export const PATRON_BANNERS = /^b\/\d{1,9}\/[a-z0-9]{8,40}-(800|1600|2400)\.webp$/;
 export const PATRON_COMPROBANTES = /^c\/\d{1,9}\/[a-z0-9]{16,40}\.(webp|pdf)$/;
 export const PATRON_ETIQUETAS = /^e\/\d{1,9}\/[a-z0-9]{16,40}\.pdf$/;
 
@@ -98,6 +99,15 @@ export function almacenDeFotos(env: NodeJS.ProcessEnv = process.env): Almacen {
     return almacenR2({ cuenta: env.R2_CUENTA, bucket: env.R2_BUCKET, id: env.R2_ACCESS_KEY_ID, secreto: env.R2_SECRET_ACCESS_KEY }, PATRON_FOTOS);
   }
   if (env.FOTOS_DIR) return almacenEnDisco(env.FOTOS_DIR, PATRON_FOTOS);
+  throw new Error("Configurá dónde guardar las fotos: FOTOS_DIR (desarrollo) o R2_CUENTA/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY");
+}
+
+/** Banners de la portada: el mismo lugar público que las fotos, con su propio patrón (b/…). */
+export function almacenDeBanners(env: NodeJS.ProcessEnv = process.env): Almacen {
+  if (env.R2_CUENTA && env.R2_BUCKET && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
+    return almacenR2({ cuenta: env.R2_CUENTA, bucket: env.R2_BUCKET, id: env.R2_ACCESS_KEY_ID, secreto: env.R2_SECRET_ACCESS_KEY }, PATRON_BANNERS);
+  }
+  if (env.FOTOS_DIR) return almacenEnDisco(env.FOTOS_DIR, PATRON_BANNERS);
   throw new Error("Configurá dónde guardar las fotos: FOTOS_DIR (desarrollo) o R2_CUENTA/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY");
 }
 

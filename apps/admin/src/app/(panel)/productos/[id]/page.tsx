@@ -13,6 +13,7 @@ interface Detalle {
     categoriaStocker: string | null; generoStocker: string | null; categoriasFijas: boolean;
     destacado: boolean; destacadoOrden: number; nuevo: boolean; categorias: number[];
     guiaTallesId: number | null; parteOutfit: string | null; parteOutfitSugerida: string | null; pesoGramos: number | null;
+    pack: boolean; packOrden: number; composicion: string | null; resenas: { cantidad: number; promedio: number | null };
   };
   colores: Array<{ id: number; clave: string; nombre: string; hex: string | null; orden: number; activo: boolean; nombreFijo: boolean }>;
   fotos: Array<{ id: number; tipo: "color" | "exhibicion"; colorId: number | null; orden: number; clave: string; ancho: number; alto: number; alt: string | null }>;
@@ -44,7 +45,7 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
   async function guardar() {
     if (!f) return;
     const cambios: Record<string, unknown> = {};
-    const campos = ["nombre", "descripcion", "seoTitulo", "seoDescripcion", "visible", "destacado", "destacadoOrden", "nuevo", "guiaTallesId", "parteOutfit", "pesoGramos"] as const;
+    const campos = ["nombre", "descripcion", "seoTitulo", "seoDescripcion", "visible", "destacado", "destacadoOrden", "nuevo", "guiaTallesId", "parteOutfit", "pesoGramos", "pack", "packOrden", "composicion"] as const;
     for (const k of campos) if (JSON.stringify(f[k]) !== JSON.stringify(original[k])) cambios[k] = f[k];
     if (JSON.stringify([...f.categorias].sort()) !== JSON.stringify([...original.categorias].sort())) cambios.categorias = f.categorias;
     if (!Object.keys(cambios).length) return;
@@ -76,8 +77,11 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
               <Campo etiqueta="Nombre en la tienda" ayuda={f.nombreFijo ? "Editado a mano: Stocker ya no lo cambia." : `Viene de Stocker (art. ${original.sku}). Si lo cambiás, queda fijo.`}>
                 <input className={claseEntrada} maxLength={150} disabled={!operador} value={f.nombre} onChange={(e) => cambiar("nombre", e.target.value)} />
               </Campo>
-              <Campo etiqueta="Descripción" ayuda={!f.descripcion && original.descripcionStocker ? "Vacía: se muestra la de Stocker." : undefined}>
-                <textarea className={`${claseEntrada} min-h-32`} maxLength={5000} disabled={!operador} placeholder={original.descripcionStocker ?? ""} value={f.descripcion ?? ""} onChange={(e) => cambiar("descripcion", e.target.value || null)} />
+              <Campo etiqueta="Descripción" ayuda={!f.descripcion ? (original.descripcionStocker ? "Vacía: se muestra la de Stocker." : "Vacía: la tienda arma una con los colores, los talles y la composición. Mejor escribirla: cómo es la tela, el calce, para qué sirve.") : undefined}>
+                <textarea className={`${claseEntrada} min-h-32`} maxLength={5000} disabled={!operador} placeholder={original.descripcionStocker ?? "Remera corta al cuerpo, cuello redondo de ribb. Tela liviana y fresca, ideal para el día a día."} value={f.descripcion ?? ""} onChange={(e) => cambiar("descripcion", e.target.value || null)} />
+              </Campo>
+              <Campo etiqueta="Composición" ayuda="Va en la ficha, con los cuidados generales (Ajustes). Ej.: 100% algodón jersey.">
+                <input className={claseEntrada} maxLength={200} disabled={!operador} value={f.composicion ?? ""} onChange={(e) => cambiar("composicion", e.target.value || null)} />
               </Campo>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Campo etiqueta="Título para Google" ayuda={`${(f.seoTitulo ?? "").length}/70 · vacío = el nombre`}><input className={claseEntrada} maxLength={70} disabled={!operador} value={f.seoTitulo ?? ""} onChange={(e) => cambiar("seoTitulo", e.target.value || null)} /></Campo>
@@ -123,6 +127,15 @@ export default function EditarProducto({ params }: { params: Promise<{ id: strin
                 </Campo>
               )}
               <Casilla etiqueta="Nuevo" ayuda='Lleva la etiqueta "Nuevo" y sale en "Nuevos" (barra de navegación e inicio).' marcada={f.nuevo} disabled={!operador} onChange={(v) => cambiar("nuevo", v)} />
+              <Casilla etiqueta="Se vende en pack (2 a 5)" ayuda='Sale en "Packs" del inicio y del menú. Llevando 2 o más, cada una tiene el % de Ajustes → Packs (no se suma a una rebaja: gana el mayor).' marcada={f.pack} disabled={!operador} onChange={(v) => cambiar("pack", v)} />
+              {f.pack && (
+                <Campo etiqueta="Posición en Packs" ayuda="Más chico = más arriba." className="pl-7">
+                  <input type="number" className={`${claseEntrada} w-28`} min={-1000} max={1000} disabled={!operador} value={f.packOrden} onChange={(e) => cambiar("packOrden", Math.max(-1000, Math.min(1000, Number(e.target.value) || 0)))} />
+                </Campo>
+              )}
+              {original.resenas.cantidad > 0 && (
+                <p className="text-sm text-tinta-suave">★ {original.resenas.promedio?.toFixed(1)} de 5 · {original.resenas.cantidad} {original.resenas.cantidad === 1 ? "reseña publicada" : "reseñas publicadas"} · <a href="/resenas?estado=publicada" className="text-marca hover:underline">Ver reseñas</a></p>
+              )}
             </div>
           </Tarjeta>
 

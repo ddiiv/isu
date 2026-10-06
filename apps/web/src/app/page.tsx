@@ -1,6 +1,12 @@
 import Link from "next/link";
-import { obtenerCategorias, obtenerColeccion, obtenerConfig, obtenerNuevos } from "@/lib/api";
+import { obtenerCategorias, obtenerColeccion, obtenerConfig, obtenerDeCategoria, obtenerNuevos, obtenerPortada, obtenerResenasInicio } from "@/lib/api";
 import { NuevosIngresos } from "@/components/NuevosIngresos";
+import { CarruselBanners } from "@/components/inicio/CarruselBanners";
+import { PestanasCategorias } from "@/components/inicio/PestanasCategorias";
+import { OpinionesInicio } from "@/components/inicio/OpinionesInicio";
+import { Grilla } from "@/components/Grilla";
+import { Foto } from "@/components/Foto";
+import { decimal } from "@/components/Estrellas";
 import { IconoBanco, IconoCamion, IconoFlecha, IconoLocal, IconoTarjeta } from "@/components/iconos";
 import { SITIO } from "@/lib/sitio";
 import { JsonLd } from "@/components/JsonLd";
@@ -12,7 +18,19 @@ export const revalidate = 300;
 const FONDOS = ["bg-marca", "bg-tinta", "bg-ahorro"];
 
 export default async function Inicio() {
-  const [config, categorias, nuevos, destacados] = await Promise.all([obtenerConfig(), obtenerCategorias(), obtenerNuevos(8), obtenerColeccion("destacados", 8)]);
+  const [config, categorias, nuevos, destacados, packs, banners, opiniones] = await Promise.all([
+    obtenerConfig(), obtenerCategorias(), obtenerNuevos(8), obtenerColeccion("destacados", 8), obtenerColeccion("packs", 8), obtenerPortada(), obtenerResenasInicio(),
+  ]);
+  // Unas prendas de cada categoría de arriba (las pestañas y la foto de cada tarjeta de categoría).
+  const grupos = await Promise.all(categorias.slice(0, 4).map(async (c) => ({ slug: c.slug, nombre: c.nombre, productos: (await obtenerDeCategoria(c.slug, 8)).productos })));
+  const fotoDe = (slug: string) => grupos.find((g) => g.slug === slug)?.productos.find((p) => p.foto)?.foto ?? null;
+  const maxPack = Math.max(...config.packs);
+  // Los números de la marca (Ajustes) + los que salen solos: opiniones y locales.
+  const cifras = [
+    ...config.cifras,
+    ...(opiniones.promedio && opiniones.cantidad >= 5 ? [{ valor: `${decimal(opiniones.promedio)} ★`, texto: `de ${opiniones.cantidad} opiniones de compras verificadas` }] : []),
+    ...(config.locales.length ? [{ valor: String(config.locales.length), texto: config.locales.length === 1 ? "local para retirar gratis" : "locales para retirar gratis" }] : []),
+  ].slice(0, 4);
 
   const beneficios = [
     { icono: IconoCamion, titulo: "Envíos a todo el país", texto: "Y en el día en CABA y GBA" },
@@ -23,7 +41,14 @@ export default async function Inicio() {
 
   return (
     <>
-      {/* Portada: el golpe tipográfico grande, como las tiendas que mejor convierten. */}
+      {/* Portada: los banners del backoffice; sin banners, el golpe tipográfico grande. */}
+      {banners.length > 0 ? (
+        <>
+          {/* Con banners, el título de la página no se ve pero está (lectores de pantalla y Google). */}
+          <h1 className="sr-only">{SITIO.nombre}: {SITIO.lema}</h1>
+          <CarruselBanners banners={banners} />
+        </>
+      ) : (
       <section className="bg-marca-claro">
         <div className="contenedor flex flex-col items-center py-16 text-center sm:py-24 lg:py-28">
           <h1 className="text-[clamp(2.9rem,9vw,7.2rem)] leading-[0.92] text-marca">
@@ -43,6 +68,7 @@ export default async function Inicio() {
           </div>
         </div>
       </section>
+      )}
 
       <section aria-label="Beneficios" className="border-b border-linea">
         <ul className="contenedor grid grid-cols-2 gap-x-4 gap-y-6 py-8 lg:grid-cols-4">
@@ -58,9 +84,27 @@ export default async function Inicio() {
         </ul>
       </section>
 
+      <NuevosIngresos productos={nuevos.productos} titulo="Nuevos y en reposición" verTodo="/nuevos" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} />
+
+      {packs.productos.length > 0 && (
+        <section className="bg-ahorro-claro" aria-labelledby="titulo-packs">
+          <div className="contenedor py-14 lg:py-20">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-widest text-ahorro">📦 Packs</p>
+                <h2 id="titulo-packs" className="mt-1 text-[clamp(2rem,5vw,3.6rem)] leading-none">Llevá más, pagá menos</h2>
+                <p className="mt-3 max-w-2xl text-lg text-tinta-suave">Elegí <b>2, 3, 4 o 5 unidades</b> y armalas con tus colores y talles. Hasta <b className="text-ahorro">{maxPack}% OFF</b> en cada una.</p>
+              </div>
+              <Link href="/packs" className="inline-flex shrink-0 items-center gap-1 text-[15px] font-bold text-ahorro hover:underline">Ver todos los packs <IconoFlecha /></Link>
+            </div>
+            <Grilla productos={packs.productos} lista="Inicio · Packs" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} filtros={false} packs={config.packs} />
+          </div>
+        </section>
+      )}
+
       <NuevosIngresos productos={destacados.productos} titulo="Destacados" id="destacados" verTodo="/destacados" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} />
 
-      <NuevosIngresos productos={nuevos.productos} titulo="Lo nuevo" verTodo="/nuevos" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} />
+      <PestanasCategorias grupos={grupos} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} />
 
       <section className="bg-marca text-white">
         <div className="contenedor flex flex-col items-start gap-5 py-14 sm:flex-row sm:items-center sm:justify-between lg:py-16">
@@ -76,12 +120,19 @@ export default async function Inicio() {
         <h2 id="titulo-categorias" className="text-[clamp(2rem,5vw,3.6rem)] leading-none">Elegí por dónde empezar</h2>
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           {categorias.map((c, i) => (
-            <div key={c.id} className={`${FONDOS[i % FONDOS.length]} flex min-h-72 flex-col justify-between rounded-[var(--radius-foto)] p-6 text-white sm:p-8`}>
-              <Link href={`/${c.slug}`} className="font-display text-5xl leading-none hover:underline sm:text-6xl">{c.nombre}</Link>
-              <ul className="mt-6 flex flex-wrap gap-2">
+            <div key={c.id} className={`${FONDOS[i % FONDOS.length]} relative flex min-h-80 flex-col justify-between overflow-hidden rounded-[var(--radius-foto)] p-6 text-white sm:p-8`}>
+              {/* Con una prenda de la categoría de fondo (oscurecida para que el texto se lea). */}
+              {fotoDe(c.slug) && (
+                <div aria-hidden="true" className="absolute inset-0 -z-0">
+                  <Foto foto={fotoDe(c.slug)} alt="" sizes="(min-width:768px) 33vw, 100vw" className="opacity-90" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/25 to-black/75" />
+                </div>
+              )}
+              <Link href={`/${c.slug}`} className="relative font-display text-5xl leading-none hover:underline sm:text-6xl">{c.nombre}</Link>
+              <ul className="relative mt-6 flex flex-wrap gap-2">
                 {c.hijas.map((h) => (
                   <li key={h.id}>
-                    <Link href={`/${c.slug}/${h.slug}`} className="inline-block rounded-full border border-white/40 px-3 py-1 text-sm hover:bg-white hover:text-tinta">{h.nombre}</Link>
+                    <Link href={`/${c.slug}/${h.slug}`} className="inline-block rounded-full border border-white/60 bg-black/20 px-3 py-1 text-sm backdrop-blur-sm hover:bg-white hover:text-tinta">{h.nombre}</Link>
                   </li>
                 ))}
               </ul>
@@ -106,7 +157,20 @@ export default async function Inicio() {
         },
       ]} />
 
-      <section className="bg-fondo-suave">
+      {cifras.length > 0 && (
+        <section aria-label="Isuwaya en números" className="border-y border-linea">
+          <ul className={`contenedor grid gap-6 py-10 text-center ${cifras.length >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"} ${cifras.length === 4 ? "lg:grid-cols-4" : ""}`}>
+            {cifras.map((c) => (
+              <li key={c.valor + c.texto}>
+                <p className="font-display text-[clamp(2.4rem,5vw,3.4rem)] leading-none text-marca">{c.valor}</p>
+                <p className="mt-2 text-tinta-suave">{c.texto}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section>
         <div className="contenedor grid gap-10 py-16 lg:grid-cols-2 lg:py-20">
           <h2 className="text-[clamp(2rem,5vw,3.6rem)] leading-none">Hacemos la ropa que vendemos</h2>
           <div className="space-y-4 text-lg text-tinta-suave">
@@ -116,6 +180,9 @@ export default async function Inicio() {
           </div>
         </div>
       </section>
+
+      {/* Al final, lo que dicen quienes compraron. */}
+      <OpinionesInicio datos={opiniones} />
     </>
   );
 }

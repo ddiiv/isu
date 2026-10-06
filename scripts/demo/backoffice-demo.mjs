@@ -6,16 +6,23 @@
  *   · un descuento del 20 % en calzas,
  *   · dos cupones: BIENVENIDA10 (10 %, una vez por cliente) y ENVIOGRATIS
  *     (envío gratis desde $30.000).
+ *   · etapa 8: tres prendas que se venden en pack, composición, opiniones de
+ *     muestra (de pedidos de prueba entregados) y dos banners en la portada.
  * En producción todo esto se hace desde el backoffice.
  *
  *   node --env-file=.env scripts/demo/backoffice-demo.mjs
  */
 import pg from "pg";
 import { createRequire } from "node:module";
+import { randomBytes } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { crearInvalidador } from "../../apps/worker/dist/stocker/invalidar.js";
+import { procesarBanner } from "../../packages/almacen/dist/index.js";
 
-// ioredis es dependencia del worker, no de la raíz.
+// ioredis es dependencia del worker, no de la raíz; sharp, del almacén.
 const { Redis } = createRequire(new URL("../../apps/worker/package.json", import.meta.url))("ioredis");
+const sharp = createRequire(new URL("../../packages/almacen/package.json", import.meta.url))("sharp");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 const r = (a, b = a) => [a, b];
@@ -65,6 +72,57 @@ await pool.query(`INSERT INTO tienda.cupones (codigo, nombre, tipo, valor, minim
   ('BIENVENIDA10', '10% OFF de bienvenida', 'porcentaje', 10, 0, 1, 'demo'),
   ('ENVIOGRATIS', 'Envío gratis desde $30.000', 'envio_gratis', 0, 3000000, NULL, 'demo')
   ON CONFLICT (codigo) WHERE codigo IS NOT NULL DO NOTHING`);
+
+// ── Etapa 8: packs, composición, opiniones de muestra y portada ──
+console.warn(`Packs: ${await porNombre("pack", ["Remera Oversize Algodón Peinado", "Remera Básica Cuello Redondo", "Top Deportivo Ribb", "Musculosa Morley"])}`);
+await pool.query("UPDATE tienda.productos SET composicion = '100% algodón jersey' WHERE nombre IN ('Remera Oversize Algodón Peinado', 'Remera Básica Cuello Redondo') AND composicion IS NULL");
+await pool.query("DELETE FROM tienda.pedidos WHERE email LIKE 'demo-resena-%@isuwaya.test'");
+const OPINIONES = [
+  ["Remera Oversize Algodón Peinado", "Lucía", "Fernández", 5, "justo", "Hermosa la tela, gruesa y suave. La pedí en mi talle de siempre y quedó perfecta, oversize como dice.", "¡Llegó al día siguiente y súper bien empaquetado!"],
+  ["Remera Oversize Algodón Peinado", "Martina", "Gómez", 4, "grande", "Muy linda, pero es bastante holgada: si la querés menos suelta, pedí un talle menos.", null],
+  ["Top Deportivo Ribb", "Sofía", "Pérez", 5, "justo", "Lo uso para entrenar y para salir. Sostiene bien y no se transparenta.", "Excelente atención por WhatsApp, me ayudaron con el talle."],
+  ["Remera Básica Cuello Redondo", "Juan", "Romero", 5, "justo", "Compré el pack de 3 y quedé re conforme. El cuello no se deforma con los lavados.", null],
+  ["Buzo Canguro Frisa Premium", "Valentina", "López", 3, "chico", "Abriga mucho, pero me quedó un poco justo de mangas. Lo cambié por un talle más sin problema.", null],
+];
+let numeroResena = 0;
+for (const [producto, nombre, apellido, estrellas, calce, texto, general] of OPINIONES) {
+  const prod = (await pool.query("SELECT id, nombre FROM tienda.productos WHERE nombre = $1", [producto])).rows[0];
+  if (!prod) continue;
+  const v = (await pool.query("SELECT v.sku, v.talle, c.nombre AS color, v.precio FROM tienda.variantes v LEFT JOIN tienda.producto_colores c ON c.id = v.color_id WHERE v.producto_id = $1 ORDER BY v.orden LIMIT 1", [prod.id])).rows[0];
+  const ped = (await pool.query(
+    `INSERT INTO tienda.pedidos (acceso_hash, email, nombre, apellido, telefono, dni, entrega, local_retiro, medio_pago, subtotal, total, estado, resena_pedida_en)
+     VALUES (repeat('0', 64), $1, $2, $3, '1100000000', '30000000', 'retiro', 'Vía Flores', 'local', $4, $4, 'retirado', now()) RETURNING id`,
+    [`demo-resena-${++numeroResena}@isuwaya.test`, nombre, apellido, v.precio])).rows[0];
+  await pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, producto_id, nombre, color, talle, precio, cantidad) VALUES ($1,$2,$3,$4,$5,$6,$7,1)", [ped.id, v.sku, prod.id, prod.nombre, v.color, v.talle, v.precio]);
+  await pool.query(`INSERT INTO tienda.resenas (pedido_id, producto_id, estrellas, texto, calce, talle, color, nombre, estado, moderada_por, moderada_en)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'publicada','demo',now())`, [ped.id, prod.id, estrellas, texto, calce, v.talle, v.color, `${nombre} ${apellido[0]}.`]);
+  if (general) await pool.query("INSERT INTO tienda.resenas (pedido_id, producto_id, estrellas, texto, nombre, estado) VALUES ($1, NULL, 5, $2, $3, 'publicada')", [ped.id, general, `${nombre} ${apellido[0]}.`]);
+}
+console.warn(`Opiniones de muestra: ${numeroResena}`);
+if (process.env.FOTOS_DIR) {
+  await pool.query("DELETE FROM tienda.banners WHERE alt LIKE '%(demo)'");
+  const BANNERS = [
+    ["Packs de remeras: llevá más, pagá menos (demo)", "/packs", "#2e6b3f", "Packs · Llevá más, pagá menos", "Hasta 20% OFF armando tu pack"],
+    ["Nuevos ingresos de temporada (demo)", "/nuevos", "#2c5f91", "Nuevos ingresos", "Lo último que salió del taller"],
+  ];
+  for (const [i, [alt, enlace, color, titulo, bajada]] of BANNERS.entries()) {
+    const svg = (w, h, t) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${color}"/>
+      <circle cx="${w * 0.82}" cy="${h * 0.5}" r="${h * 0.38}" fill="#ffffff" opacity="0.12"/>
+      <text x="${w * 0.07}" y="${h * 0.48}" font-family="Arial, sans-serif" font-weight="bold" font-size="${t}" fill="#fff">${titulo}</text>
+      <text x="${w * 0.07}" y="${h * 0.48 + t * 1.1}" font-family="Arial, sans-serif" font-size="${t * 0.5}" fill="#fff" opacity="0.9">${bajada}</text></svg>`);
+    const b = (await pool.query("INSERT INTO tienda.banners (alt, enlace, orden) VALUES ($1, $2, $3) RETURNING id", [alt, enlace, i])).rows[0];
+    for (const [tipo, w, h, t] of [["foto", 2400, 900, 120], ["foto_movil", 1080, 1350, 48]]) {
+      const proc = await procesarBanner(await sharp(svg(w, h, t)).png().toBuffer());
+      const clave = `b/${b.id}/${randomBytes(8).toString("hex")}`;
+      await mkdir(path.join(process.env.FOTOS_DIR, "b", String(b.id)), { recursive: true });
+      for (const x of proc.tamanos) await writeFile(path.join(process.env.FOTOS_DIR, `${clave}-${x.ancho}.webp`), x.datos);
+      await pool.query(tipo === "foto"
+        ? "UPDATE tienda.banners SET foto = $2, foto_ancho = $3, foto_alto = $4 WHERE id = $1"
+        : "UPDATE tienda.banners SET foto_movil = $2, movil_ancho = $3, movil_alto = $4 WHERE id = $1", [b.id, clave, proc.ancho, proc.alto]);
+    }
+  }
+  console.warn(`Portada: ${BANNERS.length} banners`);
+}
 await pool.end();
 
 const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });

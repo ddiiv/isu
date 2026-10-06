@@ -24,7 +24,7 @@ import { crearServicioPedidos } from "./modulos/pedidos/servicio.js";
 import { crearColas, type Colas } from "./lib/colas.js";
 import { crearMercadoPago } from "./lib/mercadopago.js";
 import { crearClienteStocker } from "@isu/stocker";
-import { almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, type Almacen } from "@isu/almacen";
+import { almacenDeBanners, almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, type Almacen } from "@isu/almacen";
 import { rutasEnviosAdmin } from "./modulos/admin/envios.js";
 import { crearAsistente } from "./modulos/chat/motor.js";
 import { crearIa, type Ia } from "./modulos/chat/ia.js";
@@ -37,6 +37,8 @@ import { crearTransportes, type Transportes } from "@isu/envios";
 import { crearCotizadorEnvios } from "./modulos/envios/cotizador.js";
 import { rutasEnvios } from "./modulos/envios/rutas.js";
 import { rutasSeo } from "./modulos/seo/rutas.js";
+import { rutasResenas } from "./modulos/resenas/rutas.js";
+import { rutasResenasAdmin } from "./modulos/admin/resenas.js";
 
 export interface Dependencias {
   env: Entorno;
@@ -98,7 +100,7 @@ export async function construirApp(deps: Dependencias) {
   const cache = new CacheCorta(env.CACHE_SEGUNDOS);
 
   await rutasSalud(app, { pool, redis });
-  await rutasConfig(app, { db, cache, pagoOnline: !!env.MP_ACCESS_TOKEN });
+  await rutasConfig(app, { db, pool, cache, pagoOnline: !!env.MP_ACCESS_TOKEN });
   await rutasCategorias(app, { db, cache });
   const descuentos = crearDescuentos(pool, cache);
   await rutasProductos(app, { pool, cache, descuentos });
@@ -124,7 +126,7 @@ export async function construirApp(deps: Dependencias) {
   // ── Etapa 4: envíos (cada transporte se prende con sus credenciales) ──
   const transportes = deps.transportes ?? crearTransportes(process.env);
   const cotizador = crearCotizadorEnvios({ pool, redis, transportes, log: app.log });
-  const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador });
+  const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador, secreto: env.INTERNO_TOKEN });
   await rutasCuentas(app, { pool, redis, env, colas });
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
@@ -150,6 +152,11 @@ export async function construirApp(deps: Dependencias) {
 
   // ── SEO: redirecciones de la tienda anterior ──
   await rutasSeo(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR });
+
+  // ── Etapa 8: reseñas y portada del inicio ──
+  await rutasResenas(app, { pool, redis, cache, colas, canalInvalidar: CANAL_INVALIDAR, secreto: env.INTERNO_TOKEN });
+  const banners: Almacen | null = (() => { try { return almacenDeBanners({ ...process.env, FOTOS_DIR: env.FOTOS_DIR }); } catch { return null; } })();
+  await rutasResenasAdmin(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR, banners });
 
   return app;
 }

@@ -66,7 +66,7 @@ test.describe("grilla", () => {
 
   test("el inicio muestra lo nuevo", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Lo nuevo" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Nuevos y en reposición" })).toBeVisible();
     expect(await page.locator("main article").count()).toBeGreaterThan(0);
   });
 });

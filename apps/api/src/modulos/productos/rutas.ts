@@ -13,6 +13,7 @@ import type { Descuentos } from "../../lib/descuentos.js";
  *
  *   GET /v1/productos?categoria=mujer[&sub=remeras-y-tops]   grilla de una categoría
  *   GET /v1/productos?nuevos=8                               lo último que entró (home)
+ *   GET /v1/productos?coleccion=packs                        lo que se vende en pack (etapa 8)
  *   GET /v1/productos/:slug                                  ficha
  *   GET /v1/buscar?q=remera                                  búsqueda
  *   GET /v1/productos-slugs                                  para el sitemap
@@ -44,17 +45,18 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
     {
       schema: {
         querystring: z.union([
-          z.object({ categoria: slug, sub: slug.optional() }).strict(),
+          // limite: el inicio pide unas pocas (y sólo con stock) para las pestañas Mujer / Hombre.
+          z.object({ categoria: slug, sub: slug.optional(), limite: z.coerce.number().int().min(1).max(24).optional() }).strict(),
           z.object({ nuevos: z.coerce.number().int().min(1).max(24) }).strict(),
           // Colecciones elegidas en el backoffice (sección del inicio y su página).
-          z.object({ coleccion: z.enum(["nuevos", "destacados"]), limite: z.coerce.number().int().min(1).max(200).default(200) }).strict(),
+          z.object({ coleccion: z.enum(["nuevos", "destacados", "packs"]), limite: z.coerce.number().int().min(1).max(200).default(200) }).strict(),
         ]),
         response: { 200: ListadoProductos },
       },
     },
     async (req, reply) => {
       const q = req.query;
-      const clave = "nuevos" in q ? `nuevos:${q.nuevos}` : "coleccion" in q ? `col:${q.coleccion}:${q.limite}` : `cat:${q.categoria}/${q.sub ?? ""}`;
+      const clave = "nuevos" in q ? `nuevos:${q.nuevos}` : "coleccion" in q ? `col:${q.coleccion}:${q.limite}` : `cat:${q.categoria}/${q.sub ?? ""}:${q.limite ?? ""}`;
       const r = await deps.cache.obtener(clave, async () => {
         let filas;
         if ("nuevos" in q) {
@@ -65,9 +67,10 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
         else {
           const id = await categoriaId(q.categoria, q.sub);
           if (id === null) return null;
-          filas = await productosDeCategoria(deps.pool, id);
+          filas = await productosDeCategoria(deps.pool, id, q.limite, !!q.limite);
         }
-        const productos = await tarjetas(deps.pool, filas, "nuevos" in q ? false : await agotadosVisibles(), deps.descuentos);
+        const recorte = "nuevos" in q || ("categoria" in q && !!q.limite);
+        const productos = await tarjetas(deps.pool, filas, recorte ? false : await agotadosVisibles(), deps.descuentos);
         return { productos, total: productos.length };
       });
       if (!r) throw noEncontrado("Categoría");

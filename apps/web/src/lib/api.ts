@@ -1,5 +1,5 @@
 import "server-only";
-import { ConfigPublica, CategoriaNodo, ListadoProductos, ProductoDetalle } from "@isu/shared";
+import { BannerPublico, ConfigPublica, CategoriaNodo, ListadoProductos, PACKS_POR_DEFECTO, ProductoDetalle, ResenasInicio, ResenasProducto } from "@isu/shared";
 import { z } from "zod";
 
 /*
@@ -49,6 +49,10 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   ],
   // Sin API no hay asistente: queda el botón de WhatsApp.
   chatbot: { activo: false, saludo: "" },
+  packs: PACKS_POR_DEFECTO,
+  hayPacks: false,
+  cuidados: "",
+  cifras: [],
 };
 
 export const CATEGORIAS_RESPALDO: CategoriaNodo[] = [
@@ -111,8 +115,8 @@ export async function obtenerNuevos(cantidad = 8): Promise<ListadoProductos> {
   }
 }
 
-/** Colecciones elegidas a mano en el backoffice (casillas "Destacado" y "Nuevo"). */
-export async function obtenerColeccion(cual: "nuevos" | "destacados", limite = 200): Promise<ListadoProductos> {
+/** Colecciones elegidas a mano en el backoffice (casillas "Destacado", "Nuevo" y "Pack"). */
+export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs", limite = 200): Promise<ListadoProductos> {
   try {
     return (await pedirCatalogo(`/v1/productos?coleccion=${cual}&limite=${limite}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
   } catch (err) {
@@ -135,5 +139,43 @@ export async function obtenerSlugs(): Promise<z.infer<typeof Slugs>> {
     return (await pedirCatalogo("/v1/productos-slugs", Slugs, ["catalogo"])) ?? [];
   } catch {
     return [];
+  }
+}
+
+/** Unas pocas prendas con stock de una categoría (las pestañas Mujer / Hombre del inicio). */
+export async function obtenerDeCategoria(categoria: string, limite = 8): Promise<ListadoProductos> {
+  try {
+    return (await pedirCatalogo(`/v1/productos?${new URLSearchParams({ categoria, limite: String(limite) })}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
+  } catch (err) {
+    console.warn(`[api] ${categoria}: ${(err as Error).message}`);
+    return LISTADO_VACIO;
+  }
+}
+
+// ── Etapa 8: portada y reseñas ──
+const SIN_RESENAS_INICIO: ResenasInicio = { promedio: null, cantidad: 0, resenas: [] };
+export async function obtenerPortada(): Promise<BannerPublico[]> {
+  try {
+    return (await pedirCatalogo("/v1/portada", z.object({ banners: z.array(BannerPublico) }), ["catalogo"]))?.banners ?? [];
+  } catch (err) {
+    console.warn(`[api] portada: ${(err as Error).message}`);
+    return [];
+  }
+}
+export async function obtenerResenasInicio(): Promise<ResenasInicio> {
+  try {
+    return (await pedirCatalogo("/v1/resenas/inicio", ResenasInicio, ["catalogo"])) ?? SIN_RESENAS_INICIO;
+  } catch (err) {
+    console.warn(`[api] reseñas del inicio: ${(err as Error).message}`);
+    return SIN_RESENAS_INICIO;
+  }
+}
+/** La primera página de reseñas de una prenda (va en el HTML de la ficha: Google la lee). */
+export async function obtenerResenas(slug: string): Promise<ResenasProducto | null> {
+  try {
+    return await pedirCatalogo(`/v1/productos/${encodeURIComponent(slug)}/resenas`, ResenasProducto, [`producto:${slug}`]);
+  } catch (err) {
+    console.warn(`[api] reseñas de ${slug}: ${(err as Error).message}`);
+    return null;
   }
 }

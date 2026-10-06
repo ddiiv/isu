@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
 import { CP, ESTADOS_PENDIENTES, formatearPesos, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
-import type { Paquete, Transportes } from "@isu/envios";
+import { firmaOpinar, type Paquete, type Transportes } from "@isu/envios";
 import type { CotizadorEnvios } from "../envios/cotizador.js";
 import { hoyA } from "../envios/cotizador.js";
 import { envioPublico } from "../envios/publico.js";
@@ -41,6 +41,8 @@ export interface DepsPedidos {
   /** Etapa 4: transportes y cotizador (sin ellos, el envío de costo fijo de la etapa 2). */
   transportes?: Transportes;
   cotizador?: CotizadorEnvios;
+  /** Etapa 8: para firmar el enlace de "Opiná de tu compra" (INTERNO_TOKEN). */
+  secreto?: string;
 }
 
 const ESTADO_INICIAL: Record<MedioPago, string> = {
@@ -316,6 +318,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       items: items.rows, subtotal: p.subtotal, descuento: p.descuento, envio: p.envio, total: p.total,
       cupon: p.cupon_nombre ? { codigo: p.cupon_codigo, nombre: p.cupon_nombre } : null, descuentoCupon: p.descuento_cupon,
       envioDetalle: deps.transportes ? await envioPublico(pool, deps.transportes, p) : null,
+      // Ya le llegó: puede opinar (la misma firma que el enlace del mail).
+      opinar: ["entregado", "retirado"].includes(p.estado) && deps.secreto ? firmaOpinar(p.numero, deps.secreto) : null,
       pago: {
         url: null,
         transferencia: p.medio_pago === "transferencia" && ESTADOS_PENDIENTES.includes(p.estado as never) ? a.datosTransferencia : null,

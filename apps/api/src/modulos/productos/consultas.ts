@@ -27,7 +27,7 @@ const foto = (f: FilaFoto | undefined): FotoPublica | null =>
 export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrarAgotados: boolean, desc: Descuentos): Promise<ProductoTarjeta[]> {
   if (!productos.length) return [];
   const ids = productos.map((p) => p.id);
-  const [vs, cs, fs] = await Promise.all([
+  const [vs, cs, fs, extra] = await Promise.all([
     pool.query<FilaVariante>(
       "SELECT producto_id, color_id, talle, precio, stock FROM tienda.variantes WHERE producto_id = ANY($1::int[]) AND activo ORDER BY orden",
       [ids],
@@ -41,7 +41,12 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
         WHERE producto_id = ANY($1::int[]) ORDER BY (tipo = 'exhibicion') DESC, orden, id`,
       [ids],
     ),
+    // Etapa 8: si se vende en pack y el resumen de sus reseñas.
+    pool.query<{ id: number; pack: boolean; resenas_cantidad: number; resenas_promedio: string | null }>(
+      "SELECT id, pack, resenas_cantidad, resenas_promedio FROM tienda.productos WHERE id = ANY($1::int[])", [ids],
+    ),
   ]);
+  const E = new Map(extra.rows.map((r) => [r.id, r]));
   const agrupar = <T extends { producto_id: number }>(filas: T[]) => {
     const m = new Map<number, T[]>();
     for (const f of filas) m.set(f.producto_id, [...(m.get(f.producto_id) ?? []), f]);
@@ -93,6 +98,8 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       // "Nuevo" lo marca el backoffice con una casilla.
       nuevo: p.nuevo,
       creadoEn: p.creado_en.toISOString(),
+      pack: E.get(p.id)?.pack ?? false,
+      resenas: resumen(E.get(p.id)),
     });
   }
   // Lo que hay primero; dentro de cada grupo, lo más nuevo primero (el orden de la consulta).
@@ -101,7 +108,13 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
 
 const PUBLICABLE = "p.visible AND p.en_stocker";
 
-export async function productosDeCategoria(pool: pg.Pool, categoriaId: number): Promise<FilaProducto[]> {
+/** numeric de Postgres llega como texto: "4.67" → 4.7 (una decimal alcanza). */
+export const resumen = (r: { resenas_cantidad: number; resenas_promedio: string | null } | undefined) => ({
+  cantidad: r?.resenas_cantidad ?? 0,
+  promedio: r?.resenas_promedio && r.resenas_cantidad ? Math.round(Number(r.resenas_promedio) * 10) / 10 : null,
+});
+
+export async function productosDeCategoria(pool: pg.Pool, categoriaId: number, limite = 1000, soloConStock = false): Promise<FilaProducto[]> {
   // La categoría y sus hijas: /mujer muestra todo lo de Mujer.
   const { rows } = await pool.query<FilaProducto>(
     `SELECT DISTINCT p.id, p.slug, p.nombre, p.creado_en, p.nuevo
@@ -109,9 +122,10 @@ export async function productosDeCategoria(pool: pg.Pool, categoriaId: number): 
        JOIN tienda.producto_categorias pc ON pc.producto_id = p.id
        JOIN tienda.categorias c ON c.id = pc.categoria_id AND c.visible
       WHERE ${PUBLICABLE} AND (c.id = $1 OR c.padre_id = $1)
+        AND (NOT $3 OR EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0))
       ORDER BY p.creado_en DESC, p.id DESC
-      LIMIT 1000`,
-    [categoriaId],
+      LIMIT $2`,
+    [categoriaId, Math.min(limite, 1000), soloConStock],
   );
   return rows;
 }
@@ -120,9 +134,12 @@ export async function productosDeCategoria(pool: pg.Pool, categoriaId: number): 
  * Colecciones elegidas a mano en el backoffice. "Nuevos": lo marcado como
  * nuevo, lo último marcado primero. "Destacados": por el orden que le dieron.
  */
-export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados", limite: number): Promise<FilaProducto[]> {
+export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs", limite: number): Promise<FilaProducto[]> {
   const { rows } = await pool.query<FilaProducto>(
-    cual === "nuevos"
+    cual === "packs"
+      ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
+          WHERE p.pack AND p.visible AND p.en_stocker ORDER BY p.pack_orden, p.id DESC LIMIT $1`
+      : cual === "nuevos"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
           WHERE p.nuevo AND p.visible AND p.en_stocker ORDER BY p.nuevo_desde DESC NULLS LAST, p.id DESC LIMIT $1`
       : `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
@@ -172,9 +189,10 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     id: number; slug: string; nombre: string; descripcion: string | null; seo_titulo: string | null; seo_descripcion: string | null;
     stocker_padre: string; categoria_id: number | null; actualizado_en: Date;
     guia: Record<string, unknown> | null; guia_en: Date | null;
+    pack: boolean; composicion: string | null; resenas_cantidad: number; resenas_promedio: string | null;
   }>(
     `SELECT p.id, p.slug, p.nombre, COALESCE(p.descripcion, p.stocker_descripcion) AS descripcion, p.seo_titulo, p.seo_descripcion,
-            p.stocker_padre, p.categoria_id, p.actualizado_en,
+            p.stocker_padre, p.categoria_id, p.actualizado_en, p.pack, p.composicion, p.resenas_cantidad, p.resenas_promedio,
             CASE WHEN g.id IS NULL THEN NULL ELSE jsonb_build_object('nombre', g.nombre, 'tipo', g.tipo, 'medidas', g.medidas, 'filas', g.filas, 'nota', g.nota) END AS guia,
             g.actualizado_en AS guia_en
        FROM tienda.productos p LEFT JOIN tienda.guias_talles g ON g.id = p.guia_talles_id
@@ -242,6 +260,9 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     agotado: conStock.length === 0,
     guiaTalles: guiaDe(p.guia),
     actualizadoEn: new Date(ultimo).toISOString(),
+    pack: p.pack,
+    composicion: p.composicion,
+    resenas: resumen(p),
   };
 }
 

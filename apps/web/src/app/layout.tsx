@@ -48,8 +48,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
       <body>
         <a href="#contenido" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:shadow">Saltar al contenido</a>
         <ProveedorCarrito>
-          <Anuncio texto={config.anuncio} />
-          <Header categorias={categorias} />
+          <Anuncio texto={config.anuncio} envioGratisDesde={config.envioGratisDesde} />
+          <Header categorias={categorias} hayPacks={config.hayPacks} />
           <main id="contenido">{children}</main>
           <Footer config={config} categorias={categorias} />
           {/* Con el asistente prendido, la burbuja es el chat (con WhatsApp adentro); si no, WhatsApp directo. */}

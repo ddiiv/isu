@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { crearPool, migrar } from "@isu/db";
-import { crearTransportes, firmaSeguimientoValida } from "@isu/envios";
+import { crearTransportes, firmaOpinarValida, firmaSeguimientoValida } from "@isu/envios";
 import { levantarSimulador, type Simulador } from "@isu/envios/simulador";
 import { crearEnvios, type Envios } from "./envios.js";
 
@@ -232,5 +232,39 @@ describe("Mercado Envíos", () => {
   it("a un pedido que no es de Mercado Envíos no le hace nada", async () => {
     const p = await pedido("m2");
     expect(await envios.mercadoEnvios(p.numero, "1")).toEqual({ motivo: "no_corresponde" });
+  });
+});
+
+describe("pedir la opinión (etapa 8)", () => {
+  it("unos días después de entregado, un mail por pedido con el enlace firmado; lo viejo o lo no entregado no", async () => {
+    const hace = async (estado: string, dias: number | null) => {
+      const p = await pedido(`res-${estado}-${dias}`, { entrega: "retiro", estado });
+      if (dias !== null) await pool.query("UPDATE tienda.pedidos SET cerrado_en = now() - make_interval(days => $2) WHERE id = $1", [p.id, dias]);
+      return p;
+    };
+    const listo = await hace("retirado", 5);
+    const reciente = await hace("retirado", 1);
+    const viejo = await hace("retirado", 60);
+    const sinCerrar = await hace("pagado", null);
+    await pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, nombre, precio, cantidad) VALUES ($1, 'X', 'Remera Oversize', 1000000, 1)", [listo.id]);
+    const r = await envios.pedirResenas();
+    const mails = cola.filter((c) => c.datos.plantilla === "pedir_resena");
+    const mio = mails.filter((m) => m.datos.para === `qa-wenv-res-retirado-5@test.com`);
+    expect(mio.length).toBe(1);
+    expect(r.pedidos).toBeGreaterThanOrEqual(1);
+    const d = mio[0]!.datos.datos as { enlace: string; estrellas: Array<{ estrellas: number; enlace: string }>; nombre: string };
+    expect(d.nombre).toBe("Ana");
+    const u = new URL(d.enlace);
+    expect(u.origin + u.pathname).toBe(`https://www.isuwaya.test/opinar/${listo.numero}`);
+    expect(firmaOpinarValida(listo.numero, u.searchParams.get("t")!, SECRETO)).toBe(true);
+    // La firma del seguimiento no sirve para opinar (otro propósito, otra clave).
+    expect(firmaSeguimientoValida(listo.numero, u.searchParams.get("t")!, SECRETO)).toBe(false);
+    expect(d.estrellas.map((e) => new URL(e.enlace).searchParams.get("e"))).toEqual(["5", "4", "3", "2", "1"]);
+    const marcados = await pool.query("SELECT id FROM tienda.pedidos WHERE id = ANY($1::int[]) AND resena_pedida_en IS NOT NULL", [[listo.id, reciente.id, viejo.id, sinCerrar.id]]);
+    expect(marcados.rows.map((x) => x.id)).toEqual([listo.id]);
+    // Otra pasada no lo manda de nuevo.
+    cola.length = 0;
+    await envios.pedirResenas();
+    expect(cola.filter((c) => c.datos.para === `qa-wenv-res-retirado-5@test.com`)).toEqual([]);
   });
 });

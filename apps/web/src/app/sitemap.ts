@@ -22,7 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: url(`/producto/${p.slug}`), lastModified: new Date(p.actualizadoEn), changeFrequency: "daily" as const, priority: 0.6,
       images: p.fotos.map((clave) => absoluta(src({ clave, ancho: null, alto: null, alt: null }, 1200))),
     })),
-    ...["/nuevos", "/destacados", "/outfits"].map((p) => ({ url: url(p), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.7 })),
+    ...["/nuevos", "/destacados", "/packs", "/outfits"].map((p) => ({ url: url(p), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.7 })),
     ...["/locales", "/devoluciones", "/terminos", "/privacidad", "/arrepentimiento"].map((p) => ({
       url: url(p), lastModified: ahora, changeFrequency: "monthly" as const, priority: 0.3,
     })),

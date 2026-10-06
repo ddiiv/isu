@@ -6,6 +6,7 @@ import { Cargando, Insignia, Mensaje, Tarjeta, Titulo } from "@/components/ui";
 interface Resumen {
   pedidosHoy: number; ventasHoy: number; ventasMes: number; porEstado: Record<string, number>;
   catalogo: { publicados: number; sin_fotos: number; agotados: number };
+  resenasPorModerar?: number;
   sincronizacion: Array<{ tipo: string; inicio: string; fin: string | null; error: string | null; cambios: number | null }>;
 }
 
@@ -44,6 +45,7 @@ export default function Panel() {
             <li className="flex justify-between py-2.5"><Link href="/productos?filtro=visibles" className="hover:underline">Publicados</Link><span className="font-bold">{r.catalogo.publicados}</span></li>
             <li className="flex justify-between py-2.5"><Link href="/productos?filtro=sin_fotos" className="hover:underline">Publicados sin fotos</Link><span className={`font-bold ${r.catalogo.sin_fotos ? "text-oferta" : ""}`}>{r.catalogo.sin_fotos}</span></li>
             <li className="flex justify-between py-2.5"><Link href="/productos?filtro=agotados" className="hover:underline">Agotados</Link><span className="font-bold">{r.catalogo.agotados}</span></li>
+            <li className="flex justify-between py-2.5"><Link href="/resenas" className="hover:underline">Reseñas por revisar</Link><span className={`font-bold ${r.resenasPorModerar ? "text-marca" : ""}`}>{r.resenasPorModerar ?? 0}</span></li>
           </ul>
           <h3 className="mt-5 text-sm font-bold">Sincronización con Stocker</h3>
           <ul className="mt-2 space-y-1 text-sm">

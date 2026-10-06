@@ -98,6 +98,8 @@ export const LineaCotizada = z.object({
   cantidad: z.number().int(),
   disponible: z.number().int(),          // hasta 20
   subtotal: z.number().int(),
+  /** Etapa 8: entra en un pack (cuántas unidades de la prenda lleva y qué % le toca). */
+  pack: z.object({ unidades: z.number().int(), porcentaje: z.number().int() }).nullable().optional(),
 });
 export type LineaCotizada = z.infer<typeof LineaCotizada>;
 
@@ -159,6 +161,8 @@ export const PedidoPublico = z.object({
   total: z.number().int(),
   /** Con qué viaja y por dónde anda (null para retiro en el local). */
   envioDetalle: EnvioPublico.nullable().optional(),
+  /** Etapa 8: ya se entregó o se retiró → enlace para opinar (/opinar/<numero>?t=…). */
+  opinar: z.string().nullable().optional(),
   pago: z.object({
     // Mercado Pago / Pago Fácil: a dónde ir a pagar (si todavía no pagó)
     url: z.string().nullable(),

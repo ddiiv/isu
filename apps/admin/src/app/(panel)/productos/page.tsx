@@ -8,7 +8,7 @@ import { puede, useYo } from "@/components/Marco";
 import { nombresCategorias, type Categoria, type FilaProducto } from "@/lib/catalogo";
 
 const FILTROS: Array<[string, string]> = [
-  ["todos", "Todos"], ["visibles", "Publicados"], ["ocultos", "Ocultos"], ["destacados", "Destacados"], ["nuevos", "Nuevos"],
+  ["todos", "Todos"], ["visibles", "Publicados"], ["ocultos", "Ocultos"], ["destacados", "Destacados"], ["nuevos", "Nuevos"], ["packs", "Se venden en pack"], ["sin_descripcion", "Sin descripción"],
   ["sin_fotos", "Sin fotos"], ["agotados", "Agotados"], ["de_baja", "Dados de baja en Stocker"],
 ];
 
@@ -36,7 +36,7 @@ function Productos() {
   };
 
   // Casilla de una fila: se guarda al instante (y se deshace si la API dice que no).
-  async function alternar(p: FilaProducto, campo: "visible" | "destacado" | "nuevo") {
+  async function alternar(p: FilaProducto, campo: "visible" | "destacado" | "nuevo" | "pack") {
     const valor = !p[campo];
     setDatos((d) => d && { ...d, productos: d.productos.map((x) => (x.id === p.id ? { ...x, [campo]: valor } : x)) });
     try { await api(`productos/${p.id}`, { metodo: "PATCH", cuerpo: { [campo]: valor } }); }
@@ -82,6 +82,8 @@ function Productos() {
           <Boton variante="borde" onClick={() => void masivo({ nuevo: false }, "Sacados de Nuevos")}>Quitar Nuevo</Boton>
           <Boton variante="borde" onClick={() => void masivo({ destacado: true }, "Destacados")}>Marcar Destacado</Boton>
           <Boton variante="borde" onClick={() => void masivo({ destacado: false }, "Sacados de Destacados")}>Quitar Destacado</Boton>
+          <Boton variante="borde" onClick={() => void masivo({ pack: true }, "Se venden en pack (2 a 5)")}>Vender en pack</Boton>
+          <Boton variante="borde" onClick={() => void masivo({ pack: false }, "Sacados de Packs")}>Quitar de Packs</Boton>
           <Boton variante="borde" onClick={() => void masivo({ visible: true }, "Publicados")}>Publicar</Boton>
           <Boton variante="borde" onClick={() => void masivo({ visible: false }, "Ocultados")}>Ocultar</Boton>
           <select className="rounded-full border border-linea bg-white px-3 py-2 font-bold" value="" aria-label="Agregar a categoría"
@@ -107,7 +109,7 @@ function Productos() {
               <thead className="border-b border-linea text-tinta-tenue"><tr>
                 {operador && <th className="w-10 px-3 py-3"><input type="checkbox" aria-label="Elegir todos" checked={todosElegidos} onChange={() => setElegidos(todosElegidos ? new Set() : new Set(todos.map((p) => p.id)))} /></th>}
                 <th className="px-3 py-3">Producto</th><th className="px-3 py-3">Categorías</th><th className="px-3 py-3 text-right">Precio</th><th className="px-3 py-3 text-right">Stock</th><th className="px-3 py-3">Fotos</th>
-                <th className="px-3 py-3 text-center">Visible</th><th className="px-3 py-3 text-center">Destacado</th><th className="px-3 py-3 text-center">Nuevo</th>
+                <th className="px-3 py-3 text-center">Visible</th><th className="px-3 py-3 text-center">Destacado</th><th className="px-3 py-3 text-center">Nuevo</th><th className="px-3 py-3 text-center">Pack</th>
               </tr></thead>
               <tbody className="divide-y divide-linea">
                 {todos.map((p) => (
@@ -116,21 +118,21 @@ function Productos() {
                     <td className="px-3 py-2">
                       <Link href={`/productos/${p.id}`} className="flex items-center gap-3">
                         <span className="size-12 shrink-0 overflow-hidden rounded-lg bg-fondo-suave">{p.foto && <img src={fotoUrl(p.foto)} alt="" className="size-full object-cover" />}</span>
-                        <span><span className="font-bold text-marca hover:underline">{p.nombre}</span><br /><span className="text-xs text-tinta-tenue">{p.sku}{!p.enStocker && " · baja en Stocker"}</span></span>
+                        <span><span className="font-bold text-marca hover:underline">{p.nombre}</span><br /><span className="text-xs text-tinta-tenue">{p.sku}{!p.enStocker && " · baja en Stocker"}{p.resenas > 0 && ` · ★ ${p.estrellas?.toFixed(1)} (${p.resenas})`}</span></span>
                       </Link>
                     </td>
                     <td className="px-3 py-2 text-xs" data-etiqueta="Categorías">{p.categorias.map((c) => nombres.get(c)).filter(Boolean).join(", ") || <span className="text-oferta">Sin categoría</span>}</td>
                     <td className="whitespace-nowrap px-3 py-2 text-right" data-etiqueta="Precio">{pesos(p.precio)}</td>
                     <td className="px-3 py-2 text-right" data-etiqueta="Stock">{p.stock}</td>
                     <td className="px-3 py-2" data-etiqueta="Fotos">{p.fotos ? `${p.fotos}/${p.colores * 5}` : <Insignia clase="bg-red-50 text-oferta">Sin fotos</Insignia>}</td>
-                    {(["visible", "destacado", "nuevo"] as const).map((campo) => (
-                      <td key={campo} className="celdas-casillas px-3 py-2 text-center" data-etiqueta={{ visible: "Visible", destacado: "Destacado", nuevo: "Nuevo" }[campo]}>
+                    {(["visible", "destacado", "nuevo", "pack"] as const).map((campo) => (
+                      <td key={campo} className="celdas-casillas px-3 py-2 text-center" data-etiqueta={{ visible: "Visible", destacado: "Destacado", nuevo: "Nuevo", pack: "Pack" }[campo]}>
                         <input type="checkbox" className="size-4 accent-[var(--color-marca)]" aria-label={`${campo} ${p.nombre}`} checked={p[campo]} disabled={!operador} onChange={() => void alternar(p, campo)} />
                       </td>
                     ))}
                   </tr>
                 ))}
-                {!todos.length && <tr><td colSpan={9} className="px-4 py-10 text-center text-tinta-tenue">No hay productos con ese filtro.</td></tr>}
+                {!todos.length && <tr><td colSpan={10} className="px-4 py-10 text-center text-tinta-tenue">No hay productos con ese filtro.</td></tr>}
               </tbody>
             </table>
           </div>

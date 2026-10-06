@@ -1,6 +1,7 @@
 import type { FotoPublica, ProductoDetalle, ProductoTarjeta } from "./catalogo.js";
 import { compararTalles } from "./catalogo.js";
 import { formatearPesos } from "./plata.js";
+import type { ResenaPublica } from "./resenas.js";
 
 /*
  * Lo que la tienda le dice a Google de cada página: datos estructurados
@@ -81,7 +82,7 @@ function fotosDe(p: ProductoDetalle, color: string | null): FotoPublica[] {
  * precio del talle que se buscó. Un producto de una sola variante va como
  * Product simple.
  */
-export function jsonLdProducto(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string): Record<string, unknown> {
+export function jsonLdProducto(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string, resenas: ResenaPublica[] = []): Record<string, unknown> {
   const url = `${ctx.sitio}/producto/${p.slug}`;
   const nombreColor = new Map(p.colores.map((c) => [c.clave, sinUnico(c.nombre)]));
   const publico = publicoDe(p.migas.map((m) => m.ruta));
@@ -128,6 +129,22 @@ export function jsonLdProducto(p: ProductoDetalle, ctx: ContextoSeo, descripcion
     ...(imagenes.length ? { image: imagenes } : {}),
     audience: audiencia,
     ...(p.migas.length ? { category: p.migas.map((m) => m.nombre).join(" > ") } : {}),
+    ...(p.composicion ? { material: p.composicion } : {}),
+    // Etapa 8: las estrellas en Google. Son de compras entregadas (no se pueden escribir sin haber comprado).
+    ...(p.resenas?.cantidad && p.resenas.promedio
+      ? {
+        aggregateRating: { "@type": "AggregateRating", ratingValue: p.resenas.promedio, reviewCount: p.resenas.cantidad, bestRating: 5, worstRating: 1 },
+        ...(resenas.length ? {
+          review: resenas.slice(0, 5).map((r) => ({
+            "@type": "Review",
+            reviewRating: { "@type": "Rating", ratingValue: r.estrellas, bestRating: 5, worstRating: 1 },
+            author: { "@type": "Person", name: r.nombre },
+            datePublished: r.fecha.slice(0, 10),
+            ...(r.texto ? { reviewBody: r.texto } : {}),
+          })),
+        } : {}),
+      }
+      : {}),
   };
   if (variantes.length <= 1) {
     const v = variantes[0];
@@ -190,6 +207,23 @@ export function descripcionProducto(p: ProductoDetalle, ctx: Pick<ContextoSeo, "
     }
   }
   return laQueEntra(versiones);
+}
+
+/**
+ * La descripción que se LEE en la ficha cuando la prenda no tiene una propia
+ * (Stocker no las tiene; se cargan en el backoffice). Con lo que se sabe de
+ * verdad: colores, talles, composición. Nada inventado.
+ */
+export function descripcionAutomatica(p: ProductoDetalle, marca: string): string {
+  const colores = p.colores.map((c) => sinUnico(c.nombre)).filter((c): c is string => !!c);
+  const talles = rangoTalles(p.variantes.map((v) => v.talle ?? ""));
+  const frases = [
+    `${p.nombre}${p.composicion ? `, ${p.composicion.charAt(0).toLowerCase()}${p.composicion.slice(1)}` : ""}.`,
+    colores.length || talles ? `Disponible${colores.length ? ` en ${lista(colores, 6)}${colores.length > 6 ? " y más colores" : ""}` : ""}${talles ? `${colores.length ? "," : ""} ${talles}` : ""}.` : null,
+    `Diseñada y confeccionada por ${marca}: talles reales y cumplidos.`,
+    p.guiaTalles ? "Mirá la guía de talles para elegir el tuyo." : "¿Dudas con el talle? Escribinos por WhatsApp y te ayudamos.",
+  ];
+  return frases.filter(Boolean).join(" ");
 }
 
 /** Lo mismo para una categoría: qué hay, cuántas prendas, desde qué precio. */

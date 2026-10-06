@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conDescuento, desdePesos, formatearPesos, fotosMaximasDelProducto, puedeAgregarFoto, centavos } from "./index.js";
+import { conDescuento, desdePesos, formatearPesos, fotosMaximasDelProducto, puedeAgregarFoto, centavos, porcentajePack, Packs, rutaPack, leerRutaPack, nombreParaResena, Opiniones } from "./index.js";
 
 describe("fotos", () => {
   it("el tope del padre es 5 por color", () => {
@@ -45,5 +45,39 @@ describe("plata", () => {
   it("aplica descuento y redondea al peso hacia abajo", () => {
     expect(conDescuento(centavos(1127100), 25)).toBe(845300);
     expect(() => conDescuento(centavos(100), 120)).toThrow();
+  });
+});
+
+describe("packs y reseñas (etapa 8)", () => {
+  it("el % según las unidades, con tope en 5", () => {
+    const p = [10, 15, 18, 20];
+    expect([0, 1, 2, 3, 4, 5, 6, 12].map((n) => porcentajePack(p, n))).toEqual([0, 0, 10, 15, 18, 20, 20, 20]);
+    expect(porcentajePack(p, 2.5)).toBe(0);
+    expect(Packs.safeParse([10, 15, 18, 20]).success).toBe(true);
+    expect(Packs.safeParse([10, 5, 18, 20]).success).toBe(false);
+    expect(Packs.safeParse([10, 15, 18]).success).toBe(false);
+    expect(Packs.safeParse([10, 15, 18, 61]).success).toBe(false);
+  });
+  it("la dirección del pack: pack-x2 a pack-x5", () => {
+    expect(rutaPack("remera-oversize", 3)).toBe("/producto/pack-x3-remera-oversize");
+    expect(leerRutaPack("pack-x3-remera-oversize")).toEqual({ unidades: 3, slug: "remera-oversize" });
+    for (const malo of ["pack-x1-remera", "pack-x6-remera", "pack-x3-", "pack-x3--a", "remera-oversize", "pack-x3-Remera", "pack-x10-remera"]) {
+      expect(leerRutaPack(malo), malo).toBeNull();
+    }
+  });
+  it("el nombre de quien opina: nombre e inicial", () => {
+    expect(nombreParaResena("ana maría", "García")).toBe("Ana G.");
+    expect(nombreParaResena("  JUAN ", "pérez")).toBe("Juan P.");
+    expect(nombreParaResena("Lu", "")).toBe("Lu");
+  });
+  it("las opiniones: una por prenda, el calce sólo en prendas, texto limpio", () => {
+    const ok = Opiniones.parse({ resenas: [{ productoId: 1, estrellas: 5, texto: "  Hermosa\r\n\n\n\nla tela  ", calce: "justo" }, { productoId: null, estrellas: 4, texto: "   " }] });
+    expect(ok.resenas[0]).toEqual({ productoId: 1, estrellas: 5, texto: "Hermosa\n\nla tela", calce: "justo" });
+    expect(ok.resenas[1]).toEqual({ productoId: null, estrellas: 4, texto: null, calce: null });
+    expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 5 }, { productoId: 1, estrellas: 3 }] }).success).toBe(false);
+    expect(Opiniones.safeParse({ resenas: [{ productoId: null, estrellas: 5, calce: "chico" }] }).success).toBe(false);
+    expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 0 }] }).success).toBe(false);
+    expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 5, texto: "x".repeat(1001) }] }).success).toBe(false);
+    expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 5, extra: 1 }] }).success).toBe(false);
   });
 });

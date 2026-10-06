@@ -130,6 +130,8 @@ if (api) {
 // Seguimiento de los envíos y repaso de despachos (una sola programación aunque haya varias réplicas).
 await colaEnvios.upsertJobScheduler("seguimiento", { every: 10 * 60_000 }, { name: "seguimiento" });
 if (deps) await colaEnvios.upsertJobScheduler("revisar-despachos", { every: 15 * 60_000 }, { name: "revisar-despachos" });
+// Etapa 8: pedir la opinión de las compras entregadas.
+await colaEnvios.upsertJobScheduler("pedir-resenas", { every: 60 * 60_000 }, { name: "pedir-resenas" });
 
 let escucha: ReturnType<typeof escucharStocker> | null = null;
 if (deps) {

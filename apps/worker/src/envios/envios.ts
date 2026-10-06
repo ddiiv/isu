@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { avanza, enlaceSeguimiento, telefonoWhatsapp, type Adaptador, type EstadoEnvio, type Transportes } from "@isu/envios";
+import { avanza, enlaceOpinar, enlaceSeguimiento, telefonoWhatsapp, type Adaptador, type EstadoEnvio, type Transportes } from "@isu/envios";
 import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
 
 /*
@@ -11,6 +11,8 @@ import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
  *                   eventos nuevos se guardan y los cambios importantes se avisan.
  *   revisarDespachos  por si se perdió un NOTIFY: se le pregunta a Stocker.
  *   mercadoEnvios   después del pago, trae el envío que creó Mercado Pago.
+ *   pedirResenas    (etapa 8) unos días después de entregado o retirado, el
+ *                   mail "¿Qué te pareció?" con el enlace para opinar.
  *
  * Los avisos (mail y WhatsApp) pasan por tienda.avisos: uno por pedido, tipo
  * y canal. Un reintento o dos réplicas nunca mandan dos veces el mismo.
@@ -261,6 +263,43 @@ export function crearEnvios(d: DepsEnvios) {
     return { seguimiento: e.id };
   }
 
-  return { avisar, despachado, seguir, seguirPendientes, revisarDespachos, mercadoEnvios };
+  /*
+   * Pide la opinión de las compras cerradas hace `pedirDias` días (ajuste
+   * resenas). Se marca ANTES de encolar, en la misma consulta: dos réplicas o
+   * un reintento no mandan dos mails. Lo cerrado hace más de 30 días ya no
+   * se pide (la persona no se acuerda, y llega como spam).
+   */
+  async function pedirResenas(limite = 50) {
+    if (!d.sitio || !d.secreto) return { pedidos: 0, motivo: "Falta SITIO_URL o INTERNO_TOKEN" };
+    const aj = (await d.pool.query<{ valor: { pedirDias?: number } }>("SELECT valor FROM tienda.ajustes WHERE clave = 'resenas'")).rows[0]?.valor;
+    const dias = Number.isInteger(aj?.pedirDias) ? Math.min(60, Math.max(1, aj!.pedirDias!)) : 4;
+    const { rows } = await d.pool.query<{ id: number; numero: string; nombre: string; email: string }>(
+      `UPDATE tienda.pedidos p SET resena_pedida_en = now()
+         FROM (SELECT id FROM tienda.pedidos
+                WHERE cerrado_en IS NOT NULL AND resena_pedida_en IS NULL
+                  AND cerrado_en <= now() - make_interval(days => $1) AND cerrado_en > now() - make_interval(days => $1 + 30)
+                  AND estado IN ('entregado', 'retirado')
+                ORDER BY cerrado_en LIMIT $2 FOR UPDATE SKIP LOCKED) x
+        WHERE p.id = x.id
+        RETURNING p.id, p.numero, p.nombre, p.email`,
+      [dias, limite],
+    );
+    for (const p of rows) {
+      const { rows: items } = await d.pool.query<{ nombre: string }>(
+        "SELECT DISTINCT ON (producto_id) nombre FROM tienda.pedido_items WHERE pedido_id = $1 AND producto_id IS NOT NULL ORDER BY producto_id, id LIMIT 10", [p.id]);
+      await d.encolar("email", {
+        plantilla: "pedir_resena", para: p.email,
+        datos: {
+          numero: p.numero, nombre: p.nombre.split(" ")[0] ?? p.nombre, prendas: items.map((i) => i.nombre),
+          enlace: enlaceOpinar(d.sitio, p.numero, d.secreto),
+          // Una estrella = un botón: tocarla abre la página con esas estrellas ya marcadas.
+          estrellas: [5, 4, 3, 2, 1].map((e) => ({ estrellas: e, enlace: enlaceOpinar(d.sitio!, p.numero, d.secreto!, e) })),
+        },
+      }, `resena-${p.id}`);
+    }
+    return { pedidos: rows.length };
+  }
+
+  return { avisar, despachado, seguir, seguirPendientes, revisarDespachos, mercadoEnvios, pedirResenas };
 }
 export type Envios = ReturnType<typeof crearEnvios>;

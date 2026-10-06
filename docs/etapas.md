@@ -12,6 +12,58 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 5 | Chatbot de preguntas frecuentes, ajustes finales, prueba de carga final, salida a producción | **Cerrada** (abajo) · la salida es con [`salida-produccion.md`](salida-produccion.md) |
 | 6 | Importación del catálogo del sitio mayorista (fotos por color, foto principal, categorías, colores) y cupones de descuento / promociones por monto | **Cerrada** (abajo) |
 | 7 | SEO y posicionamiento: redirecciones 301 de la tienda anterior (Jumpseller), datos estructurados de producto con variantes, textos de categoría, títulos y descripciones automáticos, sitemap con fotos, feed de Google Shopping, chequeo `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md) |
+| 8 | Inicio completo (carrusel de portada, packs, pestañas por categoría, números de la marca, opiniones al final), packs de 2 a 5 unidades con su dirección `pack-xN`, descripción y composición en la ficha, reseñas de compras verificadas con moderación | **Cerrada** (abajo) · guía en [`inicio-packs-resenas.md`](inicio-packs-resenas.md) |
+
+## Etapa 8 · resultados del cierre (06/10/2026)
+
+**Qué entró** (cómo se usa en [`inicio-packs-resenas.md`](inicio-packs-resenas.md))
+- **Inicio más completo**, de arriba hacia abajo:
+  - carrusel de banners (backoffice → **Portada**): foto para compu y, si se quiere, otra vertical para celular, con orden, fechas y enlace a una página de la tienda;
+  - beneficios, nuevos, **packs**, destacados;
+  - **pestañas por categoría** (Hombre, Mujer, Niños);
+  - categorías con foto de fondo;
+  - **números de la marca** (Ajustes, más el promedio de reseñas y los locales);
+  - **opiniones de quienes compraron**, al final.
+  - El anuncio de arriba dice «Te faltan $X para el envío gratis» cuando hay algo en el carrito.
+- **Packs de 2 a 5 unidades:**
+  - casilla «Se vende en pack» en cada prenda y % por cantidad en Ajustes (10, 15, 18 y 20 por defecto);
+  - página `/packs` y página de cada pack, `/producto/pack-x2-<prenda>`: al elegir la cantidad, la dirección pasa a `pack-x3`, `pack-x4`… (se puede compartir; Google indexa la de 2);
+  - cada unidad con su talle y su color, e «Igual a la anterior»;
+  - el % lo calcula la API contando las unidades de la prenda en cualquier talle y color, aunque se sumen sueltas; no se suma a una rebaja (gana el mayor);
+  - el carrito muestra «Pack x3 · −15%», y Stocker recibe el precio por unidad ya con el descuento.
+- **Descripción en la ficha:** siempre hay una (la del backoffice o una armada con lo que se sabe de la prenda), más desplegables de **Composición y cuidados** y **Cambios y devoluciones**. Campo «Composición» por prenda, cuidados generales en Ajustes y filtro «Sin descripción».
+- **Reseñas de compras verificadas:**
+  - Unos días después de entregado o retirado (Ajustes, 4 por defecto) sale un mail con estrellas y un enlace firmado. También desde «Mi pedido» → Opinar.
+  - Una opinión por prenda (estrellas, calce y texto) y una general.
+  - Entran por revisar. En backoffice → **Reseñas** se publican (de a una o varias), se rechazan o se responden. Hay un ajuste para publicarlas sin revisar.
+  - Se ven en las tarjetas (estrellas), en la ficha (promedio, cuántas de cada puntaje, cómo calza, lista ordenable) y al final del inicio. Las estrellas van en los datos para Google.
+- **Migración 0013:** sale sola al desplegar. También borra la redirección `/packs` → `/` que traía la 0012 de la tienda anterior.
+
+**QA**
+- Pruebas unitarias: **444/444**, 18 más que en la entrega anterior.
+  - compartido 50: dirección del pack, nombre de quien opina, opiniones válidas y estrellas en los datos para Google;
+  - API 226: packs en el carrito (cualquier talle y color, contra una rebaja, % en Ajustes), enlace para opinar, guardar y moderar, publicar solas, el freno por cliente, y banners con fotos y enlaces propios;
+  - worker 78: el mail para opinar sale una sola vez y no a pedidos viejos ni sin entregar.
+- Pruebas en navegador (escritorio y celular): **125/125**, 8 más. Las 11 omitidas son, como antes, flujos que alcanza con probar en un solo tamaño de pantalla. Nuevas:
+  - el inicio con carrusel, packs, pestañas y opiniones;
+  - el pack: la cantidad cambia la dirección, cada prenda con su talle y color, y el carrito cobra el pack;
+  - una prenda que no se vende en pack manda a su ficha;
+  - la ficha con descripción, composición y opiniones;
+  - el flujo completo: enlace del mail → opinar → el backoffice publica → se ve en la ficha.
+- Hallazgos corregidos:
+  - **`/packs` mandaba al inicio.** La redirección de la tienda anterior (0012) le ganaba a la página nueva, y el navegador además la precargaba desde el menú. La 0013 la borra.
+  - El inicio con banners se quedaba sin título principal (`h1`): ahora va uno para lectores de pantalla y Google.
+  - Moderar una reseña daba error 500 (un mismo parámetro usado con dos tipos en la consulta).
+  - El panel de la página del pack era más alto que la pantalla y quedaba cortado: deja de quedar fijo.
+
+**Hacker**
+- Auditoría: **311/311**. La sección nueva (§ 7f, detalle en `seguridad.md`) tiene 48 chequeos; 2 corren sólo si hay un pedido entregado para probar con una firma buena (en los datos de prueba, ISU-1001), y dan 313/313.
+- Hallazgo corregido: **el freno contra probar enlaces para opinar no se aplicaba por la tienda.** Contaba por IP con el límite general, y el servidor de la tienda está exento, así que por la tienda no había tope. Ahora usa el freno propio y cuenta por la IP del cliente. Prueba nueva: con el código anterior no frena; con el arreglo, al 11.º intento da 429 y otro cliente sigue pudiendo opinar.
+- Decisiones:
+  - Sólo opina quien compró y recibió: no hay formulario abierto.
+  - Se publica con nombre e inicial.
+  - El texto se muestra como texto.
+  - El enlace de un banner se comprueba también en la tienda (tercera llave).
 
 ## Arreglo: la importación de fotos se cortaba por tiempo (04/10/2026)
 

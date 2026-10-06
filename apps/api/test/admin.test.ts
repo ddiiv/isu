@@ -13,6 +13,7 @@ import { leerEntorno } from "../src/entorno.js";
 import type { Colas } from "../src/lib/colas.js";
 import { codigo } from "../src/lib/totp.js";
 import { ARGON_ADMIN } from "../src/modulos/admin/ingreso.js";
+import { firmaOpinar } from "@isu/envios";
 
 /*
  * Etapa 3: el backoffice por la API. Ingreso con doble factor, roles,
@@ -87,6 +88,7 @@ const limpiar = async () => {
   await pool.query("DELETE FROM tienda.guias_talles WHERE nombre LIKE 'QA adm%'");
   await pool.query("DELETE FROM tienda.categorias WHERE slug LIKE 'qa-adm%'");
   await pool.query("DELETE FROM tienda.redirecciones WHERE desde LIKE '/qa-adm%'");
+  await pool.query("DELETE FROM tienda.banners WHERE alt LIKE 'QA adm%'");
 };
 
 const IP = { "x-isu-interno": INTERNO, "x-isu-ip": "10.9.9.9" };
@@ -629,5 +631,200 @@ describe("redirecciones de la tienda anterior (SEO)", () => {
     expect([despues.orden, despues.visible]).toEqual([mujer.orden, mujer.visible]);
     expect((await req("PATCH", `/v1/admin/categorias/${mujer.id}`, operador, { texto: "x".repeat(3001) })).statusCode).toBe(400);
     await req("PATCH", `/v1/admin/categorias/${mujer.id}`, operador, antes);
+  });
+});
+
+// ── Etapa 8 ─────────────────────────────────────────────────────────
+describe("packs", () => {
+  const carrito = (items: Array<{ sku: string; cantidad: number }>) =>
+    app.inject({ method: "POST", url: "/v1/carrito", headers: IP, payload: { items } });
+  it("marcar una prenda como pack la muestra en Packs, con su composición, y prende el menú", async () => {
+    expect((await app.inject("/v1/config")).json().hayPacks).toBe(false);
+    expect((await req("PATCH", `/v1/admin/productos/${ids["qa-adm-1"]}`, operador, { pack: true, composicion: "100% algodón peinado" })).statusCode).toBe(200);
+    expect((await app.inject("/v1/config")).json()).toMatchObject({ hayPacks: true, packs: [10, 15, 18, 20] });
+    const col = (await app.inject("/v1/productos?coleccion=packs")).json();
+    expect(col.productos.map((p: { slug: string }) => p.slug)).toEqual(["qa-adm-1"]);
+    expect(col.productos[0].pack).toBe(true);
+    expect((await app.inject("/v1/productos/qa-adm-1")).json()).toMatchObject({ pack: true, composicion: "100% algodón peinado" });
+    expect((await req("GET", "/v1/admin/productos?filtro=packs", operador)).json().productos.map((p: { id: number }) => p.id)).toEqual([ids["qa-adm-1"]]);
+  });
+  it("el % sale de cuántas unidades de la prenda hay en el carrito (cualquier talle y color)", async () => {
+    const una = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 1 }])).json();
+    expect(una.lineas[0]).toMatchObject({ precio: 1_000_000, precioLista: null, pack: null });
+    // 2 negras S + 1 roja M = pack de 3 → 15%.
+    const tres = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 2 }, { sku: "QA-ADM-1-3", cantidad: 1 }])).json();
+    expect(tres.lineas.map((l: { precio: number; precioLista: number; pack: unknown }) => [l.precio, l.precioLista, l.pack])).toEqual([
+      [850_000, 1_000_000, { unidades: 3, porcentaje: 15 }], [935_000, 1_100_000, { unidades: 3, porcentaje: 15 }],
+    ]);
+    expect(tres.subtotal).toBe(2 * 850_000 + 935_000);
+    // Con más de 5, el de 5. Una prenda que no es pack no suma.
+    const muchas = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 4 }, { sku: "QA-ADM-1-2", cantidad: 3 }, { sku: "QA-ADM-5-1", cantidad: 2 }])).json();
+    expect(muchas.lineas.map((l: { pack: { porcentaje: number } | null }) => l.pack?.porcentaje ?? 0)).toEqual([20, 20, 0]);
+  });
+  it("no se suma a la rebaja de la prenda: gana el mayor", async () => {
+    const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm rebaja remera", porcentaje: 25, alcance: "productos", productoIds: [ids["qa-adm-1"]] });
+    const dos = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 2 }])).json();
+    expect(dos.lineas[0]).toMatchObject({ precio: 750_000, precioLista: 1_000_000, pack: null });
+    await pool.query("DELETE FROM tienda.descuentos WHERE id = $1", [d.json().id]);
+  });
+  it("los % se cambian en Ajustes (nunca menos llevando más)", async () => {
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: [10, 5, 20, 25] })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: [10, 15, 90, 95] })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { hayPacks: false })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: [5, 10, 20, 30] })).statusCode).toBe(200);
+    const cuatro = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 4 }])).json();
+    expect(cuatro.lineas[0]).toMatchObject({ precio: 800_000, pack: { unidades: 4, porcentaje: 20 } });
+    await req("PUT", "/v1/admin/ajustes", dueno, { packs: [10, 15, 18, 20] });
+  });
+});
+
+describe("reseñas", () => {
+  const firma = (n: string) => firmaOpinar(n, INTERNO);
+  async function pedido(estado: string, items: Array<[string, number, string | null, string | null]>) {
+    const r = await pool.query(
+      `INSERT INTO tienda.pedidos (acceso_hash,email,nombre,apellido,telefono,dni,entrega,local_retiro,medio_pago,subtotal,total,estado)
+       VALUES ($1,'qa-adm-resena@test.com','ana maría','García','1','2','retiro','Flores','local',1000000,1000000,$2) RETURNING id, numero`, ["d".repeat(64), estado]);
+    for (const [slug, cantidad, color, talle] of items) {
+      await pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, producto_id, nombre, color, talle, precio, cantidad) VALUES ($1,'X',$2,'Prenda',$3,$4,1000000,$5)",
+        [r.rows[0].id, ids[slug], color, talle, cantidad]);
+    }
+    return r.rows[0] as { id: number; numero: string };
+  }
+  const opinar = (numero: string, t: string, payload?: unknown) =>
+    app.inject({ method: payload ? "POST" : "GET", url: `/v1/opinar/${numero}?t=${t}`, headers: IP, ...(payload ? { payload: payload as object } : {}) });
+
+  it("sólo con el enlace firmado y cuando el pedido ya llegó", async () => {
+    const p = await pedido("pagado", [["qa-adm-1", 1, "negro", "M"], ["qa-adm-2", 1, "gris", "M"]]);
+    expect((await opinar(p.numero, firma(p.numero))).json().error).toBe("sin_entregar");
+    expect((await opinar(p.numero, "x".repeat(24))).statusCode).toBe(404);
+    expect((await opinar(p.numero, firma("ISU-1"))).statusCode).toBe(404);
+    expect((await opinar("ISU-99999999", firma("ISU-99999999"))).statusCode).toBe(404);
+    expect((await opinar(p.numero, "corta")).statusCode).toBe(400);
+    await pool.query("UPDATE tienda.pedidos SET estado = 'retirado' WHERE id = $1", [p.id]);
+    // La base anota cuándo se cerró (para el mail de "¿Qué te pareció?").
+    expect((await pool.query("SELECT cerrado_en IS NOT NULL AS c, resena_pedida_en FROM tienda.pedidos WHERE id = $1", [p.id])).rows[0]).toEqual({ c: true, resena_pedida_en: null });
+    const g = (await opinar(p.numero, firma(p.numero))).json();
+    expect(g).toMatchObject({ numero: p.numero, nombre: "ana", generalYaOpino: false });
+    expect(g.productos.map((x: { slug: string; color: string; yaOpino: boolean }) => [x.slug, x.color, x.yaOpino])).toEqual([["qa-adm-1", "negro", false], ["qa-adm-2", "gris", false]]);
+  });
+
+  it("guarda una por prenda y una general, entra pendiente y no se repite", async () => {
+    const p = await pedido("entregado", [["qa-adm-1", 2, "negro", "S"]]);
+    const t = firma(p.numero);
+    expect((await opinar(p.numero, t, { resenas: [{ productoId: ids["qa-adm-3"], estrellas: 5 }] })).json().error).toBe("prenda");
+    expect((await opinar(p.numero, t, { resenas: [{ productoId: ids["qa-adm-1"], estrellas: 6 }] })).statusCode).toBe(400);
+    expect((await opinar(p.numero, t, { resenas: [{ productoId: null, estrellas: 5, calce: "justo" }] })).statusCode).toBe(400);
+    expect((await opinar(p.numero, t, { resenas: [{ productoId: ids["qa-adm-1"], estrellas: 5 }, { productoId: ids["qa-adm-1"], estrellas: 1 }] })).statusCode).toBe(400);
+    const texto = "<script>alert(1)</script> Me encantó, el talle es justo y la tela suave.";
+    const r = await opinar(p.numero, t, { resenas: [
+      { productoId: ids["qa-adm-1"], estrellas: 5, texto, calce: "justo" },
+      { productoId: null, estrellas: 4, texto: "   Llegó rapidísimo y bien empaquetado, gracias!   " },
+    ] });
+    expect(r.json()).toEqual({ guardadas: 2, yaEstaban: 0, publicadas: false });
+    expect((await opinar(p.numero, t, { resenas: [{ productoId: ids["qa-adm-1"], estrellas: 1 }] })).json()).toMatchObject({ guardadas: 0, yaEstaban: 1 });
+    const fila = (await pool.query("SELECT nombre, talle, color, estado, texto FROM tienda.resenas WHERE pedido_id = $1 AND producto_id IS NOT NULL", [p.id])).rows[0];
+    // Nombre e inicial: nunca el apellido entero. El texto, tal cual (lo escapa la tienda al mostrarlo).
+    expect(fila).toEqual({ nombre: "Ana G.", talle: "S", color: "negro", estado: "pendiente", texto });
+    // Pendiente: todavía no se ve.
+    expect((await app.inject("/v1/productos/qa-adm-1/resenas")).json().total).toBe(0);
+    expect((await app.inject("/v1/productos/qa-adm-1")).json().resenas).toEqual({ promedio: null, cantidad: 0 });
+  });
+
+  it("el backoffice la publica, responde y la rechaza; el resumen sigue solo", async () => {
+    const pend = (await req("GET", "/v1/admin/resenas?estado=pendiente&q=qa-adm", operador)).json();
+    expect(pend.resenas.length).toBeGreaterThanOrEqual(0);
+    const todas = (await req("GET", "/v1/admin/resenas?estado=pendiente", operador)).json().resenas.filter((r: { pedido: string; producto: string | null }) => r.producto !== undefined);
+    const deRemera = todas.find((r: { productoId: number }) => r.productoId === ids["qa-adm-1"]);
+    const general = todas.find((r: { productoId: number | null; texto: string }) => r.productoId === null && r.texto?.startsWith("Llegó"));
+    expect(deRemera).toBeTruthy();
+    expect((await req("PATCH", `/v1/admin/resenas/${deRemera.id}`, lectura2, { estado: "publicada" })).json().error).toBe("sin_permiso");
+    enviados.length = 0;
+    expect((await req("PATCH", `/v1/admin/resenas/${deRemera.id}`, operador, { estado: "publicada", respuesta: "¡Gracias, Ana!" })).statusCode).toBe(200);
+    expect(enviados.some((e) => e.nombre === "invalidar" && (e.datos.slugs as string[]).includes("qa-adm-1"))).toBe(true);
+    expect((await req("POST", "/v1/admin/resenas/masivo", operador, { ids: [general.id], estado: "publicada" })).json().cambiadas).toBe(1);
+
+    const pub = (await app.inject("/v1/productos/qa-adm-1/resenas")).json();
+    expect(pub.resumen).toMatchObject({ cantidad: 1, promedio: 5, estrellas: [0, 0, 0, 0, 1], calce: { chico: 0, justo: 1, grande: 0 } });
+    expect(pub.resenas[0]).toMatchObject({ nombre: "Ana G.", estrellas: 5, talle: "S", color: "negro", calce: "justo", respuesta: "¡Gracias, Ana!" });
+    expect((await app.inject("/v1/productos/qa-adm-1")).json().resenas).toEqual({ promedio: 5, cantidad: 1 });
+    const tarjeta = (await app.inject("/v1/productos?coleccion=packs")).json().productos[0];
+    expect(tarjeta.resenas).toEqual({ promedio: 5, cantidad: 1 });
+    // El inicio: el promedio de todas (también la general) y las últimas.
+    const ini = (await app.inject("/v1/resenas/inicio")).json();
+    expect(ini.cantidad).toBeGreaterThanOrEqual(2);
+    expect(ini.resenas.find((r: { id: number }) => r.id === deRemera.id).producto).toMatchObject({ slug: "qa-adm-1" });
+    expect(ini.resenas.find((r: { id: number }) => r.id === general.id).producto).toBeNull();
+
+    expect((await req("PATCH", `/v1/admin/resenas/${deRemera.id}`, operador, { estado: "rechazada" })).statusCode).toBe(200);
+    expect((await app.inject("/v1/productos/qa-adm-1")).json().resenas).toEqual({ promedio: null, cantidad: 0 });
+    expect((await req("PATCH", `/v1/admin/resenas/${deRemera.id}`, operador, {})).statusCode).toBe(400);
+    expect((await req("PATCH", "/v1/admin/resenas/99999999", operador, { estado: "publicada" })).statusCode).toBe(404);
+    const aud = await pool.query("SELECT accion FROM tienda.auditoria WHERE entidad = 'resena' AND entidad_id = $1 ORDER BY id", [String(deRemera.id)]);
+    expect(aud.rows.map((x) => x.accion)).toEqual(["moderar_resena", "moderar_resena"]);
+    expect((await req("GET", "/v1/admin/resumen", operador)).json().resenasPorModerar).toBeGreaterThanOrEqual(0);
+  });
+
+  it("con «publicar solas» se ven al momento", async () => {
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { resenas: { publicarSolas: true, pedirDias: 0 } })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/ajustes", dueno, { resenas: { publicarSolas: true, pedirDias: 3 } })).statusCode).toBe(200);
+    const p = await pedido("entregado", [["qa-adm-5", 1, "blanco", "M"]]);
+    enviados.length = 0;
+    const r = await opinar(p.numero, firma(p.numero), { resenas: [{ productoId: ids["qa-adm-5"], estrellas: 3, calce: "chico" }] });
+    expect(r.json()).toMatchObject({ guardadas: 1, publicadas: true });
+    expect(enviados.some((e) => e.nombre === "invalidar")).toBe(true);
+    expect((await app.inject("/v1/productos/qa-adm-5")).json().resenas).toEqual({ promedio: 3, cantidad: 1 });
+    await req("PUT", "/v1/admin/ajustes", dueno, { resenas: { publicarSolas: false, pedirDias: 4 } });
+  });
+
+  it("frena a quien prueba enlaces a ciegas, por la IP del cliente (no la de la tienda)", async () => {
+    const deIp = (ip: string) => app.inject({
+      method: "POST", url: `/v1/opinar/ISU-12345?t=${"z".repeat(24)}`, headers: { "x-isu-interno": INTERNO, "x-isu-ip": ip },
+      payload: { resenas: [{ productoId: null, estrellas: 5 }] },
+    });
+    for (let i = 0; i < 10; i++) expect((await deIp("10.7.7.7")).statusCode).toBe(404);
+    expect((await deIp("10.7.7.7")).statusCode).toBe(429);
+    // Otro cliente que entra por el mismo servidor de la tienda sigue pudiendo opinar.
+    expect((await deIp("10.7.7.8")).statusCode).toBe(404);
+  });
+});
+
+describe("portada (banners del inicio)", () => {
+  const foto = (w: number, h: number) => sharp({ create: { width: w, height: h, channels: 3, background: "#2c5f91" } }).jpeg().toBuffer();
+  const subir = async (id: number, tipo: string, cuerpo: Buffer) =>
+    app.inject({ method: "POST", url: `/v1/admin/banners/${id}/foto?tipo=${tipo}`, headers: { ...IP, "x-isu-admin": operador, "content-type": "image/jpeg" }, payload: cuerpo });
+
+  it("sólo enlaces de esta tienda", async () => {
+    for (const enlace of ["//evil.com", "https://evil.com/x", "javascript:alert(1)", "/\\evil.com", "/ espacio", "packs"]) {
+      expect((await req("POST", "/v1/admin/banners", operador, { alt: "QA adm malo", enlace })).statusCode, enlace).toBe(400);
+    }
+    expect((await req("POST", "/v1/admin/banners", lectura2, { alt: "QA adm sin permiso" })).json().error).toBe("sin_permiso");
+  });
+
+  it("alta, foto para compu y celular, se ve en el inicio, se apaga y se borra con sus archivos", async () => {
+    const b = (await req("POST", "/v1/admin/banners", operador, { alt: "QA adm packs de remeras", enlace: "/packs", orden: 1 })).json().banner;
+    // Sin foto todavía: no sale en el inicio.
+    expect((await app.inject("/v1/portada")).json().banners.some((x: { id: number }) => x.id === b.id)).toBe(false);
+    expect((await subir(b.id, "escritorio", await foto(400, 200))).json().error).toBe("foto_invalida");
+    expect((await subir(b.id, "escritorio", await foto(4000, 600))).json().error).toBe("foto_invalida");
+    const e = await subir(b.id, "escritorio", await foto(1800, 700));
+    expect(e.statusCode, e.body).toBe(200);
+    expect(e.json().clave).toMatch(/^b\/\d+\/[a-f0-9]{16}$/);
+    expect(e.json().clave.startsWith(`b/${b.id}/`)).toBe(true);
+    const m = await subir(b.id, "movil", await foto(900, 1200));
+    expect(m.statusCode).toBe(200);
+    const archivos = await readdir(path.join(dirFotos, "b", String(b.id)));
+    expect(archivos.length).toBe(6);
+    const portada = (await app.inject("/v1/portada")).json().banners.find((x: { id: number }) => x.id === b.id);
+    expect(portada).toMatchObject({ alt: "QA adm packs de remeras", enlace: "/packs", foto: { clave: e.json().clave, ancho: 1800, alto: 700 }, fotoMovil: { clave: m.json().clave } });
+    // En disco (desarrollo), la API la sirve como las fotos de los productos.
+    expect((await app.inject(`/fotos/${e.json().clave}-800.webp`)).statusCode).toBe(200);
+    // Cambiar el orden no la apaga (sin valores por defecto al editar).
+    await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { orden: 3 });
+    expect((await req("GET", "/v1/admin/banners", operador)).json().banners.find((x: { id: number }) => x.id === b.id)).toMatchObject({ orden: 3, activo: true });
+    expect((await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { desde: "2030-01-02T00:00:00Z", hasta: "2030-01-01T00:00:00Z" })).statusCode).toBe(400);
+    await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { activo: false });
+    expect((await app.inject("/v1/portada")).json().banners.some((x: { id: number }) => x.id === b.id)).toBe(false);
+    expect((await req("DELETE", `/v1/admin/banners/${b.id}`, operador)).statusCode).toBe(200);
+    expect(await readdir(path.join(dirFotos, "b", String(b.id)))).toEqual([]);
   });
 });

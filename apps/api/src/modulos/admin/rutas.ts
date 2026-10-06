@@ -71,12 +71,14 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       pool.query<{ tipo: string; inicio: Date; fin: Date | null; error: string | null; cambios: number | null }>(
         "SELECT DISTINCT ON (tipo) tipo, inicio, fin, error, cambios FROM tienda.sincronizaciones ORDER BY tipo, inicio DESC"),
     ]);
+    const resenas = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM tienda.resenas WHERE estado = 'pendiente'");
     const p = ped.rows[0]!;
     return {
       pedidosHoy: p.hoy, ventasHoy: Number(p.ventas_hoy), ventasMes: Number(p.ventas_mes),
       porEstado: Object.fromEntries(rev.rows.map((r) => [r.estado, r.n])),
       catalogo: cat.rows[0],
       sincronizacion: sinc.rows.map((s) => ({ tipo: s.tipo, inicio: s.inicio.toISOString(), fin: s.fin?.toISOString() ?? null, error: s.error, cambios: s.cambios })),
+      resenasPorModerar: resenas.rows[0]?.n ?? 0,
     };
   });
 
@@ -189,7 +191,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       querystring: z.object({
         q: z.string().trim().max(80).optional(),
         categoria: Id.optional(),
-        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "de_baja"]).default("todos"),
+        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "de_baja"]).default("todos"),
         pagina: Pagina,
       }).strict(),
     },
@@ -204,12 +206,14 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       todos: "p.en_stocker", visibles: "p.en_stocker AND p.visible", ocultos: "p.en_stocker AND NOT p.visible", de_baja: "NOT p.en_stocker",
       sin_fotos: "p.en_stocker AND NOT EXISTS (SELECT 1 FROM tienda.fotos f WHERE f.producto_id = p.id)",
       agotados: "p.en_stocker AND NOT EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0)",
-      destacados: "p.destacado", nuevos: "p.nuevo",
+      destacados: "p.destacado", nuevos: "p.nuevo", packs: "p.pack",
+      sin_descripcion: "p.en_stocker AND p.descripcion IS NULL AND p.stocker_descripcion IS NULL",
     };
     w.push(filtros[filtro]!);
     params.push(POR_PAGINA, (pagina - 1) * POR_PAGINA);
     const { rows } = await pool.query(
       `SELECT p.id, p.slug, p.nombre, p.stocker_padre AS sku, p.visible, p.en_stocker AS "enStocker", p.destacado, p.destacado_orden AS "destacadoOrden", p.nuevo,
+              p.pack, p.resenas_cantidad AS "resenas", p.resenas_promedio::float AS "estrellas",
               p.stocker_categoria AS "categoriaStocker", p.stocker_genero AS "generoStocker", p.categorias_fijas AS "categoriasFijas",
               (SELECT COALESCE(sum(v.stock), 0)::int FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo) AS stock,
               (SELECT min(v.precio) FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo) AS precio,
@@ -242,6 +246,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         categoriaStocker: p.stocker_categoria, generoStocker: p.stocker_genero, categoriasFijas: p.categorias_fijas,
         destacado: p.destacado, destacadoOrden: p.destacado_orden, nuevo: p.nuevo, categorias: cats.rows.map((c) => c.categoria_id),
         guiaTallesId: p.guia_talles_id, parteOutfit: p.parte_outfit, parteOutfitSugerida: parteDe(p.stocker_categoria, p.nombre),
+        pack: p.pack, packOrden: p.pack_orden, composicion: p.composicion,
+        resenas: { cantidad: p.resenas_cantidad, promedio: p.resenas_promedio === null ? null : Number(p.resenas_promedio) },
       },
       colores: colores.rows, fotos: fotos.rows, variantes: variantes.rows,
       // El tope del padre sale solo: 5 por cada color.
@@ -265,6 +271,10 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     parteOutfit: z.enum(["arriba", "abajo", "abrigo", "ninguna"]).nullable().optional(),
     // Etapa 4: para cotizar el envío. null = el peso por defecto de Ajustes.
     pesoGramos: z.number().int().min(10).max(30_000).nullable().optional(),
+    // Etapa 8: se vende en pack de 2 a 5, su orden en "Packs" y de qué está hecha.
+    pack: z.boolean().optional(),
+    packOrden: z.number().int().min(-1000).max(1000).optional(),
+    composicion: z.string().trim().max(200).nullable().optional(),
   }).strict();
 
   async function aplicarCambios(cli: pg.PoolClient, ids: number[], c: z.infer<typeof CambiosProducto>) {
@@ -281,6 +291,9 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     if (c.destacadoOrden !== undefined) poner("destacado_orden", c.destacadoOrden);
     if (c.parteOutfit !== undefined) poner("parte_outfit", c.parteOutfit);
     if (c.pesoGramos !== undefined) poner("peso_gramos", c.pesoGramos);
+    if (c.pack !== undefined) poner("pack", c.pack);
+    if (c.packOrden !== undefined) poner("pack_orden", c.packOrden);
+    if (c.composicion !== undefined) poner("composicion", c.composicion || null);
     if (c.guiaTallesId !== undefined) {
       if (c.guiaTallesId !== null && !(await cli.query("SELECT 1 FROM tienda.guias_talles WHERE id = $1", [c.guiaTallesId])).rowCount) throw new ErrorHttp(400, "guia", "Esa guía de talles no existe.");
       poner("guia_talles_id", c.guiaTallesId);
@@ -321,7 +334,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     schema: {
       body: z.object({
         ids: z.array(Id).min(1).max(500),
-        cambios: CambiosProducto.pick({ visible: true, destacado: true, nuevo: true, categorias: true, guiaTallesId: true, parteOutfit: true, pesoGramos: true }).extend({
+        cambios: CambiosProducto.pick({ visible: true, destacado: true, nuevo: true, categorias: true, guiaTallesId: true, parteOutfit: true, pesoGramos: true, pack: true, composicion: true }).extend({
           agregarCategoria: Id.optional(), quitarCategoria: Id.optional(),
         }).strict(),
       }).strict(),
@@ -638,7 +651,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     alias: z.string().trim().regex(/^$|^[A-Za-z0-9.-]{6,20}$/, "El alias tiene de 6 a 20 letras, números, puntos o guiones"),
   }).strict();
   const AJUSTES: Record<string, z.ZodType> = {
-    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago"].includes(k))),
+    // hayPacks no se guarda: sale de las prendas marcadas como pack.
+    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks"].includes(k))),
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),
@@ -656,6 +670,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     // Etapa 5
     chatbot: AjusteChatbot,
     chatbotIa: AjusteChatbotIa,
+    // Etapa 8: reseñas (publicar sin revisar, a los cuántos días de entregado se pide la opinión).
+    resenas: z.object({ publicarSolas: z.boolean(), pedirDias: z.number().int().min(1).max(60) }).strict(),
   };
   api.get("/v1/admin/ajustes", async (req) => {
     await exigir(pool, req, "dueno");

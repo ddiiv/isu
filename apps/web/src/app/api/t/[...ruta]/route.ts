@@ -35,6 +35,10 @@ const REGLAS: Regla[] = [
   { metodo: "POST", patron: /^chat$/, api: () => "/v1/chat" },
   { metodo: "POST", patron: /^chat\/pedido$/, api: () => "/v1/chat/pedido" },
   { metodo: "POST", patron: /^chat\/voto$/, api: () => "/v1/chat/voto" },
+  // Etapa 8: opiniones (ver más / ordenar en la ficha, y opinar con el enlace firmado del mail).
+  { metodo: "GET", patron: /^productos\/([a-z0-9-]{1,80})\/resenas$/, api: (m) => `/v1/productos/${m[1]}/resenas`, consulta: ["orden", "pagina"] },
+  { metodo: "GET", patron: new RegExp(`^opinar/${NUM}$`), api: (m) => `/v1/opinar/${m[1]}`, consulta: ["t"] },
+  { metodo: "POST", patron: new RegExp(`^opinar/${NUM}$`), api: (m) => `/v1/opinar/${m[1]}`, consulta: ["t"] },
 ];
 const ACCESO = /^[A-Za-z0-9_-]{30,40}$/;
 const TIPOS_BINARIOS = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"]);
