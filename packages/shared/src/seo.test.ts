@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionCategoria, descripcionProducto, feedXml, horarioSchema, itemsFeed, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionProducto, feedXml, horarioSchema, itemsFeed, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -151,5 +151,25 @@ describe("feed de Google Shopping", () => {
   it("escapa caracteres de control que romperían el XML", () => {
     const items = itemsFeed(producto({ nombre: "Remera\u0001 «Box»" }), ctx, "d");
     expect(feedXml(items, ctx).includes("\u0001")).toBe(false);
+  });
+});
+
+describe("reseñas y descripción (etapa 8)", () => {
+  it("con reseñas publicadas, las estrellas van en los datos para Google", () => {
+    const p = producto({ resenas: { promedio: 4.5, cantidad: 2 }, composicion: "100% algodón" } as never);
+    const d = jsonLdProducto(p, ctx, "desc", [
+      { id: 1, nombre: "Ana G.", estrellas: 5, texto: "Hermosa", calce: "justo", talle: "M", color: null, fecha: "2026-10-01T12:00:00.000Z", respuesta: null },
+    ]) as Record<string, any>;
+    expect(d.aggregateRating).toEqual({ "@type": "AggregateRating", ratingValue: 4.5, reviewCount: 2, bestRating: 5, worstRating: 1 });
+    expect(d.review[0]).toMatchObject({ author: { name: "Ana G." }, reviewRating: { ratingValue: 5 }, datePublished: "2026-10-01", reviewBody: "Hermosa" });
+    expect(d.material).toBe("100% algodón");
+    // Sin reseñas, nada (Google castiga estrellas inventadas).
+    expect((jsonLdProducto(producto(), ctx, "d") as Record<string, any>).aggregateRating).toBeUndefined();
+  });
+  it("la descripción automática dice sólo lo que se sabe", () => {
+    const t = descripcionAutomatica(producto({ composicion: "100% Algodón jersey" } as never), "Isuwaya");
+    expect(t).toContain(", 100% Algodón jersey.");
+    expect(t).toMatch(/Disponible en /);
+    expect(t).toMatch(/Isuwaya/);
   });
 });

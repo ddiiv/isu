@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { conRebaja, type Descuentos } from "../../lib/descuentos.js";
 import { buscarCupon, categoriasDe, CODIGO, elegir, motivoNoVigente, normalizarCodigo, promocionesVigentes, type CuponAplicado, type LineaParaCupon } from "../../lib/cupones.js";
-import { centavos, conDescuento, formatearPesos, type Cotizacion, type ItemCarrito, type LineaCotizada, type MedioPago } from "@isu/shared";
+import { centavos, conDescuento, formatearPesos, Packs, PACKS_POR_DEFECTO, porcentajePack, type Cotizacion, type ItemCarrito, type LineaCotizada, type MedioPago } from "@isu/shared";
 
 /*
  * El precio lo pone la tienda, no el navegador.
@@ -11,7 +11,12 @@ import { centavos, conDescuento, formatearPesos, type Cotizacion, type ItemCarri
  * envío y monto mínimo. Lo que manda el carrito es sólo "qué SKU y cuántos"
  * (y el código de cupón que escribió el cliente).
  *
- * Orden: precio de la prenda (con su rebaja) → cupón → transferencia → envío.
+ * Orden: precio de la prenda (con su rebaja o el % del pack) → cupón →
+ * transferencia → envío.
+ *
+ * Packs (etapa 8): las prendas marcadas como pack llevan un % según cuántas
+ * unidades de ESA prenda hay en el carrito (2 a 5, cualquier talle y
+ * color). No se suma a la rebaja de la prenda: gana el mayor de los dos.
  */
 export interface Ajustes {
   montoMinimoCarrito: number;
@@ -24,12 +29,15 @@ export interface Ajustes {
   horasPagoLocal: number;
   datosTransferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string };
   locales: Array<{ nombre: string; retiro: boolean }>;
+  /** % por llevar 2, 3, 4 y 5 de una prenda pack */
+  packs: number[];
 }
 
 const POR_DEFECTO: Ajustes = {
   montoMinimoCarrito: 0, envioGratisDesde: null, costoEnvio: 790_000, descuentoTransferencia: 20,
   horasPagoOnline: 2, horasPagoFacil: 72, horasTransferencia: 48, horasPagoLocal: 72,
   datosTransferencia: { titular: "", cuit: "", banco: "", cbu: "", alias: "" }, locales: [],
+  packs: PACKS_POR_DEFECTO,
 };
 
 export async function leerAjustes(pool: pg.Pool): Promise<Ajustes> {
@@ -42,12 +50,13 @@ export async function leerAjustes(pool: pg.Pool): Promise<Ajustes> {
     // Un ajuste con el tipo equivocado se ignora: mejor el valor por defecto que un total mal calculado.
     if (d === null ? (r.valor === null || typeof r.valor === "number") : typeof r.valor === typeof d) a[r.clave] = r.valor;
   }
+  if (!Packs.safeParse(a.packs).success) a.packs = PACKS_POR_DEFECTO;
   return a as unknown as Ajustes;
 }
 
 export interface Fila {
   sku: string; precio: number; stock: number; talle: string | null; color: string | null; nombre: string; slug: string;
-  producto_id: number; foto: string | null; peso_gramos: number | null;
+  producto_id: number; foto: string | null; peso_gramos: number | null; pack: boolean;
 }
 
 export interface Cotizado extends Cotizacion {
@@ -73,7 +82,7 @@ export async function cotizar(
   for (const i of items) pedidos.set(i.sku, (pedidos.get(i.sku) ?? 0) + i.cantidad);
 
   const { rows } = await pool.query<Fila>(
-    `SELECT v.sku, v.precio, v.stock, v.talle, c.nombre AS color, p.nombre, p.slug, p.id AS producto_id, p.peso_gramos,
+    `SELECT v.sku, v.precio, v.stock, v.talle, c.nombre AS color, p.nombre, p.slug, p.id AS producto_id, p.peso_gramos, p.pack,
             (SELECT f.clave FROM tienda.fotos f WHERE f.producto_id = p.id
                ORDER BY (f.tipo = 'color' AND f.color_id = v.color_id) DESC, (f.tipo = 'exhibicion') DESC, f.orden, f.id LIMIT 1) AS foto
        FROM tienda.variantes v
@@ -85,6 +94,12 @@ export async function cotizar(
   const filas = new Map(rows.map((r) => [r.sku, r]));
   // Descuentos masivos del backoffice: el precio que se cobra es el rebajado.
   const rebajas = opciones.descuentos ? await opciones.descuentos.para([...new Set(rows.map((r) => r.producto_id))]) : new Map<number, number>();
+  // Packs: cuántas unidades de cada prenda pack hay en el carrito (cualquier talle y color).
+  const unidadesPack = new Map<number, number>();
+  for (const [sku, cantidad] of pedidos) {
+    const f = filas.get(sku);
+    if (f?.pack) unidadesPack.set(f.producto_id, (unidadesPack.get(f.producto_id) ?? 0) + cantidad);
+  }
 
   const lineas: LineaCotizada[] = [];
   const paraCupon: LineaParaCupon[] = [];
@@ -94,11 +109,16 @@ export async function cotizar(
     const f = filas.get(sku);
     if (!f) { problemas.push({ sku, tipo: "no_existe", mensaje: "Este artículo ya no está a la venta." }); continue; }
     const disponible = Math.min(f.stock, 20);
-    const pct = rebajas.get(f.producto_id) ?? 0;
+    const rebaja = rebajas.get(f.producto_id) ?? 0;
+    const unidades = f.pack ? unidadesPack.get(f.producto_id) ?? 0 : 0;
+    const pctPack = porcentajePack(a.packs, unidades);
+    // No se suman: gana el mayor.
+    const pct = Math.max(rebaja, pctPack);
     const precio = conRebaja(f.precio, pct);
     lineas.push({
       sku, productoSlug: f.slug, nombre: f.nombre, color: f.color && f.color !== "Único" ? f.color : null, talle: f.talle,
       foto: f.foto, precio, precioLista: pct ? f.precio : null, cantidad, disponible, subtotal: precio * cantidad,
+      pack: pctPack > 0 && pctPack >= rebaja ? { unidades, porcentaje: pctPack } : null,
     });
     if (f.stock === 0) problemas.push({ sku, tipo: "sin_stock", mensaje: `${f.nombre}${f.talle ? ` (${f.talle})` : ""}: se agotó.` });
     else if (cantidad > f.stock) problemas.push({ sku, tipo: "stock_insuficiente", mensaje: `${f.nombre}${f.talle ? ` (${f.talle})` : ""}: quedan ${f.stock}.` });

@@ -24,6 +24,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/seguimiento     cada 10 minutos, los envíos a los que les toca.
  * envios/seguir          uno ya (botón "Actualizar" del backoffice).
  * envios/revisar-despachos  repaso por si se perdió un aviso de Stocker.
+ * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
  * pagos/vencer · pagos/conciliar-mp   los corre la API (tiene la lógica del pedido);
  *                   el worker sólo marca el ritmo (cada 1 y 10 minutos).
@@ -188,6 +189,11 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
       "revisar-despachos": async () => {
         if (!extras.envios) throw sinReintento("Envíos sin configurar");
         return extras.envios.revisarDespachos();
+      },
+      // Etapa 8: "¿Qué te pareció tu compra?" (una vez por pedido).
+      "pedir-resenas": async () => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        return extras.envios.pedirResenas();
       },
       "mercado-envios": async (t) => {
         if (!extras.envios) throw sinReintento("Envíos sin configurar");

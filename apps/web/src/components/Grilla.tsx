@@ -16,8 +16,8 @@ type Orden = "destacados" | "precio" | "precio-desc" | "nuevos";
 const ORDENES: Array<[Orden, string]> = [["destacados", "Destacados"], ["precio", "Menor precio"], ["precio-desc", "Mayor precio"], ["nuevos", "Más nuevos"]];
 
 export function Grilla({
-  productos, lista, descuento, cuotas, filtros = true,
-}: { productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean }) {
+  productos, lista, descuento, cuotas, filtros = true, packs,
+}: { productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean; packs?: number[] }) {
   const [talles, setTalles] = useState<string[]>([]);
   const [colores, setColores] = useState<string[]>([]);
   const [orden, setOrden] = useState<Orden>("destacados");
@@ -142,7 +142,7 @@ export function Grilla({
       {visibles.length ? (
         <ul className="mt-6 grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-5 md:grid-cols-3 lg:grid-cols-4">
           {visibles.map((p, i) => (
-            <li key={p.id}><TarjetaProducto p={p} descuento={descuento} cuotas={cuotas} lista={lista} indice={i} prioridad={i < 2} /></li>
+            <li key={p.id}><TarjetaProducto p={p} descuento={descuento} cuotas={cuotas} lista={lista} indice={i} prioridad={i < 2} packs={packs} /></li>
           ))}
         </ul>
       ) : (

@@ -26,6 +26,7 @@
   --color-ahorro-claro: #e9f3ec;
   --color-oferta: #c8102e;         /* liquidación: se usa poco a propósito */
   --color-whatsapp: #25d366;
+  --color-estrella: #e29a0b;       /* las estrellas de las reseñas */
 
   --font-display: var(--fuente-display), system-ui, Arial, sans-serif;
   --font-sans: var(--fuente-texto), system-ui, Arial, sans-serif;

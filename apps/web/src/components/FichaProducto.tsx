@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { esClaro, formatearPesos, normalizarTalle, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
+import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
+import Link from "next/link";
+import { ResumenEstrellas } from "./Estrellas";
 import { BotonGuiaTalles, useRecomendado } from "./GuiaTalles";
 import { Foto, SinFoto } from "./Foto";
 import { Precio } from "./Precio";
@@ -84,8 +86,27 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
 
       <section aria-label="Comprar" className="lg:sticky lg:top-28 lg:self-start">
         <h1 className="text-[clamp(1.9rem,4vw,2.8rem)] leading-[1.05]">{p.nombre}</h1>
-        <p className="mt-1 text-sm text-tinta-tenue">Art. {p.sku}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <p className="text-sm text-tinta-tenue">Art. {p.sku}</p>
+          {p.resenas.cantidad > 0 && (
+            <a href="#opiniones" className="hover:underline" aria-label={`Ver las ${p.resenas.cantidad} opiniones`}>
+              <ResumenEstrellas promedio={p.resenas.promedio} cantidad={p.resenas.cantidad} />
+            </a>
+          )}
+        </div>
         <div className="mt-5"><Precio precio={precio} precioLista={precioLista} rebaja={p.descuento} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} grande /></div>
+
+        {p.pack && (
+          <Link href={rutaPack(p.slug, 2)} className="mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ahorro bg-ahorro-claro p-4 hover:bg-white">
+            <span>
+              <span className="block font-bold text-ahorro">📦 Llevá más, pagá menos</span>
+              <span className="block text-sm">
+                Armá un pack de 2 a 5 con tus talles y colores: desde {formatearPesos(conDescuento(centavos(precio), Math.max(...config.packs)))} c/u ({Math.max(...config.packs)}% OFF).
+              </span>
+            </span>
+            <span className="shrink-0 text-sm font-bold text-ahorro">Armar pack →</span>
+          </Link>
+        )}
 
         {p.colores.length > 0 && !(p.colores.length === 1 && p.colores[0]!.nombre === "Único") && (
           <fieldset className="mt-7">
@@ -180,13 +201,36 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             <p><span className="font-bold text-ahorro">{config.descuentoTransferencia}% OFF</span> pagando con transferencia · {config.cuotasSinInteres} cuotas sin interés con tarjeta.</p></li>
         </ul>
 
-        {p.descripcion && (
-          <div className="mt-8">
-            <h2 className="text-xl">Descripción</h2>
-            <p className="mt-2 whitespace-pre-line leading-relaxed text-tinta-suave">{p.descripcion}</p>
-          </div>
-        )}
+        {/* La descripción siempre se ve: la propia (backoffice) o, si no hay, una armada con lo que se sabe de la prenda. */}
+        <div className="mt-8 divide-y divide-linea border-y border-linea">
+          <Acordeon titulo="Descripción" abierto>
+            <p className="whitespace-pre-line">{p.descripcion?.trim() || descripcionAutomatica(p, "Isuwaya")}</p>
+          </Acordeon>
+          {(p.composicion || config.cuidados) && (
+            <Acordeon titulo={p.composicion ? "Composición y cuidados" : "Cuidados"}>
+              {p.composicion && <p><b className="text-tinta">Composición:</b> {p.composicion}</p>}
+              {config.cuidados && <p className={p.composicion ? "mt-2" : ""}>{config.cuidados}</p>}
+            </Acordeon>
+          )}
+          <Acordeon titulo="Cambios y devoluciones">
+            <p>Tenés <b className="text-tinta">30 días</b> desde que la recibís para cambiarla por otro talle o color. Si llegó con una falla, el cambio no te cuesta nada.</p>
+            <p className="mt-2"><Link href="/devoluciones" className="font-bold text-marca underline underline-offset-2">Cómo hacer un cambio</Link> · <Link href="/arrepentimiento" className="font-bold text-marca underline underline-offset-2">Botón de arrepentimiento</Link></p>
+          </Acordeon>
+        </div>
       </section>
     </div>
+  );
+}
+
+/* Un desplegable nativo (<details>): funciona sin JavaScript y lo leen bien los lectores de pantalla. */
+function Acordeon({ titulo, abierto = false, children }: { titulo: string; abierto?: boolean; children: React.ReactNode }) {
+  return (
+    <details open={abierto} className="group py-1">
+      <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-lg font-bold [&::-webkit-details-marker]:hidden">
+        {titulo}
+        <span aria-hidden="true" className="text-2xl leading-none text-tinta-tenue transition group-open:rotate-45">+</span>
+      </summary>
+      <div className="pb-4 leading-relaxed text-tinta-suave">{children}</div>
+    </details>
   );
 }

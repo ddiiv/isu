@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Packs, PACKS_POR_DEFECTO } from "./packs.js";
 
 /*
  * Esquemas que comparten la API, la tienda y el backoffice. Lo que viaja por
@@ -42,6 +43,13 @@ export const ConfigPublica = z.object({
   locales: z.array(Local),
   // Etapa 5: asistente de la tienda (burbuja de chat).
   chatbot: z.object({ activo: z.boolean(), saludo: z.string().max(200) }).default({ activo: false, saludo: "" }),
+  // Etapa 8. Packs: % por llevar 2, 3, 4 y 5 de la misma prenda; hayPacks = alguna prenda se vende en pack.
+  packs: Packs.default(PACKS_POR_DEFECTO),
+  hayPacks: z.boolean().default(false),
+  /** Cuidados generales de las prendas (la ficha los muestra). */
+  cuidados: z.string().max(600).default(""),
+  /** Números de la marca para el inicio ("+10 años · diseñando y fabricando"). */
+  cifras: z.array(z.object({ valor: z.string().trim().min(1).max(20), texto: z.string().trim().min(1).max(60) })).max(4).default([]),
 });
 export type ConfigPublica = z.infer<typeof ConfigPublica>;
 

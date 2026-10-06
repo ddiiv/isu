@@ -23,6 +23,8 @@ interface Ctx {
   abrir(): void;
   cerrar(): void;
   agregar(l: Omit<LineaCarrito, "cantidad">, cantidad?: number): void;
+  /** Un pack: varias prendas de una (las iguales se suman) y el cajón se abre una sola vez. */
+  agregarVarias(ls: Array<Omit<LineaCarrito, "cantidad">>): void;
   cambiar(sku: string, cantidad: number): void;
   quitar(sku: string): void;
   vaciar(): void;
@@ -121,6 +123,20 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
         return [...ls, { ...l, cantidad: Math.min(MAX_UNIDADES_POR_ARTICULO, cantidad) }];
       });
       evento("add_to_cart", { currency: "ARS", value: pesos(l.precio * cantidad), items: [{ item_id: l.slug, item_name: l.nombre, item_variant: l.sku, price: pesos(l.precio), quantity: cantidad }] });
+      setAbierto(true);
+    },
+    agregarVarias: (nuevas) => {
+      setLineas((ls) => {
+        let r = ls;
+        for (const l of nuevas) {
+          const ya = r.find((x) => x.sku === l.sku);
+          if (ya) r = r.map((x) => (x.sku === l.sku ? { ...x, ...l, cantidad: Math.min(MAX_UNIDADES_POR_ARTICULO, x.cantidad + 1) } : x));
+          else if (r.length < MAX_LINEAS_CARRITO) r = [...r, { ...l, cantidad: 1 }];
+        }
+        return r;
+      });
+      const valor = nuevas.reduce((a, l) => a + l.precio, 0);
+      evento("add_to_cart", { currency: "ARS", value: pesos(valor), items: nuevas.map((l) => ({ item_id: l.slug, item_name: l.nombre, item_variant: l.sku, price: pesos(l.precio), quantity: 1 })) });
       setAbierto(true);
     },
     cambiar: (sku, cantidad) => setLineas((ls) => ls.map((l) => (l.sku === sku ? { ...l, cantidad: Math.max(1, Math.min(MAX_UNIDADES_POR_ARTICULO, cantidad)) } : l))),

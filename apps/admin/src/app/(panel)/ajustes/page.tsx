@@ -14,6 +14,11 @@ type Valores = Record<string, unknown> & {
   locales: Local[];
   chatbot?: { activo: boolean; saludo: string };
   chatbotIa?: { activo: boolean; topeDiario: number };
+  // Etapa 8
+  packs?: number[];
+  resenas?: { publicarSolas: boolean; pedirDias: number };
+  cuidados?: string;
+  cifras?: Array<{ valor: string; texto: string }>;
 } & ValoresEnvios;
 const HORAS: Array<[keyof Valores, string, number, number]> = [
   ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 240],
@@ -81,6 +86,54 @@ export default function Ajustes() {
             <Campo etiqueta={'Avisar "¡Últimas!" desde'}><input type="number" min={0} max={20} className={`${claseEntrada} w-28`} value={v.avisoUltimas} onChange={(e) => poner("avisoUltimas", Number(e.target.value) || 0)} /></Campo>
           </div>
         </Tarjeta>
+        {v.packs && (
+          <Tarjeta titulo="Packs (llevá más, pagá menos)">
+            <p className="mb-3 text-sm text-tinta-suave">% de descuento por llevar 2, 3, 4 y 5 unidades de una prenda marcada «Se vende en pack» (cualquier talle y color). No se suma a la rebaja de la prenda: gana el mayor. Con más de 5, vale el de 5.</p>
+            <div className="grid grid-cols-4 gap-2">
+              {[2, 3, 4, 5].map((n, i) => (
+                <Campo key={n} etiqueta={`x${n}`}>
+                  <span className="relative block">
+                    <input type="number" min={0} max={60} className={`${claseEntrada} pr-7`} value={v.packs![i] ?? 0}
+                      onChange={(e) => poner("packs", v.packs!.map((x, j) => (j === i ? Math.max(0, Math.min(60, Math.trunc(Number(e.target.value)) || 0)) : x)))} />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-tinta-tenue">%</span>
+                  </span>
+                </Campo>
+              ))}
+            </div>
+            {v.packs.some((x, i) => i > 0 && x < v.packs![i - 1]!) && <p className="mt-2 text-sm font-bold text-oferta">Llevando más, el descuento no puede ser menor.</p>}
+          </Tarjeta>
+        )}
+        {v.resenas && (
+          <Tarjeta titulo="Reseñas">
+            <div className="space-y-3">
+              <Campo etiqueta="Pedir la opinión a los … días de entregado" ayuda="Un mail con estrellas para tocar. Sale una sola vez por pedido.">
+                <input type="number" min={1} max={60} className={`${claseEntrada} w-28`} value={v.resenas.pedirDias} onChange={(e) => poner("resenas", { ...v.resenas!, pedirDias: Math.max(1, Math.min(60, Number(e.target.value) || 1)) })} />
+              </Campo>
+              <Casilla etiqueta="Publicarlas sin revisar" ayuda="Apagado: entran a Reseñas → Por revisar y se publican desde ahí." marcada={v.resenas.publicarSolas} onChange={(x) => poner("resenas", { ...v.resenas!, publicarSolas: x })} />
+            </div>
+          </Tarjeta>
+        )}
+        {v.cuidados !== undefined && (
+          <Tarjeta titulo="Ficha de producto">
+            <Campo etiqueta="Cuidados de las prendas" ayuda="Se ven en todas las fichas, en «Composición y cuidados». Hasta 600 caracteres.">
+              <textarea className={claseEntrada} rows={3} maxLength={600} value={v.cuidados} onChange={(e) => poner("cuidados", e.target.value)} />
+            </Campo>
+          </Tarjeta>
+        )}
+        {v.cifras && (
+          <Tarjeta titulo="Números de la marca (inicio)" acciones={v.cifras.length < 4 ? <Boton variante="borde" onClick={() => poner("cifras", [...v.cifras!, { valor: "", texto: "" }])}>+ Número</Boton> : undefined}>
+            <p className="mb-3 text-sm text-tinta-suave">Hasta 4, sólo datos ciertos («+10 años · diseñando y fabricando», «+5.000 · pedidos entregados»). El promedio de las reseñas y los locales se suman solos.</p>
+            <ul className="space-y-2">
+              {v.cifras.map((c, i) => (
+                <li key={i} className="grid grid-cols-[7rem_1fr_auto] gap-2">
+                  <input className={claseEntrada} maxLength={20} placeholder="+10 años" aria-label="Número" value={c.valor} onChange={(e) => poner("cifras", v.cifras!.map((x, j) => (j === i ? { ...x, valor: e.target.value } : x)))} />
+                  <input className={claseEntrada} maxLength={60} placeholder="diseñando y fabricando" aria-label="Qué es" value={c.texto} onChange={(e) => poner("cifras", v.cifras!.map((x, j) => (j === i ? { ...x, texto: e.target.value } : x)))} />
+                  <button type="button" className="px-2 text-oferta" aria-label="Sacar" onClick={() => poner("cifras", v.cifras!.filter((_, j) => j !== i))}>✕</button>
+                </li>
+              ))}
+            </ul>
+          </Tarjeta>
+        )}
         <AjustesEnvios v={v} poner={(k, x) => setV({ ...v, [k]: x } as Valores)} />
         {v.chatbot && (
           <Tarjeta titulo="Asistente de la tienda">

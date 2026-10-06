@@ -514,6 +514,106 @@ async function respirar() {
   chk("seo", "robots.txt no deja indexar carrito, checkout, cuenta ni la API", ["/carrito", "/checkout", "/cuenta", "/api/"].every((r) => robots.includes(`Disallow: ${r}`)));
 }
 
+// ── 7f. Etapa 8: packs, reseñas y portada ─────────────────────────────
+{
+  await respirar();
+  const G = "etapa 8";
+  const json = (url, body, h = {}, metodo = "POST") => pedir(url, { method: metodo, headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) });
+  const firmar = async (proposito, numero) => {
+    const { createHash, createHmac } = await import("node:crypto");
+    const clave = createHash("sha256").update(`isu:${proposito}:${process.env.INTERNO_TOKEN}`).digest();
+    return createHmac("sha256", clave).update(numero).digest("base64url").slice(0, 24);
+  };
+
+  // Reseñas públicas: sin datos de quien compró ni de la moderación.
+  const inicio = await (await pedir(`${API}/v1/resenas/inicio`)).text();
+  chk(G, "reseñas del inicio: sin pedido, mail, apellido ni moderación", !/pedido|email|@|apellido|moderad|"estado"|rechazad|pendiente/i.test(inicio));
+  if (unSlug) {
+    const r = await pedir(`${API}/v1/productos/${unSlug}/resenas`);
+    chk(G, "reseñas de una prenda: 200 sin datos internos", r.status === 200 && !/pedido|email|@|apellido|moderad|rechazad|pendiente/i.test(await r.text()), String(r.status));
+    for (const qs of ["orden=1;DROP", "pagina=0", "pagina=-1", "pagina=99999", "orden=recientes&orden=peores", "estado=pendiente", "pagina=1e3"]) {
+      const x = await pedir(`${API}/v1/productos/${unSlug}/resenas?${qs}`);
+      chk(G, `reseñas con parámetros raros (${qs}) → 400`, x.status === 400, String(x.status));
+    }
+  }
+  for (const slug of ["..%2F..%2Fetc%2Fpasswd", "a'%20OR%201=1--", "%3Cscript%3E"]) {
+    const r = await pedir(`${API}/v1/productos/${slug}/resenas`);
+    chk(G, `reseñas con slug malicioso (${slug.slice(0, 16)}) → 400/404`, r.status === 400 || r.status === 404, String(r.status));
+  }
+
+  // Opinar: sólo con el enlace firmado del mail.
+  const op = (numero, t) => `${API}/v1/opinar/${numero}${t === undefined ? "" : `?t=${encodeURIComponent(t)}`}`;
+  const cuerpoOk = { resenas: [{ productoId: null, estrellas: 5, texto: "Muy buena atención y llegó rápido." }] };
+  chk(G, "opinar sin firma → 400", (await pedir(op("ISU-1001"))).status === 400);
+  chk(G, "opinar con firma inventada → 404", (await pedir(op("ISU-1001", "A".repeat(24)))).status === 404);
+  chk(G, "opinar con firma de formato raro → 400", (await pedir(op("ISU-1001", "' OR 1=1--"))).status === 400);
+  for (const numero of ["ISU-1001'--", "..%2F..%2Fetc", "1001", "ISU-1", "%3Cscript%3E"]) {
+    const r = await pedir(op(numero, "A".repeat(24)));
+    chk(G, `opinar con número raro (${numero.slice(0, 14)}) → 400/404`, r.status === 400 || r.status === 404, String(r.status));
+  }
+  chk(G, "POST opinar con firma inventada → 404 (no guarda)", (await json(op("ISU-1001", "B".repeat(24)), cuerpoOk)).status === 404);
+  chk(G, "POST opinar con campos de más (estado publicada) → 400", (await json(op("ISU-1001", "B".repeat(24)), { resenas: [{ productoId: null, estrellas: 5, texto: null, estado: "publicada" }] })).status === 400);
+  chk(G, "POST opinar con 6 estrellas → 400", (await json(op("ISU-1001", "B".repeat(24)), { resenas: [{ productoId: null, estrellas: 6, texto: null }] })).status === 400);
+  chk(G, "POST opinar dos veces la misma prenda en un envío → 400", (await json(op("ISU-1001", "B".repeat(24)), { resenas: [{ productoId: 1, estrellas: 5, texto: null }, { productoId: 1, estrellas: 1, texto: null }] })).status === 400);
+  chk(G, "POST opinar con texto de 5000 caracteres → 400", (await json(op("ISU-1001", "B".repeat(24)), { resenas: [{ productoId: null, estrellas: 5, texto: "a".repeat(5000) }] })).status === 400);
+  if (process.env.INTERNO_TOKEN) {
+    // La firma del seguimiento (otro propósito) no sirve para opinar.
+    chk(G, "la firma del enlace de seguimiento no sirve para opinar → 404", (await pedir(op("ISU-1001", await firmar("seguimiento", "ISU-1001")))).status === 404);
+    // Con una firma buena: una prenda que no es del pedido no se guarda.
+    const t = await firmar("opinar", "ISU-1001");
+    const g = await pedir(op("ISU-1001", t));
+    if (g.status === 200) {
+      chk(G, "opinar: no expone mail, apellido, dirección ni montos", !/email|@|apellido|direcci|total|precio|telefono/i.test(await g.text()));
+      chk(G, "opinar sobre una prenda que no es del pedido → 400", (await json(op("ISU-1001", t), { resenas: [{ productoId: 2147483647, estrellas: 1, texto: null }] })).status === 400);
+    }
+    // La firma de un pedido no sirve para otro.
+    chk(G, "la firma de un pedido no sirve para otro → 404", (await pedir(op("ISU-1002", t))).status === 404);
+  }
+  let frenado = false;
+  for (let i = 0; i < 30 && !frenado; i++) if ((await json(op(`ISU-${2000 + i}`, "C".repeat(24)), cuerpoOk)).status === 429) frenado = true;
+  chk(G, "probar firmas a ciegas para opinar termina en 429", frenado);
+  await respirar();
+  // Por la tienda (BFF): sin la cabecera propia no pasa.
+  chk(G, "tienda: POST /api/t/opinar sin x-isu → 403", (await json(`${WEB}/api/t/opinar/ISU-1001?t=${"A".repeat(24)}`, cuerpoOk)).status === 403);
+  {
+    const r = await pedir(`${WEB}/opinar/ISU-1001?t=%22%3E%3Cscript%3Ealert(1)%3C/script%3E`);
+    chk(G, "página para opinar con firma de script: no la refleja", !(await r.text()).includes("<script>alert(1)"), String(r.status));
+  }
+
+  // Portada: los banners sólo llevan a esta tienda.
+  const portada = await (await pedir(`${API}/v1/portada`)).json().catch(() => ({ banners: [] }));
+  chk(G, "los banners sólo enlazan a rutas propias", (portada.banners ?? []).every((b) => b.enlace === null || /^\/(?![/\\])/.test(b.enlace)));
+  chk(G, "las fotos de banners son claves propias (sin URLs ajenas)", (portada.banners ?? []).every((b) => /^b\/\d+\/[a-z0-9]+$/.test(b.foto.clave) && (!b.fotoMovil || /^b\/\d+\/[a-z0-9]+$/.test(b.fotoMovil.clave))));
+
+  // Packs: el % lo pone la API; desde el navegador no se manda.
+  const packs = await (await pedir(`${API}/v1/productos?coleccion=packs&limite=5`)).json().catch(() => null);
+  const conf = await (await pedir(`${API}/v1/config`)).json().catch(() => ({}));
+  const tope = Math.max(0, ...(conf.packs ?? []));
+  const prenda = Array.isArray(packs?.productos) ? packs.productos[0] : Array.isArray(packs) ? packs[0] : null;
+  if (prenda?.slug) {
+    const ficha = await (await pedir(`${API}/v1/productos/${prenda.slug}`)).json().catch(() => ({}));
+    const sku = ficha.variantes?.find((v) => v.stock > 0)?.sku;
+    if (sku) {
+      chk(G, "packs: el % no se manda desde el navegador → 400", (await json(`${API}/v1/carrito`, { items: [{ sku, cantidad: 2, pack: { unidades: 5, porcentaje: 90 } }] })).status === 400);
+      chk(G, "packs: un descuento de pack en el cuerpo → 400", (await json(`${API}/v1/carrito`, { items: [{ sku, cantidad: 2 }], porcentajePack: 90 })).status === 400);
+      const c = await (await json(`${API}/v1/carrito`, { items: [{ sku, cantidad: 10 }] })).json().catch(() => ({}));
+      const l = c.lineas?.[0];
+      chk(G, `packs: con 10 unidades el descuento no pasa el tope (${tope}%)`, !!l && (!l.pack || l.pack.porcentaje <= tope) && c.total >= 0, JSON.stringify(l?.pack ?? null));
+    }
+  }
+
+  // Backoffice de reseñas y portada: sin sesión, nada.
+  for (const [metodo, ruta, body] of [
+    ["GET", "/v1/admin/resenas"], ["PATCH", "/v1/admin/resenas/1", { estado: "publicada" }], ["POST", "/v1/admin/resenas/masivo", { ids: [1], estado: "publicada" }],
+    ["GET", "/v1/admin/banners"], ["POST", "/v1/admin/banners", { alt: "Hackeo", enlace: "/" }], ["PATCH", "/v1/admin/banners/1", { enlace: "/" }],
+    ["DELETE", "/v1/admin/banners/1"], ["POST", "/v1/admin/banners/1/foto?tipo=escritorio"], ["DELETE", "/v1/admin/banners/1/foto-movil"],
+  ]) {
+    const r = await pedir(API + ruta, { method: metodo, headers: { ...(body ? { "content-type": "application/json" } : {}), "x-isu-admin": "a".repeat(43) }, body: body ? JSON.stringify(body) : undefined });
+    chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
+  }
+  for (const ruta of ["/api/a/resenas", "/api/a/banners"]) chk(G, `backoffice: ${ruta} sin sesión → 401`, (await pedir(ADMIN + ruta)).status === 401);
+}
+
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────
 let bloqueado = false;
 for (let i = 0; i < 400 && !bloqueado; i++) {

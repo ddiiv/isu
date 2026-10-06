@@ -19,6 +19,13 @@ export const FotoPublica = z.object({
 });
 export type FotoPublica = z.infer<typeof FotoPublica>;
 
+/** Resumen de las reseñas publicadas (promedio null = todavía sin reseñas). */
+export const ResumenResenas = z.object({
+  promedio: z.number().min(1).max(5).nullable(),
+  cantidad: z.number().int().min(0),
+});
+export type ResumenResenas = z.infer<typeof ResumenResenas>;
+
 export const ColorTarjeta = z.object({
   clave: slug,
   nombre: z.string(),
@@ -42,6 +49,9 @@ export const ProductoTarjeta = z.object({
   agotado: z.boolean(),
   nuevo: z.boolean(),
   creadoEn: z.string(),
+  /** Se vende en pack de 2 a 5 (etapa 8). */
+  pack: z.boolean().default(false),
+  resenas: ResumenResenas.default({ promedio: null, cantidad: 0 }),
 });
 export type ProductoTarjeta = z.infer<typeof ProductoTarjeta>;
 
@@ -81,6 +91,10 @@ export const ProductoDetalle = z.object({
   agotado: z.boolean(),
   guiaTalles: GuiaPublica.nullable(),
   actualizadoEn: z.string(),
+  /** Etapa 8: se vende en pack, de qué está hecha y qué dicen quienes la compraron. */
+  pack: z.boolean().default(false),
+  composicion: z.string().nullable().default(null),
+  resenas: ResumenResenas.default({ promedio: null, cantidad: 0 }),
 });
 export type ProductoDetalle = z.infer<typeof ProductoDetalle>;
 

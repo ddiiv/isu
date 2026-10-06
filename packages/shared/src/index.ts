@@ -14,3 +14,5 @@ export * from "./chat.js";
 export * from "./cupones.js";
 export * from "./seo.js";
 export * from "./seo-datos.js";
+export * from "./packs.js";
+export * from "./resenas.js";

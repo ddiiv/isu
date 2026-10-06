@@ -10,6 +10,7 @@ export function LineasCarrito({ alNavegar }: { alNavegar?: () => void }) {
   const { lineas, cambiar, quitar, cotizacion } = useCarrito();
   const problema = (sku: string) => cotizacion?.problemas.find((p) => p.sku === sku);
   const disponible = (sku: string) => cotizacion?.lineas.find((l) => l.sku === sku)?.disponible;
+  const cotizada = (sku: string) => cotizacion?.lineas.find((l) => l.sku === sku);
   return (
     <ul className="divide-y divide-linea">
       {lineas.map((l) => {
@@ -26,6 +27,12 @@ export function LineasCarrito({ alNavegar }: { alNavegar?: () => void }) {
                 <p className="shrink-0 text-[15px] font-bold">{formatearPesos(l.precio * l.cantidad)}</p>
               </div>
               <p className="text-sm text-tinta-tenue">{[l.color, l.talle && `Talle ${l.talle}`].filter(Boolean).join(" · ")}</p>
+              {cotizada(l.sku)?.pack && (
+                <p className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-full bg-ahorro-claro px-2.5 py-0.5 text-xs font-bold text-ahorro">
+                  Pack x{Math.min(5, cotizada(l.sku)!.pack!.unidades)} · −{cotizada(l.sku)!.pack!.porcentaje}%
+                  {cotizada(l.sku)!.precioLista ? <s className="font-normal text-tinta-tenue">{formatearPesos(cotizada(l.sku)!.precioLista! * l.cantidad)}</s> : null}
+                </p>
+              )}
               {p && <p className="mt-1 text-sm font-bold text-oferta" role="alert">{p.mensaje}</p>}
               <div className="mt-auto flex items-center justify-between pt-2">
                 <div className="inline-flex items-center rounded-full border border-linea" role="group" aria-label={`Cantidad de ${l.nombre}`}>

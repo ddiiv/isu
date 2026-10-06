@@ -155,6 +155,13 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
 
         {p.estado === "a_pagar_en_local" && p.local && <p className="mt-6 rounded-2xl bg-marca-claro p-4">Retirás en <b>{p.local}</b>. Llevá tu DNI y el número de pedido.</p>}
         {p.envioDetalle && ["pagado", "enviado", "entregado"].includes(p.estado) && <SeguimientoEnvio envio={p.envioDetalle} />}
+        {/* Etapa 8: ya le llegó → que nos cuente cómo le quedó. */}
+        {p.opinar && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-marca-claro p-4">
+            <p><b>¿Qué te pareció?</b> Contanos cómo te quedó: ayuda a otras personas a elegir su talle.</p>
+            <Link href={`/opinar/${encodeURIComponent(p.numero)}?t=${encodeURIComponent(p.opinar)}`} className="boton-marca shrink-0">Opinar ★</Link>
+          </div>
+        )}
         {["pagado", "vencido", "cancelado", "sin_stock", "enviado", "entregado", "retirado"].includes(p.estado) && <Link href="/" className="boton-borde mt-6">Seguir comprando</Link>}
       </section>
 

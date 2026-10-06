@@ -20,6 +20,8 @@ const MENU: Array<{ href: string; texto: string; rol: Rol }> = [
   { href: "/pedidos", texto: "Pedidos", rol: "lectura" },
   { href: "/envios", texto: "Envíos", rol: "lectura" },
   { href: "/productos", texto: "Productos", rol: "lectura" },
+  { href: "/portada", texto: "Portada", rol: "lectura" },
+  { href: "/resenas", texto: "Reseñas", rol: "lectura" },
   { href: "/guias-talles", texto: "Guías de talles", rol: "lectura" },
   { href: "/categorias", texto: "Categorías", rol: "lectura" },
   { href: "/descuentos", texto: "Descuentos", rol: "lectura" },

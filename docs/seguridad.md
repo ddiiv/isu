@@ -104,3 +104,31 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - Rutas armadas para escaparse (`//evil.com`, `%2F%2F`, `\`, CRLF).
   - Backoffice sin sesión.
   - Mapa con rutas propias, feed sin datos internos y escapado, y robots.txt.
+
+## Packs, reseñas y portada (etapa 8)
+
+- **Packs:** el % lo calcula la API con lo que hay en el carrito (`pedidos/cotizar.ts`), al cotizar y otra vez al crear el pedido. El navegador manda sólo SKU y cantidad: cualquier campo de más (`pack`, `porcentaje`…) es 400. Con más de 5 unidades vale el % de 5, y no se suma a una rebaja: gana el mayor.
+- **Reseñas, quién opina:** sólo con el enlace del mail.
+  - El enlace va firmado (HMAC) con una clave derivada de `INTERNO_TOKEN` para este uso (`isu:opinar:`): la firma del seguimiento no sirve acá ni al revés, y la de un pedido no sirve para otro. Se compara en tiempo constante.
+  - Mismo 404 si el pedido no existe o la firma no corresponde: no se puede averiguar qué números existen.
+  - Un pedido sin entregar o retirar responde 409, y sólo a quien tiene una firma buena.
+  - Una opinión por prenda del pedido y una general: lo impone un índice único de la base. Una prenda que no es del pedido da 400.
+  - Probar enlaces a ciegas: tope de 10 envíos por cliente cada 10 minutos. Se cuenta por la IP del cliente que pasa la tienda (`x-isu-ip`, con la credencial interna), no por la del servidor de la tienda, que está exento del límite general.
+- **Reseñas, qué se guarda y qué se muestra:**
+  - El esquema es estricto: el cliente no elige estado, nombre, talle ni color.
+  - El nombre sale del pedido y se muestra como nombre + inicial («Ana G.»). El talle y el color salen de lo que compró.
+  - El texto, hasta 1000 caracteres, se guarda tal cual y la tienda lo muestra como texto, nunca como HTML.
+  - Lo público (ficha, inicio, `/opinar`) no trae número de pedido, mail, apellido, montos ni datos de moderación.
+- **Moderación:** listar pide sesión; publicar, rechazar y responder piden rol operador y quedan en la auditoría.
+- **Banners:**
+  - El enlace es sólo una ruta de esta tienda. Hay tres llaves: el `CHECK` de la base, el esquema de la API y la tienda, que no arma el enlace si no es propio.
+  - Las fotos pasan por el mismo procesado que las de productos: sin metadatos, con tope de píxeles y medidas mínimas y máximas.
+  - Las claves siguen el patrón `b/<id>/<azar>` y alta, edición, foto y baja piden rol operador y quedan en la auditoría.
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7f, 48 chequeos):
+  - reseñas públicas sin datos internos y con parámetros raros;
+  - firmas inventadas, de otro pedido y del seguimiento;
+  - cuerpos con campos de más, 6 estrellas, repetidos y textos largos;
+  - freno a ciegas y la tienda sin su cabecera;
+  - banners con rutas propias;
+  - el % de pack desde el navegador y el tope con 10 unidades;
+  - backoffice sin sesión (11).

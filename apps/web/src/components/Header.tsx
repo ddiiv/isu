@@ -15,7 +15,7 @@ import { SITIO } from "@/lib/sitio";
 // Al menú del celular (que viaja al navegador) sólo lo que muestra: no los textos de cada categoría.
 const paraMenu = (c: CategoriaNodo): CategoriaNodo => ({ id: c.id, nombre: c.nombre, slug: c.slug, hijas: c.hijas.map(paraMenu) });
 
-export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
+export function Header({ categorias, hayPacks = false }: { categorias: CategoriaNodo[]; hayPacks?: boolean }) {
   return (
     <header className="sticky top-0 z-40 border-b border-linea/70 bg-white">
       <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:h-20 lg:px-10">
@@ -28,6 +28,7 @@ export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
         <nav aria-label="Categorías" className="hidden lg:block">
           <ul className="flex items-center gap-7 text-[15px]">
             <li><Link href="/nuevos" className="py-7 font-bold text-marca hover:underline">Nuevos</Link></li>
+            {hayPacks && <li><Link href="/packs" className="py-7 font-bold text-ahorro hover:underline">Packs</Link></li>}
             {categorias.map((c) => (
               <li key={c.id} className="group relative">
                 <Link href={`/${c.slug}`} className="py-7 font-bold hover:text-marca focus-visible:text-marca">{c.nombre}</Link>
@@ -60,6 +61,7 @@ export function Header({ categorias }: { categorias: CategoriaNodo[] }) {
           <li className="shrink-0"><Link href="/outfits" className="block whitespace-nowrap rounded-full bg-marca px-3.5 py-1.5 font-bold text-white">Armá tu outfit</Link></li>
           <li className="shrink-0"><a href={SITIO.mayorista} rel="nofollow" className="block whitespace-nowrap rounded-full border border-tinta px-3.5 py-1.5 font-bold">Pedido mayorista</a></li>
           <li className="shrink-0"><Link href="/nuevos" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-marca">Nuevos</Link></li>
+          {hayPacks && <li className="shrink-0"><Link href="/packs" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-ahorro">Packs</Link></li>}
           {categorias.map((c) => (
             <li key={c.id} className="shrink-0"><Link href={`/${c.slug}`} className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold">{c.nombre}</Link></li>
           ))}

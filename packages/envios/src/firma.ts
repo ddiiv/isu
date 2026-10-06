@@ -20,3 +20,22 @@ export function firmaSeguimientoValida(numero: string, firma: string, secreto: s
 
 export const enlaceSeguimiento = (sitio: string, numero: string, secreto: string) =>
   `${sitio.replace(/\/+$/, "")}/seguimiento/${encodeURIComponent(numero)}?t=${firmaSeguimiento(numero, secreto)}`;
+
+/*
+ * Enlace para opinar de una compra entregada (etapa 8): /opinar/ISU-1001?t=…
+ * Otra clave derivada (otro propósito): la firma del seguimiento no sirve acá
+ * ni al revés.
+ */
+const claveOpinar = (secreto: string) => createHash("sha256").update(`isu:opinar:${secreto}`).digest();
+
+export const firmaOpinar = (numero: string, secreto: string) =>
+  createHmac("sha256", claveOpinar(secreto)).update(numero).digest("base64url").slice(0, 24);
+
+export function firmaOpinarValida(numero: string, firma: string, secreto: string): boolean {
+  const a = Buffer.from(firmaOpinar(numero, secreto));
+  const b = Buffer.from(firma);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export const enlaceOpinar = (sitio: string, numero: string, secreto: string, estrellas?: number) =>
+  `${sitio.replace(/\/+$/, "")}/opinar/${encodeURIComponent(numero)}?t=${firmaOpinar(numero, secreto)}${estrellas ? `&e=${estrellas}` : ""}`;
