@@ -2,9 +2,9 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { useCarrito } from "./Carrito";
-import { BarraEnvioGratis, CampoCupon, LineasCarrito, Totales } from "./LineasCarrito";
+import { BarraEnvioGratis, CampoCupon, LineasCarrito, OpcionesPago, Totales } from "./LineasCarrito";
 
-export function PaginaCarrito({ descuento }: { descuento: number }) {
+export function PaginaCarrito({ descuento, cuotas, medios }: { descuento: number; cuotas: number; medios: string[] }) {
   const { lineas, cotizacion, cotizar, unidades } = useCarrito();
   // Dependencias a propósito: se cotiza al entrar y cuando cambian las cantidades
   useEffect(() => { void cotizar(); }, [unidades]);
@@ -23,12 +23,9 @@ export function PaginaCarrito({ descuento }: { descuento: number }) {
           <aside className="space-y-4 self-start rounded-[var(--radius-foto)] border border-linea p-5 lg:sticky lg:top-28">
             <BarraEnvioGratis c={cotizacion} />
             <CampoCupon />
-            <Totales c={cotizacion} descuento={descuento} />
+            <Totales c={cotizacion} />
             {cotizacion?.problemas.filter((p) => p.tipo === "minimo").map((p) => <p key={p.mensaje} className="text-sm font-bold text-oferta">{p.mensaje}</p>)}
-            <Link href="/checkout" aria-disabled={bloqueado} onClick={(e) => bloqueado && e.preventDefault()}
-              className={`boton w-full py-4 text-base ${bloqueado ? "cursor-not-allowed bg-linea text-tinta-tenue" : "bg-tinta text-white hover:bg-marca-fuerte"}`}>
-              Finalizar compra
-            </Link>
+            <OpcionesPago c={cotizacion} descuento={descuento} cuotas={cuotas} medios={medios} bloqueado={bloqueado} />
           </aside>
         </div>
       )}

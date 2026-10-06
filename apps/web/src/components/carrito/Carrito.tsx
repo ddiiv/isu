@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { MAX_LINEAS_CARRITO, MAX_UNIDADES_POR_ARTICULO, type Cotizacion } from "@isu/shared";
+import { clavePack, MAX_LINEAS_CARRITO, MAX_PACKS_POR_LINEA, MAX_UNIDADES_POR_ARTICULO, type Cotizacion, type ItemCarrito } from "@isu/shared";
 import { api } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 
@@ -13,8 +13,27 @@ import { evento, pesos } from "@/lib/ga";
  * El cupón también: se guarda el código que escribió el cliente y la API
  * dice si sirve. Si no se aplicó (no existe, venció, falta monto…), se
  * muestra por qué y se descarta: no se sigue mandando en cada cotización.
+ *
+ * Packs (etapa 10): un pack es una línea aparte, aunque la misma prenda
+ * también esté suelta. Su `sku` es la clave del pack ("pack:SKU*2,SKU*1"),
+ * `pack` dice qué lleva UN pack, `precio` es el de un pack y `cantidad`,
+ * cuántos packs iguales.
  */
-export interface LineaCarrito { sku: string; cantidad: number; nombre: string; slug: string; color: string | null; talle: string | null; precio: number; foto: string | null }
+export interface PrendaDePack { sku: string; cantidad: number; color: string | null; talle: string | null; foto: string | null }
+export interface LineaCarrito {
+  sku: string; cantidad: number; nombre: string; slug: string; color: string | null; talle: string | null; precio: number; foto: string | null;
+  pack?: { unidades: number; prendas: PrendaDePack[] };
+}
+/** Lo que viaja a la API: SKU y cantidad, o lo que lleva el pack y cuántos. */
+export const itemDe = (l: LineaCarrito): ItemCarrito =>
+  (l.pack ? { pack: l.pack.prendas.map(({ sku, cantidad }) => ({ sku, cantidad })), cantidad: l.cantidad } : { sku: l.sku, cantidad: l.cantidad });
+/** Cuántas prendas son (un pack de 5 son 5). */
+export const prendasDe = (l: LineaCarrito) => (l.pack ? l.pack.unidades * l.cantidad : l.cantidad);
+const valida = (l: unknown): l is LineaCarrito => {
+  const x = l as LineaCarrito;
+  return typeof x?.sku === "string" && Number.isInteger(x?.cantidad) && x.cantidad >= 1
+    && (x.pack === undefined || (Number.isInteger(x.pack?.unidades) && Array.isArray(x.pack?.prendas) && x.pack.prendas.every((p) => typeof p?.sku === "string" && Number.isInteger(p?.cantidad))));
+};
 
 interface Ctx {
   lineas: LineaCarrito[];
@@ -22,9 +41,12 @@ interface Ctx {
   abierto: boolean;
   abrir(): void;
   cerrar(): void;
-  agregar(l: Omit<LineaCarrito, "cantidad">, cantidad?: number): void;
-  /** Un pack: varias prendas de una (las iguales se suman) y el cajón se abre una sola vez. */
+  /** `abrir: false`: no abre el cajón ("Comprar ahora" va directo al checkout). */
+  agregar(l: Omit<LineaCarrito, "cantidad">, cantidad?: number, opciones?: { abrir?: boolean }): void;
+  /** Varias prendas sueltas de una (un outfit): las iguales se suman y el cajón se abre una sola vez. */
   agregarVarias(ls: Array<Omit<LineaCarrito, "cantidad">>): void;
+  /** Un pack: una línea aparte; el mismo pack otra vez suma uno más. */
+  agregarPack(p: { slug: string; nombre: string; foto: string | null; precio: number; prendas: PrendaDePack[] }, opciones?: { abrir?: boolean }): void;
   cambiar(sku: string, cantidad: number): void;
   quitar(sku: string): void;
   vaciar(): void;
@@ -63,13 +85,13 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const g = JSON.parse(localStorage.getItem(CLAVE) ?? "[]");
-      if (Array.isArray(g)) setLineas(g.filter((l) => typeof l?.sku === "string" && Number.isInteger(l?.cantidad)).slice(0, MAX_LINEAS_CARRITO));
+      if (Array.isArray(g)) setLineas(g.filter(valida).slice(0, MAX_LINEAS_CARRITO));
       const cu = localStorage.getItem(CLAVE_CUPON);
       if (cu && /^[A-Z0-9_-]{3,30}$/.test(cu)) setCupon(cu);
     } catch { /* carrito roto: se empieza de cero */ }
     setCargado(true);
     // Otra pestaña cambió el carrito.
-    const alCambiar = (e: StorageEvent) => { if (e.key === CLAVE) { try { setLineas(JSON.parse(e.newValue ?? "[]")); } catch { /* */ } } };
+    const alCambiar = (e: StorageEvent) => { if (e.key === CLAVE) { try { const g = JSON.parse(e.newValue ?? "[]"); if (Array.isArray(g)) setLineas(g.filter(valida)); } catch { /* */ } } };
     window.addEventListener("storage", alCambiar);
     return () => window.removeEventListener("storage", alCambiar);
   }, []);
@@ -87,7 +109,7 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     if (!lineas.length) { setCotizacion(null); return null; }
     setCotizando(true);
     try {
-      const c = await api<Cotizacion>("carrito", { cuerpo: { items: lineas.map(({ sku, cantidad }) => ({ sku, cantidad })), ...opciones, ...(cupon ? { cupon } : {}) } });
+      const c = await api<Cotizacion>("carrito", { cuerpo: { items: lineas.map(itemDe), ...opciones, ...(cupon ? { cupon } : {}) } });
       setCotizacion(c);
       if (cupon) {
         // No se aplicó: se dice por qué y se deja de mandar.
@@ -95,7 +117,10 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
         else setAvisoCupon(null);
       }
       // Los precios guardados se actualizan con los de verdad.
-      setLineas((ls) => ls.map((l) => { const x = c.lineas.find((y) => y.sku === l.sku); return x && x.precio !== l.precio ? { ...l, precio: x.precio } : l; }));
+      setLineas((ls) => ls.map((l) => {
+        const precio = l.pack ? c.packs?.find((p) => p.clave === l.sku)?.precio : c.lineas.find((y) => y.clave === l.sku && !y.pack)?.precio;
+        return precio !== undefined && precio !== l.precio ? { ...l, precio } : l;
+      }));
       return c;
     } catch {
       return null;
@@ -111,11 +136,11 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
 
   const valor = useMemo<Ctx>(() => ({
     lineas,
-    unidades: lineas.reduce((a, l) => a + l.cantidad, 0),
+    unidades: lineas.reduce((a, l) => a + prendasDe(l), 0),
     abierto,
     abrir: () => { setAbierto(true); evento("view_cart", { currency: "ARS", value: pesos(lineas.reduce((a, l) => a + l.precio * l.cantidad, 0)) }); },
     cerrar: () => setAbierto(false),
-    agregar: (l, cantidad = 1) => {
+    agregar: (l, cantidad = 1, opciones = {}) => {
       setLineas((ls) => {
         const ya = ls.find((x) => x.sku === l.sku);
         if (ya) return ls.map((x) => (x.sku === l.sku ? { ...x, ...l, cantidad: Math.min(MAX_UNIDADES_POR_ARTICULO, x.cantidad + cantidad) } : x));
@@ -123,7 +148,7 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
         return [...ls, { ...l, cantidad: Math.min(MAX_UNIDADES_POR_ARTICULO, cantidad) }];
       });
       evento("add_to_cart", { currency: "ARS", value: pesos(l.precio * cantidad), items: [{ item_id: l.slug, item_name: l.nombre, item_variant: l.sku, price: pesos(l.precio), quantity: cantidad }] });
-      setAbierto(true);
+      if (opciones.abrir !== false) setAbierto(true);
     },
     agregarVarias: (nuevas) => {
       setLineas((ls) => {
@@ -139,7 +164,18 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
       evento("add_to_cart", { currency: "ARS", value: pesos(valor), items: nuevas.map((l) => ({ item_id: l.slug, item_name: l.nombre, item_variant: l.sku, price: pesos(l.precio), quantity: 1 })) });
       setAbierto(true);
     },
-    cambiar: (sku, cantidad) => setLineas((ls) => ls.map((l) => (l.sku === sku ? { ...l, cantidad: Math.max(1, Math.min(MAX_UNIDADES_POR_ARTICULO, cantidad)) } : l))),
+    agregarPack: (p, opciones = {}) => {
+      const sku = clavePack(p.prendas);
+      const unidades = p.prendas.reduce((a, x) => a + x.cantidad, 0);
+      setLineas((ls) => {
+        if (ls.some((x) => x.sku === sku)) return ls.map((x) => (x.sku === sku ? { ...x, precio: p.precio, cantidad: Math.min(MAX_PACKS_POR_LINEA, x.cantidad + 1) } : x));
+        if (ls.length >= MAX_LINEAS_CARRITO) return ls;
+        return [...ls, { sku, cantidad: 1, nombre: p.nombre, slug: p.slug, color: null, talle: null, precio: p.precio, foto: p.foto, pack: { unidades, prendas: p.prendas } }];
+      });
+      evento("add_to_cart", { currency: "ARS", value: pesos(p.precio), items: [{ item_id: p.slug, item_name: `Pack x${unidades} ${p.nombre}`, item_variant: sku, price: pesos(p.precio), quantity: 1 }] });
+      if (opciones.abrir !== false) setAbierto(true);
+    },
+    cambiar: (sku, cantidad) => setLineas((ls) => ls.map((l) => (l.sku === sku ? { ...l, cantidad: Math.max(1, Math.min(l.pack ? MAX_PACKS_POR_LINEA : MAX_UNIDADES_POR_ARTICULO, cantidad)) } : l))),
     quitar: (sku) => {
       setLineas((ls) => {
         const l = ls.find((x) => x.sku === sku);

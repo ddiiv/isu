@@ -1,7 +1,10 @@
 import type pg from "pg";
 import { conRebaja, type Descuentos } from "../../lib/descuentos.js";
 import { buscarCupon, categoriasDe, CODIGO, elegir, motivoNoVigente, normalizarCodigo, promocionesVigentes, type CuponAplicado, type LineaParaCupon } from "../../lib/cupones.js";
-import { centavos, conDescuento, formatearPesos, leerPacks, PACKS_POR_DEFECTO, porcentajePack, type AjustePacks, type Cotizacion, type ItemCarrito, type LineaCotizada, type MedioPago } from "@isu/shared";
+import {
+  centavos, clavePack, conDescuento, esPack, formatearPesos, leerPacks, MAX_PACKS_POR_LINEA, PACKS_POR_DEFECTO, porcentajePack,
+  type AjustePacks, type Cotizacion, type ItemCarrito, type LineaCotizada, type MedioPago, type PackCotizado,
+} from "@isu/shared";
 
 /*
  * El precio lo pone la tienda, no el navegador.
@@ -9,15 +12,18 @@ import { centavos, conDescuento, formatearPesos, leerPacks, PACKS_POR_DEFECTO, p
  * Se recalcula todo con lo que dice la base en este momento: precio de cada
  * variante (copia de Stocker), stock, cupón, descuento por transferencia,
  * envío y monto mínimo. Lo que manda el carrito es sólo "qué SKU y cuántos"
- * (y el código de cupón que escribió el cliente).
+ * (o qué lleva cada pack y cuántos) y el código de cupón que escribió el
+ * cliente.
  *
  * Orden: precio de la prenda (con su rebaja o el % del pack) → cupón →
  * transferencia → envío.
  *
- * Packs (etapa 8): las prendas marcadas como pack llevan un % según cuántas
- * unidades de ESA prenda hay en el carrito (del mínimo al máximo de Ajustes →
- * Packs, cualquier talle y color). No se suma a la rebaja de la prenda: gana
- * el mayor de los dos.
+ * Packs (etapa 10): un pack es una línea aparte, como en las tiendas de
+ * referencia. Lleva prendas de UNA prenda marcada como pack (cada una con su
+ * talle y color) y el % según cuántas lleva (del mínimo al máximo de Ajustes
+ * → Packs). Las prendas sueltas van a su precio aunque sean la misma prenda:
+ * no suman para el pack. Dentro del pack, el % no se suma a la rebaja de la
+ * prenda: gana el mayor. El stock se controla con lo suelto más lo de los packs.
  */
 export interface Ajustes {
   montoMinimoCarrito: number;
@@ -30,7 +36,7 @@ export interface Ajustes {
   horasPagoLocal: number;
   datosTransferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string };
   locales: Array<{ nombre: string; retiro: boolean }>;
-  /** % por llevar 2, 3, 4 y 5 de una prenda pack */
+  /** cuántas prendas lleva un pack (mínimo y máximo) y el % por cada cantidad */
   packs: AjustePacks;
 }
 
@@ -63,7 +69,7 @@ export interface Fila {
 
 export interface Cotizado extends Cotizacion {
   filas: Map<string, Fila>;
-  /** lo que se cobra por unidad de cada SKU, con el cupón repartido */
+  /** lo que se cobra por unidad de cada línea (por `clave`), con el cupón repartido */
   cobrado: Map<string, number>;
   aplicado: CuponAplicado | null;
   /** productos − cupón − transferencia (sin envío) */
@@ -79,9 +85,21 @@ export async function cotizar(
   opciones: { entrega?: "envio" | "retiro"; medioPago?: MedioPago; ajustes?: Ajustes; descuentos?: Descuentos; cupon?: string | null; email?: string | null } = {},
 ): Promise<Cotizado> {
   const a = opciones.ajustes ?? await leerAjustes(pool);
-  // El mismo SKU dos veces se suma.
-  const pedidos = new Map<string, number>();
-  for (const i of items) pedidos.set(i.sku, (pedidos.get(i.sku) ?? 0) + i.cantidad);
+  // Sueltas: el mismo SKU dos veces se suma. Packs: la misma composición dos veces, también.
+  const sueltas = new Map<string, number>();
+  const grupos = new Map<string, { prendas: Map<string, number>; cantidad: number }>();
+  for (const i of items) {
+    if (!esPack(i)) { sueltas.set(i.sku, (sueltas.get(i.sku) ?? 0) + i.cantidad); continue; }
+    const clave = clavePack(i.pack);
+    const g = grupos.get(clave);
+    if (g) g.cantidad = Math.min(MAX_PACKS_POR_LINEA, g.cantidad + i.cantidad);
+    else {
+      const prendas = new Map<string, number>();
+      for (const x of i.pack) prendas.set(x.sku, (prendas.get(x.sku) ?? 0) + x.cantidad);
+      grupos.set(clave, { prendas, cantidad: i.cantidad });
+    }
+  }
+  const todos = new Set([...sueltas.keys(), ...[...grupos.values()].flatMap((g) => [...g.prendas.keys()])]);
 
   const { rows } = await pool.query<Fila>(
     `SELECT v.sku, v.precio, v.stock, v.talle, c.nombre AS color, p.nombre, p.slug, p.id AS producto_id, p.peso_gramos, p.pack,
@@ -91,42 +109,90 @@ export async function cotizar(
        JOIN tienda.productos p ON p.id = v.producto_id AND p.visible AND p.en_stocker
        LEFT JOIN tienda.producto_colores c ON c.id = v.color_id
       WHERE v.sku = ANY($1::text[]) AND v.activo`,
-    [[...pedidos.keys()]],
+    [[...todos]],
   );
   const filas = new Map(rows.map((r) => [r.sku, r]));
   // Descuentos masivos del backoffice: el precio que se cobra es el rebajado.
   const rebajas = opciones.descuentos ? await opciones.descuentos.para([...new Set(rows.map((r) => r.producto_id))]) : new Map<number, number>();
-  // Packs: cuántas unidades de cada prenda pack hay en el carrito (cualquier talle y color).
-  const unidadesPack = new Map<number, number>();
-  for (const [sku, cantidad] of pedidos) {
-    const f = filas.get(sku);
-    if (f?.pack) unidadesPack.set(f.producto_id, (unidadesPack.get(f.producto_id) ?? 0) + cantidad);
+  const colorDe = (f: Fila) => (f.color && f.color !== "Único" ? f.color : null);
+  const nombreDe = (f: Fila) => `${f.nombre}${f.talle ? ` (${f.talle})` : ""}`;
+
+  // Un pack es de UNA prenda marcada como pack, con una cantidad de prendas del rango de Ajustes.
+  const problemas: Cotizacion["problemas"] = [];
+  for (const [clave, g] of [...grupos]) {
+    const fs = [...g.prendas.keys()].map((sku) => filas.get(sku));
+    const unidades = [...g.prendas.values()].reduce((t, n) => t + n, 0);
+    const f0 = fs[0];
+    const motivo = fs.some((f) => !f) || !f0 ? "Algo de este pack ya no está a la venta."
+      : !f0.pack || fs.some((f) => f!.producto_id !== f0.producto_id) ? `${f0.nombre}: ya no se vende en pack.`
+        : unidades < a.packs.minimo || unidades > a.packs.maximo ? `Los packs son de ${a.packs.minimo} a ${a.packs.maximo} prendas.`
+          : null;
+    if (motivo) { problemas.push({ sku: clave, tipo: "pack", mensaje: motivo }); grupos.delete(clave); }
   }
 
+  // Cuántas pide de cada SKU entre sueltas y packs: el stock se controla con el total.
+  const pedidas = new Map<string, number>(sueltas);
+  for (const g of grupos.values()) for (const [sku, n] of g.prendas) pedidas.set(sku, (pedidas.get(sku) ?? 0) + n * g.cantidad);
+
   const lineas: LineaCotizada[] = [];
+  const packs: PackCotizado[] = [];
   const paraCupon: LineaParaCupon[] = [];
-  const problemas: Cotizacion["problemas"] = [];
-  let subtotal = 0;
-  for (const [sku, cantidad] of pedidos) {
+  const conProblema = new Set<string>();
+  for (const [sku, total] of pedidas) {
     const f = filas.get(sku);
-    if (!f) { problemas.push({ sku, tipo: "no_existe", mensaje: "Este artículo ya no está a la venta." }); continue; }
-    const disponible = Math.min(f.stock, 20);
+    if (!f) { problemas.push({ sku, tipo: "no_existe", mensaje: "Este artículo ya no está a la venta." }); conProblema.add(sku); }
+    else if (f.stock === 0) { problemas.push({ sku, tipo: "sin_stock", mensaje: `${nombreDe(f)}: se agotó.` }); conProblema.add(sku); }
+    else if (total > f.stock) { problemas.push({ sku, tipo: "stock_insuficiente", mensaje: `${nombreDe(f)}: quedan ${f.stock}.` }); conProblema.add(sku); }
+  }
+  let subtotal = 0;
+
+  for (const [sku, cantidad] of sueltas) {
+    const f = filas.get(sku);
+    if (!f) continue;
     const rebaja = rebajas.get(f.producto_id) ?? 0;
-    const unidades = f.pack ? unidadesPack.get(f.producto_id) ?? 0 : 0;
-    const pctPack = porcentajePack(a.packs, unidades);
-    // No se suman: gana el mayor.
-    const pct = Math.max(rebaja, pctPack);
-    const precio = conRebaja(f.precio, pct);
+    const precio = conRebaja(f.precio, rebaja);
     lineas.push({
-      sku, productoSlug: f.slug, nombre: f.nombre, color: f.color && f.color !== "Único" ? f.color : null, talle: f.talle,
-      foto: f.foto, precio, precioLista: pct ? f.precio : null, cantidad, disponible, subtotal: precio * cantidad,
-      pack: pctPack > 0 && pctPack >= rebaja ? { unidades, porcentaje: pctPack } : null,
+      sku, clave: sku, productoSlug: f.slug, nombre: f.nombre, color: colorDe(f), talle: f.talle,
+      foto: f.foto, precio, precioLista: rebaja ? f.precio : null, cantidad, disponible: Math.min(f.stock, 20), subtotal: precio * cantidad, pack: null,
     });
-    if (f.stock === 0) problemas.push({ sku, tipo: "sin_stock", mensaje: `${f.nombre}${f.talle ? ` (${f.talle})` : ""}: se agotó.` });
-    else if (cantidad > f.stock) problemas.push({ sku, tipo: "stock_insuficiente", mensaje: `${f.nombre}${f.talle ? ` (${f.talle})` : ""}: quedan ${f.stock}.` });
-    else {
+    if (!conProblema.has(sku)) {
       subtotal += precio * cantidad;
-      paraCupon.push({ sku, productoId: f.producto_id, precio, rebajada: pct > 0, cantidad });
+      paraCupon.push({ sku, productoId: f.producto_id, precio, rebajada: rebaja > 0, cantidad });
+    }
+  }
+
+  for (const [clave, g] of grupos) {
+    const prendas = [...g.prendas].map(([sku, n]) => ({ sku, n, f: filas.get(sku) }));
+    const unidades = prendas.reduce((t, x) => t + x.n, 0);
+    const f0 = prendas[0]!.f!;
+    const rebaja = rebajas.get(f0.producto_id) ?? 0;
+    const pctPack = porcentajePack(a.packs, unidades);
+    const pct = Math.max(rebaja, pctPack);
+    let precioPack = 0;
+    let listaPack = 0;
+    const detalle: PackCotizado["prendas"] = [];
+    for (const { sku, n, f } of prendas) {
+      const precio = conRebaja(f!.precio, pct);
+      precioPack += precio * n;
+      listaPack += f!.precio * n;
+      detalle.push({ sku, color: colorDe(f!), talle: f!.talle, foto: f!.foto, cantidad: n, precio });
+      lineas.push({
+        sku, clave: `${clave}|${sku}`, productoSlug: f!.slug, nombre: f!.nombre, color: colorDe(f!), talle: f!.talle,
+        foto: f!.foto, precio, precioLista: pct ? f!.precio : null, cantidad: n * g.cantidad, disponible: Math.min(f!.stock, 20),
+        subtotal: precio * n * g.cantidad, pack: { clave, unidades, porcentaje: pct },
+      });
+    }
+    const disponible = Math.max(0, Math.min(MAX_PACKS_POR_LINEA, ...prendas.map((x) => Math.floor(x.f!.stock / x.n))));
+    packs.push({
+      clave, productoSlug: f0.slug, nombre: f0.nombre, foto: f0.foto, unidades, porcentaje: pct, cantidad: g.cantidad,
+      precio: precioPack, precioLista: listaPack, subtotal: precioPack * g.cantidad, disponible, prendas: detalle,
+    });
+    if (!prendas.some((x) => conProblema.has(x.sku))) {
+      subtotal += precioPack * g.cantidad;
+      for (const { sku, n, f } of prendas) {
+        // Para el cupón, cada prenda del pack es una línea con su clave: una prenda en pack cuenta como rebajada.
+        paraCupon.push({ sku: `${clave}|${sku}`, productoId: f!.producto_id, precio: conRebaja(f!.precio, pct), rebajada: pct > 0, cantidad: n * g.cantidad });
+      }
     }
   }
 
@@ -165,7 +231,7 @@ export async function cotizar(
     if (cerca) promoCerca = { nombre: cerca.nombre, falta: cerca.minimo - subtotal };
   }
   const descuentoCupon = aplicado?.descuento ?? 0;
-  const cobrado = new Map(lineas.map((l) => [l.sku, l.precio - (aplicado?.porUnidad.get(l.sku) ?? 0)]));
+  const cobrado = new Map(lineas.map((l) => [l.clave, l.precio - (aplicado?.porUnidad.get(l.clave) ?? 0)]));
 
   const trasCupon = subtotal - descuentoCupon;
   const descuento = opciones.medioPago === "transferencia" && trasCupon > 0
@@ -179,7 +245,7 @@ export async function cotizar(
     problemas.push({ sku: null, tipo: "minimo", mensaje: `La compra mínima es de ${formatearPesos(a.montoMinimoCarrito)}.` });
   }
   return {
-    lineas, subtotal,
+    lineas, packs, subtotal,
     cupon: aplicado ? { codigo: aplicado.cupon.codigo, nombre: aplicado.cupon.nombre, envioGratis: aplicado.envioGratis } : null,
     descuentoCupon, avisoCupon, promoCerca,
     descuento, envio, total: neto + envio,

@@ -35,11 +35,11 @@ El carrusel pasa solo cada 6 segundos. Se frena con el mouse encima, y no se mue
 - **Qué prendas.** Productos → casilla **Pack**, en la lista o en la ficha. Se pueden marcar muchas juntas con «Vender en pack».
 - **Cuántas y cuánto se descuenta.** Ajustes → **Packs**: el mínimo y el máximo de unidades (2 a 10 de fábrica, hasta 20) y el % por cada cantidad. Por defecto: 10, 15, 18, 20, 21, 22, 23, 24 y 25. Llevando más, el % no puede ser menor. *(Etapa 9: antes era de 2 a 5; el stock, las secciones por categoría y Liquidación están en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md).)*
 - **La página del pack.** `/producto/pack-x2-<prenda>`. Al elegir otra cantidad, la dirección cambia a `pack-x3-…`, `pack-x4-…` y así: se puede compartir. Cada prenda se arma con su talle y su color; «Igual a la anterior» copia la elección y «Copiar la prenda 1 a todas» llena las vacías. Nunca ofrece más de lo que hay en stock.
-- **Cómo se cobra.** El descuento lo calcula el carrito (la API), contando las unidades de esa prenda **en cualquier talle y color**. Vale aunque las sume sueltas desde la ficha. Con más que el máximo, vale el % del máximo.
+- **Cómo se cobra.** *(Etapa 10.)* El pack va **aparte** en el carrito, como en las tiendas de referencia: «Pack x5 Remera…» con lo que lleva (1× L / Gris, 3× M / Topo…) y cuántos packs. El % sale de cuántas prendas lleva el pack. Las prendas sueltas, aunque sean la misma, van a su precio y no suman para el pack. El descuento lo calcula la API.
   - **No se suma a una rebaja** de la prenda (Descuentos): gana el mayor.
   - **Un cupón** se aplica después, igual que con una rebaja: un cupón que no vale «sobre rebajas» tampoco vale sobre una prenda en pack.
   - **La transferencia** suma su % al final, como siempre.
-- **En el carrito** cada línea dice «Pack x3 · −15%» con el precio de antes tachado. Stocker recibe el precio por unidad ya con el descuento.
+- **En el carrito** el pack es una línea con su foto, «📦 Pack · −15%», lo que lleva y el precio de antes tachado; se suman o se quitan packs enteros. Stocker recibe el precio por unidad ya con el descuento (si la misma variante va suelta y en un pack, el promedio al centavo; el total del pedido es exacto).
 
 ## 3. Descripción de la ficha
 

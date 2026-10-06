@@ -5,7 +5,7 @@ export interface FilaProducto {
   pack: boolean; resenas: number; estrellas: number | null;
 }
 export interface Categoria { id: number; nombre: string; slug: string; padreId: number | null; orden: number; visible: boolean; productos: number; seoTitulo: string | null; seoDescripcion: string | null; texto: string | null }
-export interface GuiaResumen { id: number; nombre: string; tipo: "nino" | "adulto"; medidas: string[]; talles: number; productos: number; actualizadoEn: string; actualizadoPor: string | null }
+export interface GuiaResumen { id: number; nombre: string; tipo: "nino" | "adulto" | "otro"; medidas: string[]; talles: number; productos: number; actualizadoEn: string; actualizadoPor: string | null }
 
 /** Nombre "Mujer › Remeras" de cada categoría. */
 export function nombresCategorias(cs: Categoria[]) {

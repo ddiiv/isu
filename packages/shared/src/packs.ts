@@ -69,3 +69,13 @@ export function leerRutaPack(s: string): { unidades: number; slug: string } | nu
   const unidades = Number(m[1]);
   return unidades >= 2 && unidades <= PACK_TOPE ? { unidades, slug: m[2]! } : null;
 }
+
+/**
+ * Clave de un pack del carrito: la misma composición es el mismo pack (se suman).
+ * [{ sku: "B", cantidad: 1 }, { sku: "A", cantidad: 3 }] → "pack:A*3,B*1".
+ */
+export function clavePack(prendas: ReadonlyArray<{ sku: string; cantidad: number }>): string {
+  const porSku = new Map<string, number>();
+  for (const p of prendas) porSku.set(p.sku, (porSku.get(p.sku) ?? 0) + p.cantidad);
+  return `pack:${[...porSku].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([sku, n]) => `${sku}*${n}`).join(",")}`;
+}

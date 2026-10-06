@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 /* Piezas chicas que usan todas las pantallas del backoffice. */
 export function Titulo({ children, acciones }: { children: React.ReactNode; acciones?: React.ReactNode }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-      <h1 className="text-3xl sm:text-4xl">{children}</h1>
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
+      <h1 className="text-[2rem] leading-none sm:text-[2.6rem]">{children}</h1>
       {acciones && <div className="flex flex-wrap gap-2">{acciones}</div>}
     </div>
   );
@@ -13,13 +13,13 @@ export function Titulo({ children, acciones }: { children: React.ReactNode; acci
 
 type Variante = "primario" | "borde" | "peligro" | "texto";
 const VARIANTES: Record<Variante, string> = {
-  primario: "bg-tinta text-white hover:bg-marca-fuerte",
-  borde: "border border-linea bg-white hover:border-tinta",
-  peligro: "border border-oferta/40 bg-white text-oferta hover:bg-red-50",
+  primario: "bg-tinta text-white shadow-sm hover:bg-marca-fuerte",
+  borde: "border border-linea bg-white shadow-sm hover:border-tinta",
+  peligro: "border border-oferta/40 bg-white text-oferta shadow-sm hover:bg-red-50",
   texto: "text-marca underline-offset-2 hover:underline",
 };
 export function Boton({ variante = "primario", className = "", ...r }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variante?: Variante }) {
-  return <button type="button" {...r} className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${VARIANTES[variante]} ${className}`} />;
+  return <button type="button" {...r} className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-bold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-marca disabled:cursor-not-allowed disabled:opacity-50 ${VARIANTES[variante]} ${className}`} />;
 }
 
 export function Campo({ etiqueta, ayuda, error, children, className = "" }: { etiqueta: string; ayuda?: React.ReactNode; error?: string | null; children: React.ReactNode; className?: string }) {
@@ -32,7 +32,7 @@ export function Campo({ etiqueta, ayuda, error, children, className = "" }: { et
     </label>
   );
 }
-export const claseEntrada = "w-full rounded-xl border border-linea bg-white px-3 py-2 text-[15px] focus:border-marca focus:outline-none";
+export const claseEntrada = "w-full rounded-xl border border-linea bg-white px-3 py-2.5 text-[15px] shadow-sm transition focus:border-marca focus:outline-none focus:ring-4 focus:ring-marca/10 disabled:bg-fondo-suave";
 
 export function Casilla({ etiqueta, marcada, onChange, disabled, ayuda }: { etiqueta: React.ReactNode; marcada: boolean; onChange: (v: boolean) => void; disabled?: boolean; ayuda?: string }) {
   return (
@@ -49,10 +49,10 @@ export function Insignia({ children, clase = "bg-fondo-suave text-tinta-suave" }
 
 export function Tarjeta({ titulo, children, className = "", acciones }: { titulo?: React.ReactNode; children: React.ReactNode; className?: string; acciones?: React.ReactNode }) {
   return (
-    <section className={`rounded-2xl border border-linea bg-white p-5 ${className}`}>
+    <section className={`rounded-2xl border border-linea/80 bg-white p-5 shadow-[0_1px_3px_rgba(16,24,40,0.05)] sm:p-6 ${className}`}>
       {(titulo || acciones) && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          {titulo && <h2 className="text-xl">{titulo}</h2>}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-linea/70 pb-3">
+          {titulo && <h2 className="text-xl font-bold font-sans">{titulo}</h2>}
           {acciones}
         </div>
       )}

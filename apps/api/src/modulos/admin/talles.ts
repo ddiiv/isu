@@ -4,6 +4,8 @@ import type pg from "pg";
 import { z } from "zod";
 import { GuiaTalles, compararTalles, normalizarTalle, ordenarGuia, tallesDeTipo, type TipoGuia } from "@isu/shared";
 import { ErrorHttp } from "../../lib/errores.js";
+import { ErrorXlsx, escribirXlsx, leerXlsx, MAX_XLSX } from "../../lib/xlsx.js";
+import { guiasAHojas, hojasAGuias, type GuiaExcel } from "./guias-excel.js";
 import { auditar, exigir } from "./sesion.js";
 
 /*
@@ -27,7 +29,8 @@ export function coincide(tipo: TipoGuia, tallesGuia: string[], tallesProducto: A
   if (!reales.length) return false;
   const escala = new Set(tallesDeTipo(tipo));
   const guia = new Set(tallesGuia.map(normalizarTalle));
-  return reales.every((t) => escala.has(t) && guia.has(t));
+  // "otro" (talles propios): alcanza con que estén en la guía.
+  return reales.every((t) => (tipo === "otro" || escala.has(t)) && guia.has(t));
 }
 
 export async function rutasGuiasAdmin(app: FastifyInstance, { pool, ip, invalidar }: Deps) {
@@ -65,6 +68,65 @@ export async function rutasGuiasAdmin(app: FastifyInstance, { pool, ip, invalida
       guia: g,
       productos: rows.map((p) => ({ ...p, talles: [...p.talles].sort(compararTalles), coincide: coincide(g.tipo, tallesGuia, p.talles) })),
     };
+  });
+
+  /*
+   * Excel (etapa 10): exportar todas las guías (una hoja por guía) e
+   * importar un archivo igual. Importar crea las guías nuevas y actualiza las
+   * que ya existen con ese nombre (sus productos siguen asociados). Con
+   * `?vista=1` sólo dice qué haría, sin guardar nada.
+   */
+  api.get("/v1/admin/guias-talles/excel", async (req, reply) => {
+    const a = await exigir(pool, req);
+    const { rows } = await pool.query<GuiaExcel>("SELECT nombre, tipo, medidas, filas, nota FROM tienda.guias_talles ORDER BY tipo, lower(nombre)");
+    const archivo = escribirXlsx(rows.length ? guiasAHojas(rows) : [{ nombre: "Ejemplo", filas: [["Medida", "S", "M", "L"], ["Ancho hombro", 44.5, 46.5, 48], ["Largo prenda", 71, 74, "74,5"]] }]);
+    await auditar(pool, a, "exportar_guias_talles", "guia_talles", null, { guias: rows.length }, ip(req));
+    return reply
+      .header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("content-disposition", `attachment; filename="guias-de-talles-${new Date().toISOString().slice(0, 10)}.xlsx"`)
+      .send(Buffer.from(archivo));
+  });
+  await app.register(async (sub) => {
+    const TIPOS = ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/octet-stream"];
+    sub.addContentTypeParser(TIPOS, { parseAs: "buffer", bodyLimit: MAX_XLSX }, (_r, cuerpo, hecho) => hecho(null, cuerpo));
+    sub.withTypeProvider<ZodTypeProvider>().post("/v1/admin/guias-talles/excel", {
+      bodyLimit: MAX_XLSX,
+      schema: { querystring: z.object({ vista: z.enum(["0", "1"]).default("0") }).strict() },
+    }, async (req) => {
+      const a = await exigir(pool, req, "operador");
+      if (!Buffer.isBuffer(req.body)) throw new ErrorHttp(415, "tipo", "Subí un archivo de Excel (.xlsx).");
+      let hojas;
+      try { hojas = leerXlsx(new Uint8Array(req.body)); } catch (e) {
+        if (e instanceof ErrorXlsx) throw new ErrorHttp(400, "excel", e.message);
+        throw e;
+      }
+      const { guias, errores } = hojasAGuias(hojas);
+      if (!guias.length && !errores.length) throw new ErrorHttp(400, "excel", "El archivo no tiene ninguna guía (una hoja por guía: Medida | S | M | L…).");
+      const existentes = new Map((await pool.query<{ id: number; nombre: string }>("SELECT id, nombre FROM tienda.guias_talles")).rows.map((r) => [r.nombre.toLowerCase(), r.id]));
+      const resumen = guias.map((g) => ({ nombre: g.nombre, tipo: g.tipo, talles: g.filas.map((f) => f.talle), medidas: g.medidas.length, accion: existentes.has(g.nombre.toLowerCase()) ? "actualizar" as const : "crear" as const }));
+      if (req.query.vista === "1") return { vista: true, guias: resumen, errores };
+      const cambiadas: number[] = [];
+      const cli = await pool.connect();
+      try {
+        await cli.query("BEGIN");
+        for (const g0 of guias) {
+          const g = ordenarGuia(g0);
+          const id = existentes.get(g.nombre.toLowerCase());
+          const datos = [g.nombre, g.tipo, JSON.stringify(g.medidas), JSON.stringify(g.filas), g.nota, a.email];
+          if (id) {
+            await cli.query("UPDATE tienda.guias_talles SET nombre=$2, tipo=$3, medidas=$4, filas=$5, nota=COALESCE(nota, $6), actualizado_por=$7, actualizado_en=now() WHERE id = $1", [id, ...datos]);
+            cambiadas.push(id);
+          } else {
+            await cli.query("INSERT INTO tienda.guias_talles (nombre, tipo, medidas, filas, nota, actualizado_por) VALUES ($1,$2,$3,$4,$5,$6)", datos);
+          }
+        }
+        await auditar(cli, a, "importar_guias_talles", "guia_talles", null, { creadas: resumen.filter((r) => r.accion === "crear").length, actualizadas: cambiadas.length, conErrores: errores.length }, ip(req));
+        await cli.query("COMMIT");
+      } catch (e) { await cli.query("ROLLBACK").catch(() => {}); throw e; } finally { cli.release(); }
+      // Las fichas de los productos de las guías que cambiaron.
+      for (const id of cambiadas) await invalidar(await slugsConGuia(id));
+      return { vista: false, guias: resumen, errores };
+    });
   });
 
   api.post("/v1/admin/guias-talles", { schema: { body: GuiaTalles } }, async (req, reply) => {

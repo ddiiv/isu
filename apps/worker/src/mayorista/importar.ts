@@ -404,7 +404,7 @@ export async function aplicar(
       const r = await pool.query("UPDATE tienda.productos SET visible = false, actualizado_en = now() WHERE id = $1 AND visible", [p.productoId]);
       if (r.rowCount) res.ocultados.push(p.sku);
     } else if (!teniaFotos) {
-      const r = await pool.query("UPDATE tienda.productos SET visible = true, actualizado_en = now() WHERE id = $1 AND NOT visible", [p.productoId]);
+      const r = await pool.query("UPDATE tienda.productos SET visible = true, actualizado_en = now() WHERE id = $1 AND NOT visible AND eliminado_en IS NULL", [p.productoId]);
       if (r.rowCount) res.mostrados.push(p.sku);
     }
     res.productos++;

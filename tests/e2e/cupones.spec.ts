@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { expect, test, type Page } from "./base";
+import { expect, test, verResumen, type Page } from "./base";
 
 /*
  * Etapa 6: cupones en un navegador real (escritorio y celular).
@@ -68,7 +68,7 @@ test.describe("cupones en la tienda", () => {
     await agregar(page, "buzo-canguro-frisa-premium");
     await aplicar(page.getByRole("dialog"), "BIENVENIDA10");
     await expect(page.getByRole("dialog").getByText(/Cupón BIENVENIDA10 aplicado/)).toBeVisible();
-    await page.getByRole("link", { name: "Finalizar compra" }).click();
+    await page.getByRole("link", { name: /^Pagar con transferencia/ }).click();
     await page.getByLabel("Email").fill(`e2e-cupon-${info.project.name}-${Date.now()}@test.com`);
     await page.getByLabel("Nombre", { exact: true }).fill("Ana");
     await page.getByLabel("Apellido").fill("Cupón");
@@ -76,6 +76,7 @@ test.describe("cupones en la tienda", () => {
     await page.getByLabel("DNI o CUIT").fill("30111222");
     await page.getByText("Retiro en el local").click();
     await page.getByText("Pagar al retirar en el local").click();
+    await verResumen(page);
     const resumen = page.getByRole("complementary");
     await expect(resumen.getByText("Cupón BIENVENIDA10", { exact: false }).first()).toBeVisible();
     const valor = async (dt: string) => pesos(await resumen.locator("dt").getByText(dt, { exact: true }).locator("xpath=ancestor-or-self::dt/following-sibling::dd").innerText());

@@ -16,3 +16,9 @@ export const test = base.extend({
   },
 });
 export { expect, type Page };
+
+/** Checkout en el celular: el resumen del pedido va plegado arriba; se abre para leerlo. */
+export async function verResumen(page: Page) {
+  const b = page.getByRole("button", { name: /Mostrar resumen del pedido/ });
+  if (await b.isVisible()) await b.click();
+}

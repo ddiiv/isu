@@ -39,6 +39,9 @@ const VarianteV1 = z.object({
   publicable: Publicable,
   // Sin el campo, activa (como antes de que Stocker lo mandara).
   activo: z.boolean().optional().default(true),
+  // Packs y combos de Stocker no se venden en la tienda (los packs se arman sobre la prenda padre).
+  esPack: z.boolean().optional(),
+  esCombo: z.boolean().optional(),
 });
 
 const ProductoV1 = z.object({
@@ -51,14 +54,31 @@ const ProductoV1 = z.object({
   modelo: texto(80),
   precioMinorista: Precio.optional().transform((v) => v ?? null),
   variantes: z.array(VarianteV1).max(500),
+  /*
+   * A la tienda llegan sólo los productos padre. Stocker ya deja afuera los
+   * de evento (feria) y las variantes de pack o combo; si alguno viniera
+   * marcado igual, la tienda lo descarta acá.
+   */
+  esFeria: z.boolean().nullable().optional(),
+  esEvento: z.boolean().nullable().optional(),
+  esCombo: z.boolean().nullable().optional(),
+  esPack: z.boolean().nullable().optional(),
+  definicionCombo: z.unknown().optional(),
+  tipo: z.string().max(40).nullable().optional(),
 });
+
+/** Producto padre: ni de evento, ni pack, ni combo (con los datos que mande Stocker). */
+const TIPOS_PADRE = new Set(["padre", "producto", "normal", "simple"]);
+const esPadre = (p: z.output<typeof ProductoV1>) =>
+  !p.esFeria && !p.esEvento && !p.esCombo && !p.esPack && (p.definicionCombo === undefined || p.definicionCombo === null || p.definicionCombo === "")
+  && (p.tipo === undefined || p.tipo === null || TIPOS_PADRE.has(p.tipo.toLowerCase()));
 
 const aVariante = (v: z.output<typeof VarianteV1>) => ({ id: v.id, sku: v.sku, color: v.color, talle: v.talle, precio: v.precioMinorista, cantidad: v.publicable });
 
 export const VarianteStocker = VarianteV1.transform(aVariante);
 export type VarianteStocker = z.output<typeof VarianteStocker>;
 
-export const ProductoStocker = ProductoV1.transform((p) => ({
+const aProducto = (p: z.output<typeof ProductoV1>) => ({
   id: p.id,
   sku: p.skuAgrupador,
   titulo: p.titulo,
@@ -67,9 +87,10 @@ export const ProductoStocker = ProductoV1.transform((p) => ({
   genero: p.genero,
   modelo: p.modelo,
   precio: p.precioMinorista,
-  // Una variante dada de baja en Stocker no se vende: es como si no viniera.
-  variantes: p.variantes.filter((v) => v.activo).map(aVariante),
-}));
+  // Una variante dada de baja en Stocker no se vende: es como si no viniera. Tampoco las de pack o combo.
+  variantes: p.variantes.filter((v) => v.activo && !v.esPack && !v.esCombo).map(aVariante),
+});
+export const ProductoStocker = ProductoV1.transform(aProducto);
 export type ProductoStocker = z.output<typeof ProductoStocker>;
 
 export const CatalogoStocker = z.object({
@@ -78,8 +99,13 @@ export const CatalogoStocker = z.object({
   /** Stocker cortó la lista: lo que no vino NO es una baja. */
   truncado: z.boolean().optional().default(false),
   sinLocalesOnline: z.boolean().optional().default(false),
-  productos: z.array(ProductoStocker).max(20_000),
-}).transform(({ generadoEn, ...c }) => ({ ...c, generado: generadoEn }));
+  productos: z.array(ProductoV1).max(20_000),
+}).transform(({ generadoEn, productos, ...c }) => ({
+  ...c,
+  generado: generadoEn,
+  // Lo que no es padre no entra: es como si no viniera (si ya estaba en la tienda, se da de baja).
+  productos: productos.filter(esPadre).map(aProducto),
+}));
 export type CatalogoStocker = z.output<typeof CatalogoStocker>;
 
 export const StockStocker = z.object({

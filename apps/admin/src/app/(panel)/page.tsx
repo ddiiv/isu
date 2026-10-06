@@ -21,8 +21,12 @@ export default function Panel() {
     <>
       <Titulo>Panel</Titulo>
       <div className="grid gap-4 sm:grid-cols-3">
-        {[["Pedidos de hoy", String(r.pedidosHoy)], ["Vendido hoy", pesos(r.ventasHoy)], ["Vendido este mes", pesos(r.ventasMes)]].map(([t, v]) => (
-          <div key={t} className="rounded-2xl border border-linea bg-white p-5"><p className="text-sm text-tinta-tenue">{t}</p><p className="mt-1 font-display text-3xl">{v}</p></div>
+        {([["Pedidos de hoy", String(r.pedidosHoy), "bg-marca", "/pedidos"], ["Vendido hoy", pesos(r.ventasHoy), "bg-ahorro", "/pedidos"], ["Vendido este mes", pesos(r.ventasMes), "bg-tinta", "/pedidos"]] as const).map(([t, v, color, href]) => (
+          <Link key={t} href={href} className="group relative overflow-hidden rounded-2xl border border-linea/80 bg-white p-5 shadow-[0_1px_3px_rgba(16,24,40,0.05)] transition hover:-translate-y-0.5 hover:shadow-md">
+            <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1.5 ${color}`} />
+            <p className="text-xs font-bold uppercase tracking-wider text-tinta-tenue">{t}</p>
+            <p className="mt-2 font-display text-[2.2rem] leading-none">{v}</p>
+          </Link>
         ))}
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-2">

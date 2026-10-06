@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   cantidadesPack, centavos, compararTalles, conDescuento, esClaro, formatearPesos, PACK_TOPE, porcentajePack, rutaPack,
@@ -38,6 +39,7 @@ export function FichaPack({ p, config, unidades: inicial }: { p: ProductoDetalle
   const [elecciones, setElecciones] = useState<Eleccion[]>(Array.from({ length: PACK_TOPE }, () => VACIA));
   const [aviso, setAviso] = useState<string | null>(null);
   const carrito = useCarrito();
+  const router = useRouter();
 
   const sinColor = p.colores.length <= 1 && (p.colores[0]?.nombre ?? "Único") === "Único";
   const conTalle = p.variantes.some((v) => v.talle);
@@ -99,14 +101,19 @@ export function FichaPack({ p, config, unidades: inicial }: { p: ProductoDetalle
     setElecciones(nuevas);
     setAviso(faltaron ? `No alcanzan para todas: quedan ${faltaron} por elegir con otro talle o color.` : null);
   }
-  function agregar() {
+  function agregar(comprarYa = false) {
     const falta = elegidas.findIndex((e) => !varianteDe(e));
     if (falta >= 0) { setAviso(`Elegí ${conTalle ? "talle" : ""}${conTalle && !sinColor ? " y " : ""}${sinColor ? "" : "color"} de la prenda ${falta + 1}.`); document.getElementById(`prenda-${falta + 1}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
     const foto = (v: VariantePublica) => p.colores.find((c) => c.clave === v.color)?.fotos[0] ?? p.exhibicion[0] ?? null;
-    carrito.agregarVarias(variantes.map((v) => ({
-      sku: v!.sku, nombre: p.nombre, slug: p.slug,
-      color: sinColor ? null : nombreColor(v!.color), talle: v!.talle, precio: unitario(v!, n), foto: foto(v!)?.clave ?? null,
-    })));
+    // Va como UN pack (aparte de las sueltas de esta prenda): las prendas iguales se agrupan.
+    const prendas = new Map<string, { sku: string; cantidad: number; color: string | null; talle: string | null; foto: string | null }>();
+    for (const v of variantes) {
+      const ya = prendas.get(v!.sku);
+      if (ya) ya.cantidad++;
+      else prendas.set(v!.sku, { sku: v!.sku, cantidad: 1, color: sinColor ? null : nombreColor(v!.color), talle: v!.talle, foto: foto(v!)?.clave ?? null });
+    }
+    carrito.agregarPack({ slug: p.slug, nombre: p.nombre, foto: (p.exhibicion[0] ?? foto(variantes[0]!))?.clave ?? null, precio: total, prendas: [...prendas.values()] }, { abrir: !comprarYa });
+    if (comprarYa) router.push("/checkout");
   }
 
   const fotos = [...p.exhibicion, ...p.colores.flatMap((c) => c.fotos)].filter((f, i, a) => a.findIndex((g) => g.clave === f.clave) === i).slice(0, 8);
@@ -221,11 +228,14 @@ export function FichaPack({ p, config, unidades: inicial }: { p: ProductoDetalle
                   <p className="text-right text-sm font-bold text-ahorro">{formatearPesos(conDescuento(centavos(total), config.descuentoTransferencia))}<br /><span className="font-normal">con transferencia</span></p>
                 )}
               </div>
-              <button type="button" onClick={agregar} className="boton mt-4 w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte">
+              <button type="button" onClick={() => agregar()} className="boton mt-4 w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte">
                 Agregar pack x{n} al carrito
               </button>
+              <button type="button" onClick={() => agregar(true)} className="boton mt-2 w-full border-2 border-tinta bg-white py-3.5 text-base hover:bg-tinta hover:text-white">
+                Comprar ahora
+              </button>
               {aviso && <p className="mt-2 text-center text-sm font-bold text-oferta" role="alert">{aviso}</p>}
-              <p className="mt-2 text-center text-xs text-tinta-tenue">El descuento se aplica solo en el carrito: vale aunque sumes unidades sueltas de esta prenda.</p>
+              <p className="mt-2 text-center text-xs text-tinta-tenue">El pack va aparte en el carrito: las prendas sueltas van a su precio.</p>
             </div>
             <BarraEnvioGratis desde={config.envioGratisDesde} className="mt-4" />
           </>

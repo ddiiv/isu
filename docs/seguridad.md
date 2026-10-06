@@ -107,7 +107,7 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
 
 ## Packs, reseñas y portada (etapa 8)
 
-- **Packs:** el % lo calcula la API con lo que hay en el carrito (`pedidos/cotizar.ts`), al cotizar y otra vez al crear el pedido. El navegador manda sólo SKU y cantidad: cualquier campo de más (`pack`, `porcentaje`…) es 400. Con más unidades que el máximo de Ajustes vale el % del máximo, y no se suma a una rebaja: gana el mayor. El ajuste se valida entero (de 2 a 20 unidades, un % por cantidad, nunca más de 60 % ni menor al de una unidad menos).
+- **Packs:** el % lo calcula la API con lo que hay en el carrito (`pedidos/cotizar.ts`), al cotizar y otra vez al crear el pedido. El navegador manda SKU y cantidad, o (etapa 10) qué lleva cada pack y cuántos: cualquier campo de más (`porcentaje`…) es 400. Un pack que no es de una sola prenda marcada como pack, o fuera del rango de Ajustes, no se arma. No se suma a una rebaja: gana el mayor. El ajuste se valida entero (de 2 a 20 unidades, un % por cantidad, nunca más de 60 % ni menor al de una unidad menos).
 - **Reseñas, quién opina:** sólo con el enlace del mail.
   - El enlace va firmado (HMAC) con una clave derivada de `INTERNO_TOKEN` para este uso (`isu:opinar:`): la firma del seguimiento no sirve acá ni al revés, y la de un pedido no sirve para otro. Se compara en tiempo constante.
   - Mismo 404 si el pedido no existe o la firma no corresponde: no se puede averiguar qué números existen.
@@ -168,3 +168,22 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - que el rango de packs de la config esté dentro del tope;
   - el backoffice sin sesión: liquidación, rango de packs;
   - páginas de Packs y Liquidación con un script en la dirección, y `pack-x999` / `pack-x15`.
+
+## Carrito con packs aparte, eliminar productos y guías en Excel (etapa 10)
+
+- **Pack en el carrito:** el navegador manda qué lleva cada pack (SKU y cuántas) y cuántos packs, nunca el %. La API arma el pack sólo si es de una prenda marcada como pack y con una cantidad del rango de Ajustes. Si no, lo avisa y no lo cobra. El stock se controla sumando lo suelto y lo de los packs.
+- **A Stocker** va una línea por SKU (Stocker suma las repetidas y se queda con un solo precio): con la misma variante suelta y en pack, el promedio al centavo.
+- **Eliminar productos:** pide rol operador y queda en la auditoría. Es una baja suave: una restricción de la base (`eliminado ⇒ oculto`) impide volver a publicarlo por cualquier camino (backoffice, importador mayorista) sin restaurarlo antes.
+- **Sólo productos padre desde Stocker:** la tienda descarta lo que venga marcado como evento, pack o combo, además del filtro de Stocker.
+- **Excel:**
+  - el archivo se lee en el servidor, sin librerías pesadas (fflate + XML);
+  - topes: 5 MB el archivo, 40 MB descomprimido (un zip chico que se infla se corta antes), 100 hojas, 500 filas y 50 columnas;
+  - no se leen fórmulas ni macros, sólo valores;
+  - cada guía se valida con las mismas reglas que el editor, y una hoja mal armada no se importa;
+  - importar pide rol operador y queda en la auditoría; exportar pide sesión;
+  - el backoffice deja pasar el archivo sólo en esa ruta, con su tipo y hasta 5 MB.
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7i):
+  - packs con %, vacíos, gigantes o mezclados con una suelta;
+  - un pack de una prenda que no es pack;
+  - eliminar, restaurar y Excel sin sesión;
+  - un Excel de 7 MB.

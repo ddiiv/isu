@@ -637,7 +637,7 @@ describe("redirecciones de la tienda anterior (SEO)", () => {
 
 // ── Etapa 8 ─────────────────────────────────────────────────────────
 describe("packs", () => {
-  const carrito = (items: Array<{ sku: string; cantidad: number }>) =>
+  const carrito = (items: Array<{ sku: string; cantidad: number } | { pack: Array<{ sku: string; cantidad: number }>; cantidad: number }>) =>
     app.inject({ method: "POST", url: "/v1/carrito", headers: IP, payload: { items } });
   it("marcar una prenda como pack la muestra en Packs, con su composición, y prende el menú", async () => {
     expect((await app.inject("/v1/config")).json().hayPacks).toBe(false);
@@ -650,26 +650,63 @@ describe("packs", () => {
     expect((await app.inject("/v1/productos/qa-adm-1")).json()).toMatchObject({ pack: true, composicion: "100% algodón peinado" });
     expect((await req("GET", "/v1/admin/productos?filtro=packs", operador)).json().productos.map((p: { id: number }) => p.id)).toEqual([ids["qa-adm-1"]]);
   });
-  it("el % sale de cuántas unidades de la prenda hay en el carrito (cualquier talle y color)", async () => {
+  it("el pack va aparte (etapa 10): las sueltas a su precio y el pack con el % de cuántas prendas lleva", async () => {
     const una = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 1 }])).json();
-    expect(una.lineas[0]).toMatchObject({ precio: 1_000_000, precioLista: null, pack: null });
-    // 2 negras S + 1 roja M = pack de 3 → 15%.
-    const tres = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 2 }, { sku: "QA-ADM-1-3", cantidad: 1 }])).json();
-    expect(tres.lineas.map((l: { precio: number; precioLista: number; pack: unknown }) => [l.precio, l.precioLista, l.pack])).toEqual([
-      [850_000, 1_000_000, { unidades: 3, porcentaje: 15 }], [935_000, 1_100_000, { unidades: 3, porcentaje: 15 }],
+    expect(una.lineas[0]).toMatchObject({ clave: "QA-ADM-1-1", precio: 1_000_000, precioLista: null, pack: null });
+    expect(una.packs).toEqual([]);
+    // Un pack de 3 (2 negras S + 1 roja M) y una negra S suelta: la suelta NO suma para el pack.
+    const pack3 = { pack: [{ sku: "QA-ADM-1-1", cantidad: 2 }, { sku: "QA-ADM-1-3", cantidad: 1 }], cantidad: 1 };
+    const r = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 1 }, pack3])).json();
+    expect(r.problemas).toEqual([]);
+    expect(r.lineas.map((l: { clave: string; precio: number; cantidad: number; pack: unknown }) => [l.clave, l.precio, l.cantidad, l.pack])).toEqual([
+      ["QA-ADM-1-1", 1_000_000, 1, null],
+      ["pack:QA-ADM-1-1*2,QA-ADM-1-3*1|QA-ADM-1-1", 850_000, 2, { clave: "pack:QA-ADM-1-1*2,QA-ADM-1-3*1", unidades: 3, porcentaje: 15 }],
+      ["pack:QA-ADM-1-1*2,QA-ADM-1-3*1|QA-ADM-1-3", 935_000, 1, { clave: "pack:QA-ADM-1-1*2,QA-ADM-1-3*1", unidades: 3, porcentaje: 15 }],
     ]);
-    expect(tres.subtotal).toBe(2 * 850_000 + 935_000);
-    // 7 de la misma prenda → el % de 7. Una prenda que no es pack no suma.
-    const muchas = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 4 }, { sku: "QA-ADM-1-2", cantidad: 3 }, { sku: "QA-ADM-5-1", cantidad: 2 }])).json();
-    expect(muchas.lineas.map((l: { pack: { porcentaje: number } | null }) => l.pack?.porcentaje ?? 0)).toEqual([22, 22, 0]);
+    expect(r.packs).toHaveLength(1);
+    expect(r.packs[0]).toMatchObject({ clave: "pack:QA-ADM-1-1*2,QA-ADM-1-3*1", productoSlug: "qa-adm-1", unidades: 3, porcentaje: 15, cantidad: 1,
+      precio: 2 * 850_000 + 935_000, precioLista: 2 * 1_000_000 + 1_100_000 });
+    expect(r.packs[0].prendas.map((x: { sku: string; cantidad: number }) => [x.sku, x.cantidad])).toEqual([["QA-ADM-1-1", 2], ["QA-ADM-1-3", 1]]);
+    expect(r.subtotal).toBe(1_000_000 + 2 * 850_000 + 935_000);
+    // El mismo pack dos veces (aunque venga en otro orden) son 2 packs iguales.
+    const dos = (await carrito([pack3, { pack: [{ sku: "QA-ADM-1-3", cantidad: 1 }, { sku: "QA-ADM-1-1", cantidad: 2 }], cantidad: 1 }])).json();
+    expect(dos.packs.map((x: { cantidad: number; subtotal: number }) => [x.cantidad, x.subtotal])).toEqual([[2, 2 * (2 * 850_000 + 935_000)]]);
+    // 7 prendas → el % de 7.
+    const siete = (await carrito([{ pack: [{ sku: "QA-ADM-1-1", cantidad: 4 }, { sku: "QA-ADM-1-2", cantidad: 3 }], cantidad: 1 }])).json();
+    expect(siete.packs[0].porcentaje).toBe(22);
+  });
+  it("un pack que no se puede armar así se avisa y no se cobra", async () => {
+    const problema = async (pack: Array<{ sku: string; cantidad: number }>) => {
+      const r = (await carrito([{ pack, cantidad: 1 } as never])).json();
+      return { tipos: r.problemas.map((x: { tipo: string }) => x.tipo), subtotal: r.subtotal };
+    };
+    // Una prenda que no se vende en pack; dos prendas distintas; menos del mínimo; más del máximo.
+    expect(await problema([{ sku: "QA-ADM-5-1", cantidad: 2 }])).toEqual({ tipos: ["pack"], subtotal: 0 });
+    expect(await problema([{ sku: "QA-ADM-1-1", cantidad: 1 }, { sku: "QA-ADM-5-1", cantidad: 1 }])).toEqual({ tipos: ["pack"], subtotal: 0 });
+    expect(await problema([{ sku: "QA-ADM-1-1", cantidad: 1 }])).toEqual({ tipos: ["pack"], subtotal: 0 });
+    expect(await problema([{ sku: "QA-ADM-1-1", cantidad: 6 }, { sku: "QA-ADM-1-2", cantidad: 5 }])).toEqual({ tipos: ["pack"], subtotal: 0 });
+    // El stock se controla con lo suelto más lo de los packs.
+    const { stock } = (await pool.query("SELECT stock FROM tienda.variantes WHERE sku = 'QA-ADM-1-1'")).rows[0];
+    const r = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 1 }, { pack: [{ sku: "QA-ADM-1-1", cantidad: Math.min(10, stock) }], cantidad: Math.ceil(stock / Math.min(10, stock)) } as never])).json();
+    expect(r.problemas.map((x: { tipo: string; sku: string }) => [x.tipo, x.sku])).toEqual([["stock_insuficiente", "QA-ADM-1-1"]]);
+    // El % no lo manda el navegador; un ítem no puede ser suelto y pack a la vez.
+    for (const malo of [
+      [{ sku: "QA-ADM-1-1", cantidad: 2, pack: { unidades: 5, porcentaje: 90 } }],
+      [{ sku: "QA-ADM-1-1", cantidad: 1, pack: [{ sku: "QA-ADM-1-1", cantidad: 2 }] }],
+      [{ pack: [{ sku: "QA-ADM-1-1", cantidad: 2, porcentaje: 90 }], cantidad: 1 }],
+      [{ pack: [{ sku: "QA-ADM-1-1", cantidad: 2 }], cantidad: 11 }],
+      [{ pack: [], cantidad: 1 }],
+    ]) expect((await carrito(malo as never)).statusCode, JSON.stringify(malo)).toBe(400);
   });
   it("no se suma a la rebaja de la prenda: gana el mayor", async () => {
     const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm rebaja remera", porcentaje: 25, alcance: "productos", productoIds: [ids["qa-adm-1"]] });
-    const dos = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 2 }])).json();
-    expect(dos.lineas[0]).toMatchObject({ precio: 750_000, precioLista: 1_000_000, pack: null });
+    const r = (await carrito([{ sku: "QA-ADM-1-1", cantidad: 1 }, { pack: [{ sku: "QA-ADM-1-1", cantidad: 2 }], cantidad: 1 } as never])).json();
+    // Suelta: la rebaja. Pack de 2 (10%): gana la rebaja (25%).
+    expect(r.lineas[0]).toMatchObject({ precio: 750_000, precioLista: 1_000_000, pack: null });
+    expect(r.packs[0]).toMatchObject({ porcentaje: 25, precio: 2 * 750_000 });
     await pool.query("DELETE FROM tienda.descuentos WHERE id = $1", [d.json().id]);
   });
-  it("mínimo, máximo y % se cambian en Ajustes (nunca menos llevando más); con más del máximo, el del máximo", async () => {
+  it("mínimo, máximo y % se cambian en Ajustes (nunca menos llevando más); fuera del rango no hay pack", async () => {
     for (const malo of [
       { minimo: 2, maximo: 5, porcentajes: [10, 5, 20, 25] }, { minimo: 2, maximo: 5, porcentajes: [10, 15, 90, 95] },
       { minimo: 2, maximo: 5, porcentajes: [10, 15] }, { minimo: 1, maximo: 2, porcentajes: [5, 10] }, { minimo: 2, maximo: 30, porcentajes: Array(29).fill(5) },
@@ -677,9 +714,9 @@ describe("packs", () => {
     ]) expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: malo })).statusCode, JSON.stringify(malo)).toBe(400);
     for (const k of ["hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn"]) expect((await req("PUT", "/v1/admin/ajustes", dueno, { [k]: false })).statusCode, k).toBe(400);
     expect((await req("PUT", "/v1/admin/ajustes", dueno, { packs: { minimo: 3, maximo: 4, porcentajes: [10, 20] } })).statusCode).toBe(200);
-    // 2 ya no es pack; 4 es el máximo; 6, el % del máximo.
-    const pct = async (n: number) => (await carrito([{ sku: "QA-ADM-1-1", cantidad: n }])).json().lineas[0].pack?.porcentaje ?? 0;
-    expect([await pct(2), await pct(3), await pct(4), await pct(6)]).toEqual([0, 10, 20, 20]);
+    // 2 ya no es pack; 4 es el máximo; 5 tampoco se arma.
+    const pct = async (n: number) => (await carrito([{ pack: [{ sku: "QA-ADM-1-1", cantidad: n }], cantidad: 1 }])).json().packs[0]?.porcentaje ?? 0;
+    expect([await pct(2), await pct(3), await pct(4), await pct(5)]).toEqual([0, 10, 20, 0]);
     expect((await app.inject("/v1/config")).json().packs).toEqual({ minimo: 3, maximo: 4, porcentajes: [10, 20] });
     await req("PUT", "/v1/admin/ajustes", dueno, { packs: { minimo: 2, maximo: 10, porcentajes: [10, 15, 18, 20, 21, 22, 23, 24, 25] } });
   });
@@ -982,5 +1019,87 @@ describe("transferencias recibidas (lo que no se pudo asignar solo)", () => {
     expect((await req("PUT", "/v1/admin/ajustes", dueno, { transferenciasAuto: { talo: false, mercadoPago: true } })).statusCode).toBe(200);
     expect((await req("GET", "/v1/admin/transferencias", operador)).json().estado.mercadoPago.prendido).toBe(true);
     await req("PUT", "/v1/admin/ajustes", dueno, { transferenciasAuto: { talo: false, mercadoPago: false } });
+  });
+});
+
+describe("eliminar productos (etapa 10)", () => {
+  it("sale de la tienda y de las listas, no se puede volver a publicar sin restaurarlo, y queda en la auditoría", async () => {
+    const id = ids["qa-adm-2"];
+    expect((await app.inject("/v1/productos/qa-adm-2")).statusCode).toBe(200);
+    // Lectura no puede.
+    expect((await req("POST", "/v1/admin/productos/eliminar", lectura2, { ids: [id] })).statusCode).toBe(403);
+    const r = await req("POST", "/v1/admin/productos/eliminar", operador, { ids: [id, id] });
+    expect(r.json()).toMatchObject({ ok: true, productos: 1 });
+    expect((await app.inject("/v1/productos/qa-adm-2")).statusCode).toBe(404);
+    const lista = async (filtro: string) => (await req("GET", `/v1/admin/productos?filtro=${filtro}&q=QA`, operador)).json().productos.map((p: { id: number }) => p.id);
+    expect(await lista("todos")).not.toContain(id);
+    expect(await lista("ocultos")).not.toContain(id);
+    expect(await lista("eliminados")).toContain(id);
+    // Publicarlo (uno o en masa) no hace nada: está eliminado.
+    await req("PATCH", `/v1/admin/productos/${id}`, operador, { visible: true });
+    await req("POST", "/v1/admin/productos/masivo", operador, { ids: [id], cambios: { visible: true } });
+    expect((await pool.query("SELECT visible FROM tienda.productos WHERE id = $1", [id])).rows[0].visible).toBe(false);
+    // La base tampoco deja: eliminado = oculto.
+    await expect(pool.query("UPDATE tienda.productos SET visible = true WHERE id = $1", [id])).rejects.toThrow(/productos_eliminado_oculto/);
+    expect((await req("GET", `/v1/admin/productos/${id}`, operador)).json().producto.eliminadoEn).toBeTruthy();
+    expect((await pool.query("SELECT 1 FROM tienda.auditoria WHERE accion = 'eliminar_productos'")).rowCount).toBeGreaterThan(0);
+    // Restaurado vuelve oculto; se publica a mano.
+    expect((await req("POST", "/v1/admin/productos/restaurar", operador, { ids: [id] })).json()).toMatchObject({ productos: 1 });
+    expect(await lista("ocultos")).toContain(id);
+    await req("PATCH", `/v1/admin/productos/${id}`, operador, { visible: true });
+    expect((await app.inject("/v1/productos/qa-adm-2")).statusCode).toBe(200);
+  });
+  it("sin sesión, nada", async () => {
+    for (const ruta of ["/v1/admin/productos/eliminar", "/v1/admin/productos/restaurar"]) {
+      expect((await app.inject({ method: "POST", url: ruta, headers: IP, payload: { ids: [1] } })).statusCode).toBe(401);
+    }
+  });
+});
+
+describe("guías de talles con Excel (etapa 10)", () => {
+  const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const subir = (archivo: Buffer | string, token: string | undefined, vista = false, tipo = XLSX) =>
+    app.inject({ method: "POST", url: `/v1/admin/guias-talles/excel${vista ? "?vista=1" : ""}`, headers: { ...IP, ...(token ? { "x-isu-admin": token } : {}), "content-type": tipo }, payload: archivo });
+  it("la migración trae las 40 guías de la fábrica, sin productos", async () => {
+    const { rows } = await pool.query("SELECT nombre, tipo FROM tienda.guias_talles WHERE actualizado_por = 'migracion 0017' ORDER BY nombre");
+    expect(rows).toHaveLength(40);
+    expect(rows.find((r) => r.nombre === "Pant Chupin Dama")?.tipo).toBe("otro");
+    const g = (await req("GET", "/v1/admin/guias-talles", operador)).json().guias.find((x: { nombre: string }) => x.nombre === "Remera Clasica");
+    expect(g).toMatchObject({ tipo: "adulto", productos: 0, talles: 5 });
+  });
+  it("vista previa sin guardar, importar (crea y actualiza por nombre) y exportar", async () => {
+    const { escribirXlsx, leerXlsx } = await import("../src/lib/xlsx.js");
+    const archivo = Buffer.from(escribirXlsx([
+      { nombre: "QA Excel nueva", filas: [["Medida", "1", "2", "3 (L)"], ["Ancho muslo", 26, "27,5", "28-29"], ["Bota", "-", 20, 21]] },
+      { nombre: "Remera Clasica", filas: [["Medida", "S", "M"], ["Ancho Pecho", 55, 57]] },
+      { nombre: "QA rota", filas: [["Medida", "S"], ["Pecho", "mucho"]] },
+    ]));
+    const vista = await subir(archivo, operador, true);
+    expect(vista.statusCode, vista.body).toBe(200);
+    expect(vista.json()).toMatchObject({ vista: true, guias: [{ nombre: "QA Excel nueva", accion: "crear", tipo: "otro" }, { nombre: "Remera Clasica", accion: "actualizar" }], errores: [{ hoja: "QA rota" }] });
+    expect((await pool.query("SELECT 1 FROM tienda.guias_talles WHERE nombre = 'QA Excel nueva'")).rowCount).toBe(0);
+    // Lectura no importa; sin sesión, nada; otro tipo de archivo, no.
+    expect((await subir(archivo, lectura2)).statusCode).toBe(403);
+    expect((await subir(archivo, undefined)).statusCode).toBe(401);
+    expect((await subir("hola", operador, false, "text/plain")).statusCode).toBe(415);
+    expect((await subir(Buffer.from("no es zip"), operador)).json()).toMatchObject({ error: "excel" });
+    const r = await subir(archivo, operador);
+    expect(r.json()).toMatchObject({ vista: false, errores: [{ hoja: "QA rota" }] });
+    const nueva = (await pool.query("SELECT tipo, medidas, filas FROM tienda.guias_talles WHERE nombre = 'QA Excel nueva'")).rows[0];
+    expect(nueva).toMatchObject({ tipo: "otro", medidas: ["Ancho muslo", "Bota"] });
+    expect(nueva.filas.map((f: { talle: string }) => f.talle)).toEqual(["1", "2", "3 (L)"]);
+    expect(nueva.filas[2].valores).toEqual([[28, 29], [21, 21]]);
+    expect((await pool.query("SELECT jsonb_array_length(filas) AS n FROM tienda.guias_talles WHERE nombre = 'Remera Clasica'")).rows[0].n).toBe(2);
+    // La guía nueva se ve en la ficha como cualquier otra.
+    const id = (await pool.query("SELECT id FROM tienda.guias_talles WHERE nombre = 'QA Excel nueva'")).rows[0].id;
+    expect((await req("GET", `/v1/admin/guias-talles/${id}`, operador)).statusCode).toBe(200);
+    // Exportar: un .xlsx con una hoja por guía, que se vuelve a leer igual.
+    const x = await req("GET", "/v1/admin/guias-talles/excel", lectura2);
+    expect(x.statusCode).toBe(200);
+    expect(x.headers["content-type"]).toBe(XLSX);
+    expect(String(x.headers["content-disposition"])).toMatch(/^attachment; filename="guias-de-talles-\d{4}-\d{2}-\d{2}\.xlsx"$/);
+    const hojas = leerXlsx(x.rawPayload);
+    expect(hojas.find((h) => h.nombre === "QA Excel nueva")?.filas).toEqual([["Medida", "1", "2", "3 (L)"], ["Ancho muslo", 26, "27,5", "28-29"], ["Bota", "-", 20, 21]]);
+    await pool.query("DELETE FROM tienda.guias_talles WHERE nombre = 'QA Excel nueva'");
   });
 });

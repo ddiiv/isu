@@ -3,8 +3,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import {
-  CLAVES_MEDIDA, MEDIDAS, TALLES_ADULTO, TALLES_NINO, TALLES_NINO_HABITUALES, normalizarTalle, tallesDeTipo,
-  type ClaveMedida, type TipoGuia,
+  CLAVES_MEDIDA, MEDIDA_LIBRE, TALLES_ADULTO, TALLES_NINO, TALLES_NINO_HABITUALES, infoMedida, normalizarTalle, tallesDeTipo,
+  type TipoGuia,
 } from "@isu/shared";
 import { api, fotoUrl, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, claseEntrada, Insignia, Mensaje, Paginador, Tarjeta, Titulo, useAviso } from "@/components/ui";
@@ -16,14 +16,18 @@ import { puede, useYo } from "@/components/Marco";
  * si es un solo número, se deja "hasta" vacío). Abajo, los productos
  * asociados y el buscador para asociar más: por defecto sólo ofrece los que
  * "coinciden" (todos sus talles están en la guía).
+ *
+ * Etapa 10: tipo "Talles propios" (1 a 8 de pantalón, "3 (L)"…: se escriben
+ * y quedan en ese orden) y medidas con nombre propio ("Ancho muslo"), que
+ * sólo se muestran. También se cargan desde Excel (Guías de talles → Importar).
  */
 type Celda = [string, string];
-interface Guardada { id: number; nombre: string; tipo: TipoGuia; medidas: ClaveMedida[]; filas: Array<{ talle: string; valores: Array<[number, number] | null> }>; nota: string | null }
+interface Guardada { id: number; nombre: string; tipo: TipoGuia; medidas: string[]; filas: Array<{ talle: string; valores: Array<[number, number] | null> }>; nota: string | null }
 interface Asociado { id: number; nombre: string; sku: string; slug: string; visible: boolean; talles: string[]; coincide: boolean }
 interface Candidato { id: number; nombre: string; sku: string; visible: boolean; foto: string | null; talles: string[]; coincide: boolean; guiaActual: { id: number; nombre: string } | null }
 
-const PREDETERMINADAS: Record<TipoGuia, ClaveMedida[]> = { adulto: ["pecho", "cintura", "cadera", "largo"], nino: ["altura", "edad", "pecho", "cintura"] };
-const INICIALES: Record<TipoGuia, readonly string[]> = { adulto: ["XS", "S", "M", "L", "XL", "XXL"], nino: TALLES_NINO_HABITUALES };
+const PREDETERMINADAS: Record<TipoGuia, string[]> = { adulto: ["pecho", "cintura", "cadera", "largo"], nino: ["altura", "edad", "pecho", "cintura"], otro: ["ancho", "largo"] };
+const INICIALES: Record<TipoGuia, readonly string[]> = { adulto: ["XS", "S", "M", "L", "XL", "XXL"], nino: TALLES_NINO_HABITUALES, otro: ["1", "2", "3", "4", "5"] };
 const numero = (s: string) => { const n = Number(s.replace(",", ".")); return s.trim() !== "" && Number.isFinite(n) ? n : null; };
 
 export default function EditorGuia({ params }: { params: Promise<{ id: string }> }) {
@@ -37,9 +41,11 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
 
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState<TipoGuia>("adulto");
-  const [medidas, setMedidas] = useState<ClaveMedida[]>(PREDETERMINADAS.adulto);
+  const [medidas, setMedidas] = useState<string[]>(PREDETERMINADAS.adulto);
+  const [talleNuevo, setTalleNuevo] = useState("");
+  const [medidaNueva, setMedidaNueva] = useState("");
   const [talles, setTalles] = useState<string[]>([...INICIALES.adulto]);
-  const [celdas, setCeldas] = useState<Record<string, Partial<Record<ClaveMedida, Celda>>>>({});
+  const [celdas, setCeldas] = useState<Record<string, Partial<Record<string, Celda>>>>({});
   const [nota, setNota] = useState("Medidas del cuerpo, en centímetros.");
   const [errores, setErrores] = useState<string[]>([]);
 
@@ -57,9 +63,25 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
   if (!nueva && error) return <Mensaje>{error}</Mensaje>;
   if (!nueva && !datos) return <Cargando />;
 
-  const escala = tallesDeTipo(tipo);
+  const libre = tipo === "otro";
+  // Talles propios: los que se escribieron, en ese orden. Si no, los de la escala.
+  const escala = libre ? talles : tallesDeTipo(tipo);
   const filas = escala.filter((t) => talles.includes(t));
-  const poner = (talle: string, m: ClaveMedida, i: 0 | 1, v: string) =>
+  const propias = medidas.filter((m) => !(CLAVES_MEDIDA as readonly string[]).includes(m));
+  function agregarTalle() {
+    const t = talleNuevo.trim().slice(0, 10);
+    if (!t || talles.some((x) => normalizarTalle(x) === normalizarTalle(t))) { setTalleNuevo(""); return; }
+    setTalles((ts) => [...ts, t]); setTalleNuevo("");
+  }
+  function agregarMedida() {
+    const m = medidaNueva.replace(/\s+/g, " ").trim().slice(0, 40);
+    if (!m) return;
+    if (!MEDIDA_LIBRE.test(m)) { aviso.error(new Error("El nombre de la medida lleva letras y números (por ejemplo: Ancho muslo).")); return; }
+    if (medidas.length >= 8) { aviso.error(new Error("Como mucho 8 medidas por guía.")); return; }
+    if (!medidas.some((x) => x.toLowerCase() === m.toLowerCase())) setMedidas((ms) => [...ms, m]);
+    setMedidaNueva("");
+  }
+  const poner = (talle: string, m: string, i: 0 | 1, v: string) =>
     setCeldas((c) => { const fila = { ...(c[talle] ?? {}) }; const celda: Celda = [...(fila[m] ?? ["", ""])] as Celda; celda[i] = v.replace(/[^\d.,]/g, "").slice(0, 5); fila[m] = celda; return { ...c, [talle]: fila }; });
 
   function cambiarTipo(t: TipoGuia) {
@@ -82,7 +104,7 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
           const desde = numero(a), hasta = numero(b);
           if (desde === null && hasta === null) return null;
           const r: [number, number] = [desde ?? hasta!, hasta ?? desde!];
-          if (r[1] < r[0]) problemas.push(`Talle ${t}, ${MEDIDAS[m].nombre}: "hasta" es menor que "desde".`);
+          if (r[1] < r[0]) problemas.push(`Talle ${t}, ${infoMedida(m).nombre}: "hasta" es menor que "desde".`);
           return r;
         }),
       })),
@@ -125,7 +147,7 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
             <div className="text-sm">
               <span className="font-bold">Tipo</span>
               <div className="mt-1 inline-flex rounded-full border border-linea bg-white p-1">
-                {([["adulto", "Adulto (XS a 5XL)"], ["nino", "Niños (4 a 16)"]] as const).map(([k, t]) => (
+                {([["adulto", "Adulto (XS a 5XL)"], ["nino", "Niños (4 a 16)"], ["otro", "Talles propios"]] as const).map(([k, t]) => (
                   <button key={k} type="button" disabled={!operador} aria-pressed={tipo === k} onClick={() => cambiarTipo(k)}
                     className={`rounded-full px-4 py-1.5 font-bold ${tipo === k ? "bg-tinta text-white" : "text-tinta-suave"}`}>{t}</button>
                 ))}
@@ -138,24 +160,40 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
             <div className="mt-2 flex flex-wrap gap-2">
               {escala.map((t) => (
                 <button key={t} type="button" disabled={!operador} aria-pressed={talles.includes(t)} onClick={() => setTalles((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t]))}
-                  className={`min-w-12 rounded-full border px-3 py-1.5 text-sm font-bold ${talles.includes(t) ? "border-tinta bg-tinta text-white" : "border-linea bg-white"}`}>{t}</button>
+                  title={libre ? "Tocá para sacarlo" : undefined}
+                  className={`min-w-12 rounded-full border px-3 py-1.5 text-sm font-bold ${talles.includes(t) ? "border-tinta bg-tinta text-white" : "border-linea bg-white"}`}>{t}{libre && <span aria-hidden="true" className="ml-1 opacity-60">×</span>}</button>
               ))}
+              {libre && operador && (
+                <span className="inline-flex gap-1">
+                  <input className="w-28 rounded-full border border-linea px-3 py-1.5 text-sm" maxLength={10} placeholder="Talle (ej: 3 (L))" aria-label="Talle nuevo" value={talleNuevo}
+                    onChange={(e) => setTalleNuevo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarTalle(); } }} />
+                  <Boton variante="borde" className="py-1.5" onClick={agregarTalle}>Agregar</Boton>
+                </span>
+              )}
             </div>
+            {libre && <p className="mt-1 text-xs text-tinta-tenue">Se muestran en el orden en que los agregás.</p>}
             {tipo === "nino" && <p className="mt-1 text-xs text-tinta-tenue">Los habituales son los pares; si alguna prenda viene en impares, sumalos.</p>}
           </fieldset>
 
           <fieldset className="mt-5">
             <legend className="text-sm font-bold">Medidas que muestra</legend>
             <div className="mt-2 flex flex-wrap gap-2">
-              {CLAVES_MEDIDA.map((m) => (
-                <button key={m} type="button" disabled={!operador || (!medidas.includes(m) && medidas.length >= 8)} aria-pressed={medidas.includes(m)} title={MEDIDAS[m].ayuda}
-                  onClick={() => setMedidas((ms) => (ms.includes(m) ? ms.filter((x) => x !== m) : CLAVES_MEDIDA.filter((x) => x === m || ms.includes(x))))}
+              {[...CLAVES_MEDIDA, ...propias].map((m) => (
+                <button key={m} type="button" disabled={!operador || (!medidas.includes(m) && medidas.length >= 8)} aria-pressed={medidas.includes(m)} title={infoMedida(m).ayuda || undefined}
+                  onClick={() => setMedidas((ms) => (ms.includes(m) ? ms.filter((x) => x !== m) : [...ms, m]))}
                   className={`rounded-full border px-3 py-1.5 text-sm ${medidas.includes(m) ? "border-marca bg-marca-claro font-bold text-marca-fuerte" : "border-linea bg-white"}`}>
-                  {MEDIDAS[m].nombre} <span className="text-xs font-normal text-tinta-tenue">{MEDIDAS[m].tipo === "cuerpo" ? "cuerpo" : "prenda"}</span>
+                  {infoMedida(m).nombre} <span className="text-xs font-normal text-tinta-tenue">{infoMedida(m).tipo === "cuerpo" ? "cuerpo" : "prenda"}</span>
                 </button>
               ))}
+              {operador && (
+                <span className="inline-flex gap-1">
+                  <input className="w-44 rounded-full border border-linea px-3 py-1.5 text-sm" maxLength={40} placeholder="Medida propia (ej: Ancho muslo)" aria-label="Medida nueva" value={medidaNueva}
+                    onChange={(e) => setMedidaNueva(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarMedida(); } }} />
+                  <Boton variante="borde" className="py-1.5" onClick={agregarMedida}>Agregar</Boton>
+                </span>
+              )}
             </div>
-            <p className="mt-1 text-xs text-tinta-tenue">Las del cuerpo sirven para recomendarle el talle al cliente según sus medidas. Las de la prenda sólo se muestran.</p>
+            <p className="mt-1 text-xs text-tinta-tenue">Las del cuerpo sirven para recomendarle el talle al cliente según sus medidas. Las de la prenda (y las propias) sólo se muestran. Se muestran en el orden en que las elegís.</p>
           </fieldset>
         </Tarjeta>
 
@@ -165,7 +203,7 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
               <table className="w-full min-w-max text-sm">
                 <thead><tr className="text-left text-tinta-tenue">
                   <th className="py-2 pr-3">Talle</th>
-                  {medidas.map((m) => <th key={m} className="px-2 py-2">{MEDIDAS[m].nombre}<span className="block text-xs font-normal">desde – hasta{m === "edad" ? " (años)" : ""}</span></th>)}
+                  {medidas.map((m) => <th key={m} className="px-2 py-2">{infoMedida(m).nombre}<span className="block text-xs font-normal">desde – hasta{m === "edad" ? " (años)" : ""}</span></th>)}
                 </tr></thead>
                 <tbody className="divide-y divide-linea">
                   {filas.map((t) => (
@@ -176,9 +214,9 @@ export default function EditorGuia({ params }: { params: Promise<{ id: string }>
                         return (
                           <td key={m} className="px-2 py-2">
                             <span className="flex items-center gap-1">
-                              <input aria-label={`${t} ${MEDIDAS[m].nombre} desde`} inputMode="decimal" disabled={!operador} className="w-16 rounded-lg border border-linea px-2 py-1.5 text-center" value={a} onChange={(e) => poner(t, m, 0, e.target.value)} />
+                              <input aria-label={`${t} ${infoMedida(m).nombre} desde`} inputMode="decimal" disabled={!operador} className="w-16 rounded-lg border border-linea px-2 py-1.5 text-center" value={a} onChange={(e) => poner(t, m, 0, e.target.value)} />
                               <span className="text-tinta-tenue">–</span>
-                              <input aria-label={`${t} ${MEDIDAS[m].nombre} hasta`} inputMode="decimal" disabled={!operador} className="w-16 rounded-lg border border-linea px-2 py-1.5 text-center" value={b} onChange={(e) => poner(t, m, 1, e.target.value)} placeholder={a} />
+                              <input aria-label={`${t} ${infoMedida(m).nombre} hasta`} inputMode="decimal" disabled={!operador} className="w-16 rounded-lg border border-linea px-2 py-1.5 text-center" value={b} onChange={(e) => poner(t, m, 1, e.target.value)} placeholder={a} />
                             </span>
                           </td>
                         );
@@ -212,7 +250,7 @@ function Asociar({ guiaId, tipo, tallesGuia, asociados, operador, alCambiar, avi
   const [quitar, setQuitar] = useState<Set<number>>(new Set());
   const { datos, cargando, recargar } = useDatos<{ productos: Candidato[]; total: number; porPagina: number }>(`guias-talles/${guiaId}/candidatos`, { q: buscado, solo, pagina });
   const guia = new Set(tallesGuia.map(normalizarTalle));
-  const escala = new Set<string>(tipo === "nino" ? TALLES_NINO : TALLES_ADULTO);
+  const escala = new Set<string>(tipo === "nino" ? TALLES_NINO : tipo === "adulto" ? TALLES_ADULTO : tallesGuia.map(normalizarTalle));
   const libres = (datos?.productos ?? []).filter((p) => p.guiaActual?.id !== guiaId);
 
   async function aplicar(agregar: number[], sacar: number[]) {
@@ -256,7 +294,7 @@ function Asociar({ guiaId, tipo, tallesGuia, asociados, operador, alCambiar, avi
             <option value="todos">Todos</option>
           </select>
         </form>
-        <p className="mt-2 text-xs text-tinta-tenue"><span className="rounded bg-ahorro-claro px-1 text-ahorro">verde</span> talle en la guía · <span className="rounded bg-amber-50 px-1 text-amber-800">amarillo</span> falta en la guía · <span className="rounded bg-red-50 px-1 text-oferta">rojo</span> no es de {tipo === "nino" ? "niños" : "adulto"}</p>
+        <p className="mt-2 text-xs text-tinta-tenue"><span className="rounded bg-ahorro-claro px-1 text-ahorro">verde</span> talle en la guía · <span className="rounded bg-amber-50 px-1 text-amber-800">amarillo</span> falta en la guía · <span className="rounded bg-red-50 px-1 text-oferta">rojo</span> {tipo === "otro" ? "no está en la guía" : `no es de ${tipo === "nino" ? "niños" : "adulto"}`}</p>
         {operador && libres.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Boton variante="borde" className="py-1.5" onClick={() => setElegidos(new Set(libres.map((p) => p.id)))}>Elegir los {libres.length} de esta página</Boton>

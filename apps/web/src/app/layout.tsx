@@ -54,7 +54,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <Footer config={config} categorias={categorias} />
           {/* Con el asistente prendido, la burbuja es el chat (con WhatsApp adentro); si no, WhatsApp directo. */}
           {config.chatbot.activo ? <Asistente saludo={config.chatbot.saludo} whatsapp={config.whatsapp} /> : <BotonWhatsapp numero={config.whatsapp} />}
-          <CajonCarrito descuento={config.descuentoTransferencia} montoMinimo={config.montoMinimoCarrito} />
+          <CajonCarrito descuento={config.descuentoTransferencia} montoMinimo={config.montoMinimoCarrito} cuotas={config.cuotasSinInteres} medios={config.mediosPago} />
         </ProveedorCarrito>
         <Analytics />
         <Hidratado />

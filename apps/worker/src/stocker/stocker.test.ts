@@ -291,6 +291,24 @@ describe("cliente de Stocker", () => {
     // La dada de baja no viene; el publicable negativo (más reservado que stock) es 0.
     expect(p.variantes.map((v) => [v.sku, v.cantidad, v.precio])).toEqual([["ISUABEPANNEGL", 1002, 3_200_000], ["ISUABEPANMOLL", 0, 3_200_000], ["ISUABEPANTOPL", 0, 3_200_000]]);
   });
+  it("sólo entran productos padre: ni de evento, ni packs, ni combos", async () => {
+    const v = (id: number, extra = {}) => ({ id, sku: `S${id}`, color: "Negro", talle: "M", precioMinorista: 1000, publicable: 3, activo: true, ...extra });
+    const p = (id: number, extra = {}, variantes = [v(id * 10)]) => ({ id, skuAgrupador: `P${id}`, titulo: `P${id}`, descripcion: null, categoria: null, genero: null, modelo: null, precioMinorista: 1000, variantes, ...extra });
+    respuesta = { status: 200, cuerpo: { negocio: 1, generadoEn: ahora(), productos: [
+      p(1),
+      p(2, { esFeria: true }),
+      p(3, { esEvento: true }),
+      p(4, { esCombo: true }),
+      p(5, { definicionCombo: "{\"eje\":\"Talle\"}" }),
+      p(6, { tipo: "pack" }),
+      p(7, { tipo: "padre", esFeria: null, definicionCombo: null }),
+      // Un padre con una variante de pack y otra de combo: quedan las comunes.
+      p(8, {}, [v(81), v(82, { esPack: true }), v(83, { esCombo: true })]),
+    ] } };
+    const c = await cli().catalogo();
+    expect(c.productos.map((x) => x.sku)).toEqual(["P1", "P7", "P8"]);
+    expect(c.productos[2]!.variantes.map((x) => x.sku)).toEqual(["S81"]);
+  });
   it("un catálogo cortado (truncado) se avisa", async () => {
     respuesta = { status: 200, cuerpo: { negocio: 1, generadoEn: ahora(), truncado: true, sinLocalesOnline: false, productos: [] } };
     expect((await cli().catalogo()).truncado).toBe(true);

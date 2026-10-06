@@ -20,7 +20,7 @@ Ajustes → **Packs**:
 | **Máximo** | 10 | La más grande (hasta 20) |
 | **% por cantidad** | 2 → 10 %, 3 → 15 %, 4 → 18 %, 5 → 20 %, 6 → 21 %, 7 → 22 %, 8 → 23 %, 9 → 24 %, 10 → 25 % | Un casillero por cantidad. Llevando más, el % no puede ser menor (como mucho 60 %) |
 
-Al cambiar el mínimo o el máximo, los casilleros se agregan o se quitan solos. Con más unidades que el máximo (sumando sueltas en el carrito), vale el % del máximo.
+Al cambiar el mínimo o el máximo, los casilleros se agregan o se quitan solos. *(Etapa 10: en el carrito el pack va aparte; las prendas sueltas de la misma prenda van a su precio y no suman para el pack.)*
 
 > Al subir esta versión, la migración 0015 pasa el ajuste viejo (x2 a x5) al nuevo. Si tenía los % de fábrica, quedan los nuevos de 2 a 10. Si los había cambiado, se respetan y de 6 a 10 se repite el de x5. Revisalos en Ajustes → Packs.
 

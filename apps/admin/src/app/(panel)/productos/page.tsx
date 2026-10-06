@@ -9,7 +9,7 @@ import { nombresCategorias, type Categoria, type FilaProducto } from "@/lib/cata
 
 const FILTROS: Array<[string, string]> = [
   ["todos", "Todos"], ["visibles", "Publicados"], ["ocultos", "Ocultos"], ["destacados", "Destacados"], ["nuevos", "Nuevos"], ["packs", "Se venden en pack"], ["sin_descripcion", "Sin descripción"],
-  ["sin_fotos", "Sin fotos"], ["agotados", "Agotados"], ["de_baja", "Dados de baja en Stocker"],
+  ["sin_fotos", "Sin fotos"], ["agotados", "Agotados"], ["de_baja", "Dados de baja en Stocker"], ["eliminados", "Eliminados"],
 ];
 
 function Productos() {
@@ -58,6 +58,19 @@ function Productos() {
       setElegidos(new Set());
     } catch (e) { aviso.error(e); }
   }
+  /** Etapa 10: eliminar (sale de la tienda y de las listas; Stocker no lo vuelve a publicar) y restaurar. */
+  async function eliminar() {
+    if (!window.confirm(`¿Eliminar ${elegidos.size === 1 ? "el producto elegido" : `los ${elegidos.size} productos elegidos`}? Sale de la tienda y de esta lista, y Stocker no lo vuelve a publicar. Se puede restaurar desde el filtro «Eliminados».`)) return;
+    await accion("productos/eliminar", "Eliminados");
+  }
+  async function accion(ruta: string, texto: string) {
+    try {
+      const r = await api<{ productos: number }>(ruta, { cuerpo: { ids: [...elegidos] } });
+      aviso.ok(`${texto} (${r.productos} productos).`);
+      setElegidos(new Set());
+      setDatos(await api<{ productos: FilaProducto[]; total: number; porPagina: number }>("productos", { query: { filtro, categoria, q: sp.get("q"), pagina } }));
+    } catch (e) { aviso.error(e); }
+  }
   async function masivo(cambios: Record<string, unknown>, texto: string) {
     try {
       const r = await api<{ productos: number }>("productos/masivo", { cuerpo: { ids: [...elegidos], cambios } });
@@ -87,7 +100,14 @@ function Productos() {
       </div>
       <div className="mb-4"><aviso.Aviso /></div>
 
-      {operador && elegidos.size > 0 && (
+      {operador && elegidos.size > 0 && filtro === "eliminados" && (
+        <div className="sticky top-2 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-marca bg-marca-claro p-3 text-sm">
+          <span className="mr-2 font-bold">{elegidos.size} elegidos:</span>
+          <Boton variante="borde" onClick={() => void accion("productos/restaurar", "Restaurados: quedan ocultos hasta que los publiques")}>Restaurar</Boton>
+          <Boton variante="texto" onClick={() => setElegidos(new Set())}>Deseleccionar</Boton>
+        </div>
+      )}
+      {operador && elegidos.size > 0 && filtro !== "eliminados" && (
         <div className="sticky top-2 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-marca bg-marca-claro p-3 text-sm">
           <span className="mr-2 font-bold">{elegidos.size} elegidos:</span>
           <Boton variante="borde" onClick={() => void masivo({ nuevo: true }, "Marcados como nuevos")}>Marcar Nuevo</Boton>
@@ -110,6 +130,7 @@ function Productos() {
             {(guias?.guias ?? []).map((g) => <option key={g.id} value={g.id}>{g.nombre}</option>)}
             <option value="ninguna">Sin guía</option>
           </select>
+          <Boton variante="peligro" onClick={() => void eliminar()}>Eliminar…</Boton>
           <Boton variante="texto" onClick={() => setElegidos(new Set())}>Deseleccionar</Boton>
         </div>
       )}
