@@ -81,9 +81,9 @@ test.describe("cupones en la tienda", () => {
     await expect(resumen.getByText("Cupón BIENVENIDA10", { exact: false }).first()).toBeVisible();
     const valor = async (dt: string) => pesos(await resumen.locator("dt").getByText(dt, { exact: true }).locator("xpath=ancestor-or-self::dt/following-sibling::dd").innerText());
     const subtotal = await valor("Subtotal");
-    const total = await valor("Total");
-    expect(total).toBeLessThan(subtotal);
-    expect(total).toBeGreaterThanOrEqual(Math.floor(subtotal * 0.9) - 1);
+    // El total se recalcula al cambiar el pago: se espera el de "pagar en el local" (sin el % de transferencia).
+    await expect.poll(() => valor("Total"), { timeout: 10_000 }).toBeGreaterThanOrEqual(Math.floor(subtotal * 0.9) - 1);
+    expect(await valor("Total")).toBeLessThan(subtotal);
     await page.getByRole("checkbox").check();
     await page.getByRole("button", { name: "Confirmar compra" }).click();
     await page.waitForURL(/\/pedido\/ISU-\d+/);

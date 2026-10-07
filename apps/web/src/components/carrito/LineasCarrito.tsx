@@ -3,11 +3,32 @@ import Link from "next/link";
 import { useId, useState } from "react";
 import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion } from "@isu/shared";
 import { Foto } from "../Foto";
-import { useCarrito } from "./Carrito";
+import { useCarrito, usoDe, type AvisoStock, type LineaCarrito } from "./Carrito";
+
+/*
+ * Si el + no deja sumar porque la misma variante también está en otra línea
+ * (suelta y en un pack comparten el stock), qué decir. null: no es por eso.
+ */
+function bloqueoPorOtras(l: LineaCarrito, lineas: LineaCarrito[], c: Cotizacion | null, max: number): AvisoStock | null {
+  if (!c || l.cantidad < max) return null;
+  const prendas = l.pack ? l.pack.prendas : [{ sku: l.sku, cantidad: 1, talle: l.talle, color: l.color, foto: l.foto }];
+  for (const x of prendas) {
+    const otras = usoDe(lineas, x.sku, l.sku);
+    if (!otras.total) continue;
+    // Lo que queda para esta línea (la API ya le restó lo de las otras).
+    const libre = c.lineas.find((y) => y.clave === (l.pack ? `${l.sku}|${x.sku}` : l.sku))?.disponible;
+    if (libre === undefined || Math.floor(libre / x.cantidad) > l.cantidad) continue;
+    return {
+      nombre: l.nombre, detalle: [x.talle && `Talle ${x.talle}`, x.color].filter(Boolean).join(" · "), foto: x.foto,
+      stock: libre + otras.total, uso: usoDe(lineas, x.sku), desde: "carrito",
+    };
+  }
+  return null;
+}
 
 /* Las líneas del carrito y el resumen: lo usan el cajón lateral y la página /carrito. */
 export function LineasCarrito({ alNavegar }: { alNavegar?: () => void }) {
-  const { lineas, cambiar, quitar, cotizacion } = useCarrito();
+  const { lineas, cambiar, quitar, cotizacion, avisarStock } = useCarrito();
   return (
     <ul className="divide-y divide-linea">
       {lineas.map((l) => {
@@ -21,6 +42,7 @@ export function LineasCarrito({ alNavegar }: { alNavegar?: () => void }) {
         const pct = l.pack ? pack?.porcentaje : undefined;
         const nombre = l.pack ? `Pack x${l.pack.unidades} ${l.nombre}` : l.nombre;
         const href = l.pack ? rutaPack(l.slug, l.pack.unidades) : `/producto/${l.slug}`;
+        const bloqueo = bloqueoPorOtras(l, lineas, cotizacion, max);
         return (
           <li key={l.sku} className="flex gap-3 py-4">
             <Link href={href} onClick={alNavegar} className="block aspect-[4/5] w-20 shrink-0 overflow-hidden rounded-xl bg-fondo-suave">
@@ -56,7 +78,9 @@ export function LineasCarrito({ alNavegar }: { alNavegar?: () => void }) {
                 <div className="inline-flex items-center rounded-full border border-linea" role="group" aria-label={`Cantidad de ${nombre}`}>
                   <button type="button" onClick={() => cambiar(l.sku, l.cantidad - 1)} disabled={l.cantidad <= 1} className="size-9 rounded-full text-lg disabled:opacity-30" aria-label="Uno menos">−</button>
                   <span className="w-7 text-center text-sm font-bold" aria-live="polite">{l.cantidad}</span>
-                  <button type="button" onClick={() => cambiar(l.sku, l.cantidad + 1)} disabled={l.cantidad >= max} className="size-9 rounded-full text-lg disabled:opacity-30" aria-label="Uno más">+</button>
+                  {/* Sin stock por lo que va en otra línea: el + explica por qué, en vez de quedar apagado. */}
+                  <button type="button" onClick={() => (bloqueo ? avisarStock(bloqueo) : cambiar(l.sku, l.cantidad + 1))} disabled={!bloqueo && l.cantidad >= max}
+                    className={`size-9 rounded-full text-lg disabled:opacity-30 ${bloqueo ? "opacity-40" : ""}`} aria-label="Uno más">+</button>
                 </div>
                 <button type="button" onClick={() => quitar(l.sku)} className="text-sm text-tinta-tenue underline hover:text-tinta">Quitar</button>
               </div>

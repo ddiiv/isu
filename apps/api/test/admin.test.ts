@@ -668,6 +668,11 @@ describe("packs", () => {
       precio: 2 * 850_000 + 935_000, precioLista: 2 * 1_000_000 + 1_100_000 });
     expect(r.packs[0].prendas.map((x: { sku: string; cantidad: number }) => [x.sku, x.cantidad])).toEqual([["QA-ADM-1-1", 2], ["QA-ADM-1-3", 1]]);
     expect(r.subtotal).toBe(1_000_000 + 2 * 850_000 + 935_000);
+    // Lo que queda para cada línea (el + del carrito) descuenta lo que la misma variante lleva en las otras.
+    const stockDe = async (sku: string) => (await pool.query<{ stock: number }>("SELECT stock FROM tienda.variantes WHERE sku = $1", [sku])).rows[0]!.stock;
+    const [s11, s13] = [await stockDe("QA-ADM-1-1"), await stockDe("QA-ADM-1-3")];
+    expect(r.lineas[0].disponible).toBe(Math.min(20, s11 - 2));
+    expect(r.packs[0].disponible).toBe(Math.min(10, Math.floor((s11 - 1) / 2), s13));
     // El mismo pack dos veces (aunque venga en otro orden) son 2 packs iguales.
     const dos = (await carrito([pack3, { pack: [{ sku: "QA-ADM-1-3", cantidad: 1 }, { sku: "QA-ADM-1-1", cantidad: 2 }], cantidad: 1 }])).json();
     expect(dos.packs.map((x: { cantidad: number; subtotal: number }) => [x.cantidad, x.subtotal])).toEqual([[2, 2 * (2 * 850_000 + 935_000)]]);

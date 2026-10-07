@@ -77,12 +77,13 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
     if (conTalle && !talle) { setAvisoTalle(true); return; }
     if (!listo || !variante) return;
     const foto = colorActual?.fotos[0] ?? p.exhibicion[0] ?? null;
-    carrito.agregar({
+    // Si las que quedan ya están en el carrito (por ejemplo, dentro de un pack), no agrega y lo explica.
+    const agregada = carrito.agregar({
       sku: variante.sku, nombre: p.nombre, slug: p.slug,
       color: colorActual && colorActual.nombre !== "Único" ? colorActual.nombre : null,
       talle: variante.talle, precio: variante.precio, foto: foto?.clave ?? null,
-    }, 1, { abrir: !comprarYa });
-    if (comprarYa) router.push("/checkout");
+    }, 1, { abrir: !comprarYa, stock: variante.stock });
+    if (agregada && comprarYa) router.push("/checkout");
   }
 
   return (

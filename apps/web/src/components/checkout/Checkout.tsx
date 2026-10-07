@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { centavos, conDescuento, formatearPesos, PedidoNuevo, type ConfigPublica, type Cotizacion, type MedioPago } from "@isu/shared";
+import { centavos, conDescuento, formatearPesos, NOMBRES_PROVINCIAS, PedidoNuevo, type ConfigPublica, type Cotizacion, type LugarDireccion, type MedioPago } from "@isu/shared";
 import { itemDe, useCarrito } from "../carrito/Carrito";
 import { Foto } from "../Foto";
 import { CampoCupon, LineaCupon } from "../carrito/LineasCarrito";
 import { api, guardarAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 import { OpcionesEnvio, type EleccionEnvio } from "./OpcionesEnvio";
+import { AvisoDireccion, CampoCalle } from "./Direccion";
 
 /*
  * Checkout en una sola página, como el de las tiendas de referencia:
@@ -27,7 +28,6 @@ const MEDIOS: Array<{ id: MedioPago; titulo: string; detalle: (c: ConfigPublica)
   { id: "pagofacil", titulo: "Pago Fácil / Rapipago", detalle: () => "Pagás en efectivo con el código que te da Mercado Pago. Tenés 3 días." },
   { id: "local", titulo: "Pagar al retirar en el local", detalle: () => "Efectivo, débito o transferencia al retirar. Te guardamos las prendas 3 días." },
 ];
-const PROVINCIAS = ["CABA", "Buenos Aires", "Catamarca", "Chaco", "Chubut", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán"];
 
 type Campos = { [k: string]: string };
 const campo = "w-full rounded-lg border border-linea bg-white px-3.5 py-3 text-base outline-none transition focus:border-tinta focus:ring-2 focus:ring-tinta/10 aria-[invalid=true]:border-oferta";
@@ -50,6 +50,12 @@ export function Checkout({ config }: { config: ConfigPublica }) {
   const [recargarEnvio, setRecargarEnvio] = useState(0);
   const [avisosWhatsapp, setAvisosWhatsapp] = useState(true);
   const cambiar = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setC((x) => ({ ...x, [k]: e.target.value }));
+  // Etapa 11: la sugerencia de Google elegida completa la dirección (lo que no trae queda como estaba).
+  const elegirLugar = (l: LugarDireccion) => {
+    setC((x) => ({ ...x, calle: l.calle || (x.calle ?? ""), numero: l.numero || (x.numero ?? ""), cp: l.cp || (x.cp ?? ""), localidad: l.localidad || (x.localidad ?? ""), provincia: l.provincia ?? x.provincia ?? "CABA" }));
+    // Sin altura en la sugerencia (se eligió sólo la calle): el foco va al número.
+    if (!l.numero) setTimeout(() => document.querySelector<HTMLInputElement>('input[name="numero"]')?.focus(), 0);
+  };
 
   // Con sesión: los datos de la cuenta ya completos.
   useEffect(() => {
@@ -186,14 +192,22 @@ export function Checkout({ config }: { config: ConfigPublica }) {
             </div>
             {entrega === "envio" ? (
               <div className="mt-4 grid gap-3 sm:grid-cols-6">
-                <div className="sm:col-span-4">{inp("calle", "Calle", { autoComplete: "address-line1" })}</div>
+                <div className="sm:col-span-4">
+                  <CampoCalle valor={c.calle ?? ""} alCambiar={(v) => setC((x) => ({ ...x, calle: v }))} alElegir={elegirLugar}
+                    activo={config.direcciones.sugerencias} error={errores.calle} clase={campo} />
+                </div>
                 <div className="sm:col-span-2">{inp("numero", "Número")}</div>
+                {/* La revisión de Georef, pegada a calle y número (en el celular queda a la vista al escribir). */}
+                <div className="sm:col-span-6 empty:hidden -mt-1">
+                  <AvisoDireccion activo={config.direcciones.revisar} d={{ calle: c.calle ?? "", numero: c.numero ?? "", localidad: c.localidad ?? "", provincia: c.provincia ?? "" }}
+                    alUsar={(s) => setC((x) => ({ ...x, calle: s.calle, numero: s.numero, localidad: s.localidad || (x.localidad ?? ""), provincia: s.provincia }))} />
+                </div>
                 <div className="sm:col-span-2">{inp("piso", "Piso / depto (opcional)", { autoComplete: "address-line2" })}</div>
                 <div className="sm:col-span-2">{inp("cp", "Código postal", { autoComplete: "postal-code" })}</div>
                 <div className="sm:col-span-2">{inp("localidad", "Localidad", { autoComplete: "address-level2" })}</div>
                 <label className="block sm:col-span-3">
                   <span className="mb-1 block text-sm font-bold">Provincia</span>
-                  <select value={c.provincia} onChange={cambiar("provincia")} className={campo} autoComplete="address-level1">{PROVINCIAS.map((p) => <option key={p}>{p}</option>)}</select>
+                  <select value={c.provincia} onChange={cambiar("provincia")} className={campo} autoComplete="address-level1">{NOMBRES_PROVINCIAS.map((p) => <option key={p}>{p}</option>)}</select>
                 </label>
                 <div className="sm:col-span-3">{inp("indicaciones", "Indicaciones (opcional)", { placeholder: "Timbre, entre calles…" })}</div>
                 <div className="sm:col-span-6">
