@@ -485,6 +485,24 @@ describe("ajustes (sólo el dueño)", () => {
     expect((await app.inject("/v1/config")).json().avisoUltimas).toBe(4);
     await req("PUT", "/v1/admin/ajustes", dueno, { avisoUltimas: 3 });
   });
+  it("el link de cada local: sólo https; uno viejo inválido no rompe la tienda (el local se ve sin link)", async () => {
+    const original = (await pool.query("SELECT valor FROM tienda.ajustes WHERE clave = 'locales'")).rows[0]?.valor;
+    const local = (mapa: string | null) => ({ nombre: "QA Local", direccion: "Bacacay 3231", localidad: "Flores, CABA", horario: "Lun a vie", mapa, retiro: true });
+    try {
+      for (const malo of ["javascript:alert(document.cookie)", "data:text/html,<b>x</b>", "http://maps.google.com", "no es un link"]) {
+        expect((await req("PUT", "/v1/admin/ajustes", dueno, { locales: [local(malo)] })).statusCode, malo).toBe(400);
+      }
+      expect((await req("PUT", "/v1/admin/ajustes", dueno, { locales: [local("https://maps.app.goo.gl/QaFlores1")] })).statusCode).toBe(200);
+      expect((await app.inject("/v1/config")).json().locales[0]).toMatchObject({ nombre: "QA Local", mapa: "https://maps.app.goo.gl/QaFlores1" });
+      // Guardado antes de exigir https (o a mano en la base): el local sigue, sin el link.
+      await pool.query("UPDATE tienda.ajustes SET valor = $1 WHERE clave = 'locales'", [JSON.stringify([local("javascript:alert(1)"), local(null)])]);
+      const ls = (await app.inject("/v1/config")).json().locales;
+      expect(ls).toHaveLength(2);
+      expect(ls.map((l: { mapa: string | null }) => l.mapa)).toEqual([null, null]);
+    } finally {
+      await pool.query("UPDATE tienda.ajustes SET valor = $1 WHERE clave = 'locales'", [JSON.stringify(original)]);
+    }
+  });
   it("la auditoría registra quién cambió qué", async () => {
     const a = (await req("GET", "/v1/admin/auditoria?entidad=ajuste", dueno)).json().registros;
     expect(a[0]).toMatchObject({ actor: "qa-adm-dueno@test.com", accion: "ajustes", ip: "10.9.9.9" });

@@ -200,6 +200,8 @@ export const PedidoPublico = z.object({
   entrega: z.enum(["envio", "retiro"]),
   direccion: Direccion.nullable(),
   local: z.string().nullable(),
+  /** El link del local de retiro (Ajustes → Locales), si tiene. */
+  localEnlace: z.string().nullable().optional(),
   contacto: z.object({ email: z.string(), nombre: z.string(), apellido: z.string(), telefono: z.string() }),
   items: z.array(z.object({ sku: z.string(), nombre: z.string(), color: z.string().nullable(), talle: z.string().nullable(), precio: z.number().int(), cantidad: z.number().int() })),
   subtotal: z.number().int(),

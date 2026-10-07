@@ -217,7 +217,11 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             <p><span className="font-bold">Envíos a todo el país.</span> En CABA y GBA te llega hoy o mañana.
               {config.envioGratisDesde ? <> <span className="font-bold text-ahorro">Gratis</span> desde {formatearPesos(config.envioGratisDesde)}.</> : null}</p></li>
           <li className="flex gap-3 p-4"><IconoLocal className="size-5 shrink-0 text-marca" />
-            <p><span className="font-bold">Retirá gratis</span> en {config.locales.length > 1 ? "nuestros locales" : "nuestro local"}{config.locales[0] ? ` (${config.locales[0].nombre})` : ""}.</p></li>
+            <p><span className="font-bold">Retirá gratis</span> en {config.locales.length > 1
+              ? <Link href="/locales" className="underline underline-offset-2 hover:text-marca">nuestros locales</Link>
+              : <>nuestro local{config.locales[0] ? <> ({config.locales[0].mapa
+                ? <a href={config.locales[0].mapa} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-marca">{config.locales[0].nombre}</a>
+                : config.locales[0].nombre})</> : null}</>}.</p></li>
           <li className="flex gap-3 p-4"><IconoBanco className="size-5 shrink-0 text-ahorro" />
             <p><span className="font-bold text-ahorro">{config.descuentoTransferencia}% OFF</span> pagando con transferencia · {config.cuotasSinInteres} cuotas sin interés con tarjeta.</p></li>
         </ul>

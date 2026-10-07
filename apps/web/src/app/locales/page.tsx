@@ -26,13 +26,25 @@ export default async function Locales() {
       <p className="mt-4 max-w-2xl text-lg text-tinta-suave">Vení a probarte las prendas o retirá gratis lo que compraste online.</p>
       <ul className="mt-10 grid gap-4 md:grid-cols-3">
         {config.locales.map((l) => (
-          <li key={l.nombre} className="rounded-[var(--radius-foto)] border border-linea p-6">
+          <li key={l.nombre} className="flex flex-col rounded-[var(--radius-foto)] border border-linea p-6">
             <IconoLocal className="size-7 text-marca" />
-            <h2 className="mt-4 text-2xl">{l.nombre}</h2>
-            <p className="mt-2 text-tinta-suave">{l.direccion}<br />{l.localidad}</p>
+            {/* Con link (Ajustes → Locales): el nombre y la dirección llevan ahí. */}
+            <h2 className="mt-4 text-2xl">
+              {l.mapa ? <a href={l.mapa} target="_blank" rel="noopener noreferrer" className="hover:text-marca hover:underline">{l.nombre}</a> : l.nombre}
+            </h2>
+            <p className="mt-2 text-tinta-suave">
+              {l.mapa
+                ? <a href={l.mapa} target="_blank" rel="noopener noreferrer" className="underline decoration-linea underline-offset-4 hover:text-marca hover:decoration-marca">{l.direccion}<br />{l.localidad}</a>
+                : <>{l.direccion}<br />{l.localidad}</>}
+            </p>
             <p className="mt-3 text-sm"><strong>Horario:</strong> {l.horario}</p>
-            {l.retiro && <p className="mt-3 inline-block rounded-full bg-ahorro-claro px-3 py-1 text-sm font-bold text-ahorro">Retiro de compras online</p>}
-            {l.mapa && <p className="mt-3"><a href={l.mapa} target="_blank" rel="noopener noreferrer" className="font-bold text-marca underline">Cómo llegar</a></p>}
+            {l.retiro && <p className="mt-3 w-fit rounded-full bg-ahorro-claro px-3 py-1 text-sm font-bold text-ahorro">Retiro de compras online</p>}
+            {l.mapa && (
+              <div className="mt-auto pt-5">
+                <a href={l.mapa} target="_blank" rel="noopener noreferrer" aria-label={`Cómo llegar a ${l.nombre} (se abre en otra pestaña)`}
+                  className="boton-borde">Cómo llegar <span aria-hidden="true">↗</span></a>
+              </div>
+            )}
           </li>
         ))}
       </ul>

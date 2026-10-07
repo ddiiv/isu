@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conDescuento, desdePesos, formatearPesos, formatearPesosExactos, fotosMaximasDelProducto, puedeAgregarFoto, centavos, porcentajePack, Packs, PACKS_POR_DEFECTO, leerPacks, cantidadesPack, maxPorcentajePack, rutaPack, leerRutaPack, nombreParaResena, Opiniones } from "./index.js";
+import { conDescuento, desdePesos, formatearPesos, formatearPesosExactos, fotosMaximasDelProducto, puedeAgregarFoto, centavos, porcentajePack, Packs, PACKS_POR_DEFECTO, leerPacks, cantidadesPack, maxPorcentajePack, rutaPack, leerRutaPack, nombreParaResena, Opiniones, EnlaceLocal, normalizarEnlace, enlaceDeLocal, Local } from "./index.js";
 
 describe("fotos", () => {
   it("el tope del padre es 5 por color", () => {
@@ -101,5 +101,33 @@ describe("packs y reseñas (etapa 8)", () => {
     expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 0 }] }).success).toBe(false);
     expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 5, texto: "x".repeat(1001) }] }).success).toBe(false);
     expect(Opiniones.safeParse({ resenas: [{ productoId: 1, estrellas: 5, extra: 1 }] }).success).toBe(false);
+  });
+});
+
+describe("link de los locales", () => {
+  it("sólo https: Google Maps sí; javascript:, data:, http y cosas que no son links, no", () => {
+    for (const ok of ["https://maps.app.goo.gl/AbC123xyz", "https://www.google.com/maps/place/Bacacay+3231", "https://instagram.com/isuwaya", "  https://goo.gl/maps/xyz  "]) {
+      expect(EnlaceLocal.safeParse(ok).success, ok).toBe(true);
+    }
+    for (const malo of ["javascript:alert(1)", "data:text/html,<script>alert(1)</script>", "http://maps.google.com", "ftp://x.com/a", "https://", "https://localhost", "maps.app.goo.gl/x", "no es un link", `https://x.com/${"a".repeat(600)}`]) {
+      expect(EnlaceLocal.safeParse(malo).success, malo).toBe(false);
+    }
+  });
+  it("lo que se pega en Ajustes queda como link con https://", () => {
+    expect(normalizarEnlace("maps.app.goo.gl/AbC")).toBe("https://maps.app.goo.gl/AbC");
+    expect(normalizarEnlace("http://maps.google.com/x")).toBe("https://maps.google.com/x");
+    expect(normalizarEnlace("  https://x.com  ")).toBe("https://x.com");
+    expect(normalizarEnlace("")).toBe("");
+    // Un esquema raro no se "arregla": queda para que la validación lo rechace.
+    expect(normalizarEnlace("javascript:alert(1)")).toBe("javascript:alert(1)");
+  });
+  it("el link de un local por su nombre (el pedido guarda el nombre)", () => {
+    const locales = [{ nombre: "Flores", mapa: "https://maps.app.goo.gl/Flores1" }, { nombre: "Salada", mapa: null }, { nombre: "Viejo", mapa: "javascript:alert(1)" }];
+    expect(enlaceDeLocal(locales, "Flores")).toBe("https://maps.app.goo.gl/Flores1");
+    expect(enlaceDeLocal(locales, "Salada")).toBeNull();
+    expect(enlaceDeLocal(locales, "Viejo")).toBeNull();
+    expect(enlaceDeLocal(locales, "Otro")).toBeNull();
+    expect(enlaceDeLocal(locales, null)).toBeNull();
+    expect(Local.safeParse({ nombre: "A", direccion: "B", localidad: "C", horario: "D", mapa: "javascript:alert(1)", retiro: true }).success).toBe(false);
   });
 });

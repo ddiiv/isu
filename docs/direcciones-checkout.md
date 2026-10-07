@@ -1,4 +1,4 @@
-# Direcciones en el checkout y aviso del carrito (Etapa 11)
+# Direcciones en el checkout, aviso del carrito y links de los locales (Etapa 11)
 
 Qué cambió y cómo se usa. Lo anterior del carrito y el checkout sigue en [`carrito-checkout-backoffice.md`](carrito-checkout-backoffice.md).
 
@@ -102,7 +102,29 @@ Se cierra con Escape, tocando afuera o con los botones. Al cerrar, el foco vuelv
 
 **El «+» del carrito** ahora sabe cuántas quedan descontando lo que va en las otras líneas. Antes, el «+» de una prenda suelta contaba todo el stock, aunque una parte estuviera en un pack.
 
-## 5. Para probar en la compu
+## 5. Links de los locales
+
+En **Ajustes → Locales**, cada local tiene un campo **«Link del local»**. Va el de Google Maps (en Google Maps: el local → **Compartir → Copiar vínculo**) o cualquier otro link que quieras (Instagram del local, por ejemplo).
+
+- **Si lo pegás sin `https://`** («maps.app.goo.gl/…»), se lo agrega solo al salir del campo.
+- **Si el link no sirve**, el campo lo marca en rojo y no deja guardar.
+- **«Probar ↗»**, al lado del campo, lo abre para que confirmes que lleva al lugar correcto.
+
+**Dónde se puede tocar en la tienda** (siempre se abre en otra pestaña):
+
+| Dónde | Qué lleva al link |
+|---|---|
+| **Nuestros locales** | El nombre, la dirección y el botón **«Cómo llegar ↗»** |
+| **Checkout**, al elegir «Retiro en el local» | **«Cómo llegar ↗»** debajo de cada local |
+| **Ficha de la prenda**, «Retirá gratis en…» | El nombre del local (con varios locales, lleva a la página de locales) |
+| **Página del pedido** con retiro | «Cómo llegar ↗» en el aviso y el nombre del local en el resumen |
+| **Mails** de pedido recibido y pago confirmado | El nombre del local y, en el texto plano, «Cómo llegar al local: …» |
+
+Un local sin link se ve igual que antes, sin nada para tocar.
+
+**Seguridad:** sólo se aceptan links `https://`. Nada de `javascript:` ni `data:`. Si quedara guardado un link viejo que no cumple, la tienda muestra el local igual, sin el link.
+
+## 6. Para probar en la compu
 
 `pnpm demo:direcciones` levanta Google y Georef simulados (en `http://127.0.0.1:3940`) con unas pocas calles reales:
 
@@ -116,3 +138,5 @@ El `.env.example` ya apunta ahí. Para probar:
 - «Thames 1500» → sugerencia → todo completo.
 - «Corientes» 1234 → «¿Tu dirección es Av. Corrientes 1234, CABA?».
 - Thames 99999 → «No encontramos la altura».
+
+Los datos de muestra (`pnpm demo:fotos`) le ponen link al local de Flores; los de La Salada quedan sin link.

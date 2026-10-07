@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
-import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, leerPacks, PACKS_POR_DEFECTO } from "@isu/shared";
+import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, EnlaceLocal, leerPacks, PACKS_POR_DEFECTO } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
 import type { CacheCorta } from "../../lib/cache.js";
 import { CON_STOCK, EN_LIQUIDACION } from "../productos/consultas.js";
@@ -70,7 +70,11 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
       // El ajuste de direcciones tiene otra forma (topes, Google, Georef): se resume abajo.
       if (clave === "direcciones") continue;
       const campo = forma[clave as keyof typeof forma];
-      const r = campo.safeParse(valor);
+      // Un local con un link que ya no vale (guardado antes de exigir https) se muestra igual, sin el link.
+      const limpio = clave === "locales" && Array.isArray(valor)
+        ? valor.map((l: Record<string, unknown>) => ({ ...l, mapa: EnlaceLocal.safeParse(l?.mapa).success ? l.mapa : null }))
+        : valor;
+      const r = campo.safeParse(limpio);
       if (r.success) salida[clave] = r.data;
       else app.log.warn({ clave }, "ajuste inválido: se usa el valor por defecto");
     }

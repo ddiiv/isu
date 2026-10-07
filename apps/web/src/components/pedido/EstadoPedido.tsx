@@ -178,7 +178,8 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
         )}
         {aviso && <p className="mt-4 text-sm font-bold" role="status">{aviso}</p>}
 
-        {p.estado === "a_pagar_en_local" && p.local && <p className="mt-6 rounded-2xl bg-marca-claro p-4">Retirás en <b>{p.local}</b>. Llevá tu DNI y el número de pedido.</p>}
+        {p.estado === "a_pagar_en_local" && p.local && <p className="mt-6 rounded-2xl bg-marca-claro p-4">Retirás en <b>{p.local}</b>. Llevá tu DNI y el número de pedido.{p.localEnlace && <> <a href={p.localEnlace} target="_blank" rel="noopener noreferrer" className="font-bold text-marca underline">Cómo llegar ↗</a></>}</p>}
+        {p.estado === "listo_para_retirar" && p.local && p.localEnlace && <p className="mt-6 rounded-2xl bg-marca-claro p-4">Te esperamos en <b>{p.local}</b>. <a href={p.localEnlace} target="_blank" rel="noopener noreferrer" className="font-bold text-marca underline">Cómo llegar ↗</a></p>}
         {p.envioDetalle && ["pagado", "enviado", "entregado"].includes(p.estado) && <SeguimientoEnvio envio={p.envioDetalle} />}
         {/* Etapa 8: ya le llegó → que nos cuente cómo le quedó. */}
         {p.opinar && (
@@ -209,7 +210,8 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
           </div>
           <div className="flex justify-between pt-1 font-display text-2xl"><dt>Total</dt><dd>{formatearPesos(p.total)}</dd></div>
         </dl>
-        <p className="mt-4 text-sm text-tinta-suave">{p.entrega === "envio" && p.direccion ? `${p.direccion.calle} ${p.direccion.numero}${p.direccion.piso ? `, ${p.direccion.piso}` : ""} · ${p.direccion.localidad}, ${p.direccion.provincia}` : p.local}</p>
+        <p className="mt-4 text-sm text-tinta-suave">{p.entrega === "envio" && p.direccion ? `${p.direccion.calle} ${p.direccion.numero}${p.direccion.piso ? `, ${p.direccion.piso}` : ""} · ${p.direccion.localidad}, ${p.direccion.provincia}` : p.localEnlace
+          ? <a href={p.localEnlace} target="_blank" rel="noopener noreferrer" className="underline hover:text-marca">{p.local}</a> : p.local}</p>
         <p className="mt-4 text-xs text-tinta-tenue">¿Te arrepentiste? Podés cancelar desde el <Link href="/arrepentimiento" className="underline">botón de arrepentimiento</Link>.</p>
       </aside>
     </div>
