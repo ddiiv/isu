@@ -823,6 +823,22 @@ async function respirar() {
   chk(G, "backoffice: /api/a/direcciones sin sesión → 401", (await pedir(`${ADMIN}/api/a/direcciones`)).status === 401);
 }
 
+// ── 7k. Links de los locales (Ajustes → Locales) ──────────────────────
+{
+  await respirar();
+  const G = "locales";
+  const c = await (await pedir(`${API}/v1/config`)).json().catch(() => ({}));
+  const links = (c.locales ?? []).map((l) => l.mapa).filter(Boolean);
+  chk(G, `config: los links de los locales son sólo https (${links.length})`, links.every((u) => /^https:\/\/[^\s"'<>]+$/.test(u)), links.join(" "));
+  const h = await (await pedir(`${WEB}/locales`)).text();
+  const hrefs = [...h.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+  chk(G, "/locales: ningún enlace javascript: ni data:", !hrefs.some((u) => /^\s*(javascript|data|vbscript):/i.test(u)));
+  const otraPestana = [...h.matchAll(/<a [^>]*target="_blank"[^>]*>/g)].map((m) => m[0]);
+  chk(G, `/locales: lo que abre otra pestaña va con noopener (${otraPestana.length})`, otraPestana.length > 0 && otraPestana.every((a) => /rel="[^"]*noopener/.test(a)));
+  chk(G, "PUT /v1/admin/ajustes (locales) con token inventado → 401",
+    (await pedir(`${API}/v1/admin/ajustes`, { method: "PUT", headers: { "content-type": "application/json", "x-isu-admin": "a".repeat(43) }, body: JSON.stringify({ locales: [{ nombre: "x", direccion: "x", localidad: "x", horario: "x", mapa: "javascript:alert(1)", retiro: true }] }) })).status === 401);
+}
+
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────
 let bloqueado = false;
 for (let i = 0; i < 400 && !bloqueado; i++) {

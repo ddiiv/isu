@@ -219,3 +219,14 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - ráfaga → 429;
   - la tienda sin `x-isu` → 403;
   - el backoffice sin sesión → 401.
+
+### Links de los locales
+
+- `Local.mapa` (el «Link del local» de Ajustes) es sólo `https://` con un dominio, hasta 500 caracteres: `EnlaceLocal` en shared. La API rechaza `javascript:`, `data:`, `http:` y cualquier texto que no sea un link.
+- Un valor viejo guardado antes de exigirlo no rompe nada: la configuración pública muestra el local sin link.
+- La tienda abre el link en otra pestaña con `rel="noopener noreferrer"`. Los mails lo vuelven a validar antes de ponerlo en un `href`, y si no es https muestran sólo el nombre.
+- **Auditoría** (§ 7k):
+  - los links de la configuración pública son sólo https;
+  - `/locales` no tiene enlaces `javascript:` ni `data:`;
+  - lo que abre otra pestaña va con `noopener`;
+  - cambiar los locales pide sesión del dueño.

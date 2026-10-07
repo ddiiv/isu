@@ -25,6 +25,8 @@ interface DatosPedido {
   /** "cupón VERANO10 (10% OFF)" o "promo …" (etapa 6) */
   cupon?: string | null; descuentoCupon?: number;
   entrega: "envio" | "retiro"; local: string | null; venceEn: string | null; items: Item[]; enlace: string;
+  /** El link del local de retiro (Ajustes → Locales). Mails viejos en la cola no lo traen. */
+  localEnlace?: string | null;
   transferencia: {
     titular: string; cuit: string; banco: string; cbu: string; alias: string;
     /** Transferencias que se confirman solas: el monto exacto (centavos) y a dónde. Mails viejos en la cola pueden no traerlo. */
@@ -48,12 +50,19 @@ function marco(titulo: string, cuerpo: string, pie = "Isuwaya · Hacemos la ropa
 const boton = (texto: string, url: string) =>
   `<p style="margin:24px 0"><a href="${esc(enlaceSeguro(url))}" style="background:#171717;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:bold;display:inline-block">${esc(texto)}</a></p>`;
 
+/** El nombre del local, con su link si tiene (sólo https). */
+const nombreLocal = (d: DatosPedido) => {
+  const u = typeof d.localEnlace === "string" && /^https:\/\/[^\s"'<>]+$/.test(d.localEnlace) ? d.localEnlace : null;
+  return u ? `<a href="${esc(u)}" style="color:${MARCA};font-weight:bold">${esc(d.local)}</a>` : `<b>${esc(d.local)}</b>`;
+};
+const comoLlegar = (d: DatosPedido) => (d.entrega === "retiro" && typeof d.localEnlace === "string" && /^https:\/\/[^\s"'<>]+$/.test(d.localEnlace) ? `\nCómo llegar al local: ${d.localEnlace}` : "");
+
 function tablaItems(d: DatosPedido) {
   const filas = d.items.map((i) => `<tr><td style="padding:6px 0">${esc(i.cantidad)} × ${esc(i.nombre)}${i.color ? ` · ${esc(i.color)}` : ""}${i.talle ? ` · ${esc(i.talle)}` : ""}</td><td align="right">${esc(formatearPesos(i.precio * i.cantidad))}</td></tr>`).join("");
   const extra = [
     d.cupon ? `<tr><td style="color:${AHORRO}">${esc(d.cupon.charAt(0).toUpperCase() + d.cupon.slice(1))}</td><td align="right" style="color:${AHORRO}">${d.descuentoCupon ? `−${esc(formatearPesos(d.descuentoCupon))}` : "Envío gratis"}</td></tr>` : "",
     d.descuento ? `<tr><td style="color:${AHORRO}">Descuento por transferencia</td><td align="right" style="color:${AHORRO}">−${esc(formatearPesos(d.descuento))}</td></tr>` : "",
-    d.entrega === "envio" ? `<tr><td>Envío</td><td align="right">${d.envio ? esc(formatearPesos(d.envio)) : "Gratis"}</td></tr>` : `<tr><td>Retiro en ${esc(d.local)}</td><td align="right">Gratis</td></tr>`,
+    d.entrega === "envio" ? `<tr><td>Envío</td><td align="right">${d.envio ? esc(formatearPesos(d.envio)) : "Gratis"}</td></tr>` : `<tr><td>Retiro en ${nombreLocal(d)}</td><td align="right">Gratis</td></tr>`,
   ].join("");
   return `<table role="presentation" width="100%" style="font-size:14px;border-top:1px solid #e7e5e4;border-bottom:1px solid #e7e5e4;margin:16px 0">${filas}${extra}
 <tr><td style="padding:8px 0;font-weight:bold">Total</td><td align="right" style="font-weight:bold">${esc(formatearPesos(d.total))}</td></tr></table>`;
@@ -94,23 +103,23 @@ export function armar(plantilla: Plantilla, datos: Record<string, unknown>): { a
 <table role="presentation" style="font-size:14px;background:#e9f3ec;border-radius:10px;padding:12px;width:100%">${filas}</table>
 <p>${despues}</p>`;
       } else if (d.medioPago === "local") {
-        como = `<p>Lo pagás al retirarlo en <b>${esc(d.local)}</b> hasta el ${esc(fecha(d.venceEn))}. Te lo tenemos guardado.</p>`;
+        como = `<p>Lo pagás al retirarlo en ${nombreLocal(d)} hasta el ${esc(fecha(d.venceEn))}. Te lo tenemos guardado.</p>`;
       } else {
         como = `<p>Si todavía no terminaste de pagar, lo podés hacer desde tu pedido hasta el ${esc(fecha(d.venceEn))}.</p>`;
       }
       return {
         asunto: `Recibimos tu pedido ${d.numero}`,
         html: marco(`¡Gracias, ${d.nombre}! Tu pedido es el ${d.numero}`, `<p>Ya te separamos las prendas.</p>${como}${tablaItems(d)}${boton("Ver mi pedido", d.enlace)}`),
-        texto: `¡Gracias, ${d.nombre}! Tu pedido es el ${d.numero}.\n${textoItems(d)}\nVer el pedido: ${d.enlace}`,
+        texto: `¡Gracias, ${d.nombre}! Tu pedido es el ${d.numero}.\n${textoItems(d)}\nVer el pedido: ${d.enlace}${comoLlegar(d)}`,
       };
     }
     case "pago_confirmado": {
       const d = datos as unknown as DatosPedido;
-      const sigue = d.entrega === "retiro" ? `Te avisamos cuando esté listo para retirar en ${esc(d.local)}.` : "Te avisamos cuando lo despachemos.";
+      const sigue = d.entrega === "retiro" ? `Te avisamos cuando esté listo para retirar en ${nombreLocal(d)}.` : "Te avisamos cuando lo despachemos.";
       return {
         asunto: `Pago confirmado · pedido ${d.numero}`,
         html: marco("¡Pago confirmado!", `<p>Hola, ${esc(d.nombre)}. Ya está pago tu pedido <b>${esc(d.numero)}</b>. ${sigue}</p>${tablaItems(d)}${boton("Ver mi pedido", d.enlace)}`),
-        texto: `Pago confirmado para el pedido ${d.numero}.\n${textoItems(d)}`,
+        texto: `Pago confirmado para el pedido ${d.numero}.\n${textoItems(d)}${comoLlegar(d)}`,
       };
     }
     case "pedido_vencido": {

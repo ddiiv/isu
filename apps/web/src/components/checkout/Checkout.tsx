@@ -225,7 +225,9 @@ export function Checkout({ config }: { config: ConfigPublica }) {
                 {locales.map((l) => (
                   <label key={l.nombre} className={`flex cursor-pointer gap-3 p-4 ${local === l.nombre ? "bg-marca-claro/40" : ""}`}>
                     <input type="radio" name="local" checked={local === l.nombre} onChange={() => setLocal(l.nombre)} className="mt-1 size-4 accent-tinta" />
-                    <span><b>{l.nombre}</b><br /><span className="text-sm text-tinta-suave">{l.direccion}, {l.localidad} · {l.horario}</span></span>
+                    <span><b>{l.nombre}</b><br /><span className="text-sm text-tinta-suave">{l.direccion}, {l.localidad} · {l.horario}</span>
+                      {l.mapa && <><br /><a href={l.mapa} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-marca underline" aria-label={`Cómo llegar a ${l.nombre} (se abre en otra pestaña)`}>Cómo llegar ↗</a></>}
+                    </span>
                   </label>
                 ))}
               </div>

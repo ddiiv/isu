@@ -17,6 +17,21 @@ describe("mails", () => {
     expect(m.html).not.toContain("<script>");
     expect(m.html).toContain("&lt;img src=x");
   });
+  it("retiro: el nombre del local lleva a su link (sólo https), y el texto plano dice cómo llegar", () => {
+    const m = armar("pedido_recibido", pedido({ localEnlace: "https://maps.app.goo.gl/ViaFlores" }));
+    expect(m.html).toContain('<a href="https://maps.app.goo.gl/ViaFlores"');
+    expect(m.html).toContain(">Vía Flores · Local 21</a>");
+    expect(m.texto).toContain("Cómo llegar al local: https://maps.app.goo.gl/ViaFlores");
+    expect(armar("pago_confirmado", pedido({ localEnlace: "https://maps.app.goo.gl/ViaFlores" })).html).toContain('href="https://maps.app.goo.gl/ViaFlores"');
+    // Un link raro (o un mail viejo sin link): el nombre va solo, sin enlace.
+    for (const raro of ["javascript:alert(1)", 'https://x.com/"onmouseover="alert(1)', undefined]) {
+      const r = armar("pedido_recibido", pedido({ localEnlace: raro }));
+      expect(r.html).not.toContain("javascript:");
+      expect(r.html).not.toContain("onmouseover");
+      expect(r.html).toContain("<b>Vía Flores · Local 21</b>");
+      expect(r.texto).not.toContain("Cómo llegar");
+    }
+  });
   it("un enlace que no es http(s) no llega al botón", () => {
     const m = armar("restablecer", { nombre: "Ana", modo: "cambiar", enlace: "javascript:alert(1)" });
     expect(m.html).not.toContain("javascript:");

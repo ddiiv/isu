@@ -1,7 +1,7 @@
 import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
-import { CP, ESTADOS_PENDIENTES, formatearPesos, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
+import { CP, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
 import { firmaOpinar, type Paquete, type Transportes } from "@isu/envios";
 import type { CotizadorEnvios } from "../envios/cotizador.js";
 import { hoyA } from "../envios/cotizador.js";
@@ -15,6 +15,7 @@ import { crearTransferencias } from "./transferencias.js";
 import { conEnvio, cotizar, leerAjustes, type Ajustes } from "./cotizar.js";
 import { motivoNoVigente, normalizarCodigo } from "../../lib/cupones.js";
 import type { Descuentos } from "../../lib/descuentos.js";
+import { leerAjuste } from "../productos/consultas.js";
 
 /*
  * Pedidos: de "Confirmar compra" a "pagado".
@@ -329,12 +330,16 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     return { numero: p.numero, acceso, estado: p.estado, redirigir };
   }
 
+  /** El link del local de retiro (Ajustes → Locales), para que se pueda tocar en la página del pedido y en el mail. */
+  const enlaceRetiro = async (p: FilaPedido) =>
+    (p.entrega === "retiro" && p.local_retiro ? enlaceDeLocal(await leerAjuste<Local[]>(pool, "locales", []).then((l) => (Array.isArray(l) ? l : [])), p.local_retiro) : null);
+
   async function datosMail(p: FilaPedido, acceso: string | null, a?: Ajustes) {
     const ajustes = a ?? await leerAjustes(pool);
     const items = (await pool.query("SELECT nombre, color, talle, precio, cantidad FROM tienda.pedido_items WHERE pedido_id = $1 ORDER BY id", [p.id])).rows;
     return {
       numero: p.numero, nombre: p.nombre, estado: p.estado, medioPago: p.medio_pago, total: p.total, subtotal: p.subtotal,
-      descuento: p.descuento, envio: p.envio, descuentoCupon: p.descuento_cupon, cupon: p.cupon_nombre ? conCupon({ codigo: p.cupon_codigo, nombre: p.cupon_nombre }) : null, entrega: p.entrega, local: p.local_retiro, direccion: p.direccion,
+      descuento: p.descuento, envio: p.envio, descuentoCupon: p.descuento_cupon, cupon: p.cupon_nombre ? conCupon({ codigo: p.cupon_codigo, nombre: p.cupon_nombre }) : null, entrega: p.entrega, local: p.local_retiro, localEnlace: await enlaceRetiro(p), direccion: p.direccion,
       venceEn: p.vence_en?.toISOString() ?? null, items,
       enlace: acceso ? urlPedido(p.numero, acceso) : `${deps.sitio.replace(/\/+$/, "")}/cuenta`,
       transferencia: p.medio_pago === "transferencia" ? paraTransferir(p, ajustes) : null,
@@ -360,7 +365,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     return {
       numero: p.numero, estado: p.estado, creadoEn: p.creado_en.toISOString(), venceEn: p.vence_en?.toISOString() ?? null,
       pagadoEn: p.pagado_en?.toISOString() ?? null, medioPago: p.medio_pago, entrega: p.entrega, direccion: p.direccion,
-      local: p.local_retiro, contacto: { email: p.email, nombre: p.nombre, apellido: p.apellido, telefono: p.telefono },
+      local: p.local_retiro, localEnlace: await enlaceRetiro(p), contacto: { email: p.email, nombre: p.nombre, apellido: p.apellido, telefono: p.telefono },
       items: items.rows, subtotal: p.subtotal, descuento: p.descuento, envio: p.envio, total: p.total,
       cupon: p.cupon_nombre ? { codigo: p.cupon_codigo, nombre: p.cupon_nombre } : null, descuentoCupon: p.descuento_cupon,
       envioDetalle: deps.transportes ? await envioPublico(pool, deps.transportes, p) : null,

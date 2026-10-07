@@ -291,6 +291,22 @@ describe("pedidos", () => {
     expect(mails("pedido_recibido").at(-1)?.datos.numero).toBe(numero);
   });
 
+  it("retiro: el pedido y el mail traen el link del local (Ajustes → Locales)", async () => {
+    const original = (await pool.query("SELECT valor FROM tienda.ajustes WHERE clave = 'locales'")).rows[0]?.valor as Array<Record<string, unknown>>;
+    try {
+      await pool.query("UPDATE tienda.ajustes SET valor = $1 WHERE clave = 'locales'",
+        [JSON.stringify(original.map((l) => (l.nombre === "Vía Flores · Local 21" ? { ...l, mapa: "https://maps.app.goo.gl/QaViaFlores" } : l)))]);
+      const { numero, acceso } = (await post("/v1/pedidos", pedido("lk1"))).json();
+      expect((await get(`/v1/pedidos/${numero}`, { "x-isu-acceso": acceso })).json()).toMatchObject({ local: "Vía Flores · Local 21", localEnlace: "https://maps.app.goo.gl/QaViaFlores" });
+      expect(mails("pedido_recibido").at(-1)?.datos).toMatchObject({ numero, localEnlace: "https://maps.app.goo.gl/QaViaFlores" });
+      // Sin link en Ajustes: null.
+      await pool.query("UPDATE tienda.ajustes SET valor = $1 WHERE clave = 'locales'", [JSON.stringify(original)]);
+      expect((await get(`/v1/pedidos/${numero}`, { "x-isu-acceso": acceso })).json().localEnlace).toBeNull();
+    } finally {
+      await pool.query("UPDATE tienda.ajustes SET valor = $1 WHERE clave = 'locales'", [JSON.stringify(original)]);
+    }
+  });
+
   it("nadie más ve el pedido: otro token, otra sesión o sin nada → 404", async () => {
     const { numero } = (await post("/v1/pedidos", pedido("t2"))).json();
     expect((await get(`/v1/pedidos/${numero}`)).statusCode).toBe(404);

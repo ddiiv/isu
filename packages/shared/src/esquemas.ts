@@ -16,14 +16,36 @@ export const slug = z
 
 export const telefonoWhatsapp = z.string().regex(/^\d{10,15}$/, "Sólo dígitos, con código de país");
 
+/**
+ * El link de un local (el de Google Maps, o el que se quiera): la tienda lo
+ * muestra para que se pueda tocar. Sólo https: nada de javascript:, data: ni
+ * direcciones sin cifrar.
+ */
+export const EnlaceLocal = z.string().trim().max(500).url("No es un link válido.")
+  .refine((u) => /^https:\/\/[^\s/]+\.[^\s/]+/i.test(u), "Tiene que ser un link que empiece con https://");
+
+/** Lo que se pega en Ajustes ("maps.app.goo.gl/xyz", "http://…") como link: con https:// adelante. */
+export function normalizarEnlace(s: string): string {
+  const t = s.trim();
+  if (!t) return "";
+  if (/^http:\/\//i.test(t)) return `https://${t.slice(7)}`;
+  return /^[a-z][a-z0-9+.-]*:/i.test(t) ? t : `https://${t}`;
+}
+
 export const Local = z.object({
   nombre: z.string(),
   direccion: z.string(),
   localidad: z.string(),
   horario: z.string(),
-  mapa: z.string().url().nullable(),
+  /** El link del local (Google Maps). Nombre histórico: ahora sirve para cualquier link. */
+  mapa: EnlaceLocal.nullable(),
   retiro: z.boolean(),
 });
+/** El link del local por su nombre (el pedido guarda el nombre), si tiene uno válido. */
+export function enlaceDeLocal(locales: ReadonlyArray<Pick<Local, "nombre" | "mapa">>, nombre: string | null | undefined): string | null {
+  const m = nombre ? locales.find((l) => l.nombre === nombre)?.mapa : null;
+  return m && EnlaceLocal.safeParse(m).success ? m : null;
+}
 export type Local = z.infer<typeof Local>;
 
 /** Lo que la tienda necesita saber de la configuración, sin sesión. */

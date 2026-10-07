@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { leerPacks, PACK_TOPE, type AjusteDirecciones, type AjustePacks, type Local } from "@isu/shared";
+import { EnlaceLocal, leerPacks, normalizarEnlace, PACK_TOPE, type AjusteDirecciones, type AjustePacks, type Local } from "@isu/shared";
 import { api, fecha, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, EntradaPesos, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
 import { AjustesEnvios, type ValoresEnvios } from "@/components/AjustesEnvios";
@@ -235,8 +235,23 @@ export default function Ajustes() {
                     <input aria-label="Dirección" placeholder="Dirección" className={claseEntrada} value={l.direccion} onChange={(e) => cambiar({ direccion: e.target.value })} />
                     <input aria-label="Localidad" placeholder="Localidad" className={claseEntrada} value={l.localidad} onChange={(e) => cambiar({ localidad: e.target.value })} />
                     <input aria-label="Horario" placeholder="Horario" className={claseEntrada} value={l.horario} onChange={(e) => cambiar({ horario: e.target.value })} />
-                    <input aria-label="Enlace a Google Maps" placeholder="https://maps.google.com/…" className={`${claseEntrada} sm:col-span-2`} value={l.mapa ?? ""} onChange={(e) => cambiar({ mapa: e.target.value || null })} />
                   </div>
+                  {(() => {
+                    // El link del local: la tienda lo muestra para tocar (nombre, «Cómo llegar», checkout, pedido y mails).
+                    const malo = l.mapa ? !EnlaceLocal.safeParse(l.mapa).success : false;
+                    return (
+                      <Campo etiqueta="Link del local" error={malo ? "Tiene que ser un link que empiece con https:// (copialo desde Google Maps → Compartir)." : null}
+                        ayuda="El de Google Maps (Compartir → Copiar vínculo) o el que quieras. En la tienda, el nombre del local y «Cómo llegar» llevan ahí.">
+                        <span className="flex gap-2">
+                          <input aria-label={`Link del local ${l.nombre || i + 1}`} placeholder="https://maps.app.goo.gl/…" inputMode="url" aria-invalid={malo}
+                            className={claseEntrada} value={l.mapa ?? ""}
+                            onChange={(e) => cambiar({ mapa: e.target.value || null })}
+                            onBlur={(e) => cambiar({ mapa: normalizarEnlace(e.target.value) || null })} />
+                          {l.mapa && !malo && <a href={l.mapa} target="_blank" rel="noopener noreferrer" className="shrink-0 self-center text-sm font-bold text-marca underline">Probar ↗</a>}
+                        </span>
+                      </Campo>
+                    );
+                  })()}
                   <div className="flex items-center justify-between">
                     <Casilla etiqueta="Se puede retirar acá" marcada={l.retiro} onChange={(x) => cambiar({ retiro: x })} />
                     <Boton variante="texto" className="text-oferta" onClick={() => poner("locales", locales.filter((_, j) => j !== i))}>Quitar</Boton>

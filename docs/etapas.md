@@ -34,6 +34,9 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
   - en la ficha («Agregar» y «Comprar ahora»), en la página del pack y en el «+» del carrito;
   - ventana al centro en la compu y la notebook, hoja desde abajo en el celular.
 - **El «+» del carrito** descuenta lo que la misma variante lleva en las otras líneas (`disponible` de la cotización).
+- **Links de los locales:**
+  - en Ajustes, «Link del local» (Google Maps u otro): sólo https, se completa el `https://` y se puede probar;
+  - en la tienda, el nombre del local y «Cómo llegar ↗» llevan ahí: Locales, checkout (retiro), ficha, página del pedido y mails.
 - **Migración 0018** (el ajuste `direcciones`), el simulador `pnpm demo:direcciones` y la política de privacidad con Google Maps y Georef.
 
 **QA**
