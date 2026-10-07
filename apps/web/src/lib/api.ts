@@ -56,6 +56,7 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   liquidacionEn: [],
   cuidados: "",
   cifras: [],
+  direcciones: { sugerencias: false, revisar: false },
 };
 
 export const CATEGORIAS_RESPALDO: CategoriaNodo[] = [

@@ -28,7 +28,7 @@ export function revisar(env = process.env) {
   const VARIABLES = ["DATABASE_URL", "REDIS_URL", "NEXT_PUBLIC_SITE_URL", "SITIO_URL", "ADMIN_URL", "API_PUBLICA_URL", "ORIGENES_PERMITIDOS",
     "STOCKER_API_URL", "STOCKER_TOKEN", "INTERNO_TOKEN", "REVALIDAR_TOKEN", "PAGOS_TOKEN", "ADMIN_CLAVE_CIFRADO", "NEXT_PUBLIC_CDN_IMAGENES",
     "MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET", "SMTP_URL", "MAYORISTA_URL", "R2_CUENTA", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-    "TALO_API_URL", "TALO_USER_ID", "TALO_CLIENT_ID", "TALO_CLIENT_SECRET"];
+    "TALO_API_URL", "TALO_USER_ID", "TALO_CLIENT_ID", "TALO_CLIENT_SECRET", "GOOGLE_MAPS_API_KEY", "GOOGLE_PLACES_URL", "GEOREF_URL"];
   const conRelleno = new Set();
   for (const k of VARIABLES) {
     const v = env[k];
@@ -114,6 +114,18 @@ export function revisar(env = process.env) {
   if (talo.length === 3) {
     const u = conProtocolo("TALO_API_URL", ["https:", "http:"], "https://api.talo.com.ar");
     if (produccion && u && u.hostname !== "api.talo.com.ar") ojo("TALO_API_URL", `apunta a ${u.hostname}: en producción va https://api.talo.com.ar (sandbox-api es sólo para pruebas: ahí no entra plata de verdad).`);
+  }
+  // Direcciones del checkout (etapa 11): Google es opcional; Georef va solo, salvo que se apague.
+  if (valida("GOOGLE_MAPS_API_KEY")) {
+    const k = env.GOOGLE_MAPS_API_KEY;
+    if (k.length < 20 || k.length > 200) mal("GOOGLE_MAPS_API_KEY", "no parece una clave de Google (tiene entre 20 y 200 caracteres; las de Google Cloud empiezan con AIza).");
+    else if (produccion && !k.startsWith("AIza")) ojo("GOOGLE_MAPS_API_KEY", "no empieza con AIza: copiala de Google Cloud → APIs y servicios → Credenciales.");
+    const u = conProtocolo("GOOGLE_PLACES_URL", ["https:", "http:"], "https://places.googleapis.com");
+    if (produccion && u && u.hostname !== "places.googleapis.com") ojo("GOOGLE_PLACES_URL", `apunta a ${u.hostname}: en producción no la pongas (va la de Google).`);
+  }
+  if (valida("GEOREF_URL") && env.GEOREF_URL !== "off") {
+    const u = conProtocolo("GEOREF_URL", ["https:", "http:"], "https://apis.datos.gob.ar/georef/api");
+    if (produccion && u && u.hostname !== "apis.datos.gob.ar") ojo("GEOREF_URL", `apunta a ${u.hostname}: en producción no la pongas (va la del Gobierno) o poné off para apagarla.`);
   }
   return { errores: [...new Set(errores)], avisos: [...new Set(avisos)] };
 }

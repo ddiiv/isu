@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
-import { ConfigPublica, leerPacks, PACKS_POR_DEFECTO } from "@isu/shared";
+import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, leerPacks, PACKS_POR_DEFECTO } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
 import type { CacheCorta } from "../../lib/cache.js";
 import { CON_STOCK, EN_LIQUIDACION } from "../productos/consultas.js";
@@ -35,6 +35,7 @@ const POR_DEFECTO: ConfigPublica = {
   liquidacionEn: [],
   cuidados: "",
   cifras: [],
+  direcciones: { sugerencias: false, revisar: false },
 };
 
 /** Slugs de las categorías de arriba (Hombre, Mujer, Niños…) que tienen algún producto publicado que cumple `condicion`. */
@@ -50,7 +51,7 @@ async function categoriasCon(pool: pg.Pool, condicion: string): Promise<string[]
   return rows.map((r) => r.slug);
 }
 
-export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg.Pool; cache: CacheCorta; pagoOnline: boolean }) {
+export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg.Pool; cache: CacheCorta; pagoOnline: boolean; direcciones?: { google: boolean; georef: boolean } }) {
   const cargar = async (): Promise<ConfigPublica> => {
     const filas = await deps.db.select({ clave: esquema.ajustes.clave, valor: esquema.ajustes.valor }).from(esquema.ajustes);
     const salida: Record<string, unknown> = { ...POR_DEFECTO };
@@ -66,6 +67,8 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
       if (!(clave in forma)) continue;
       // Packs: también el formato viejo ([x2, x3, x4, x5]) mientras no corra la migración 0015.
       if (clave === "packs") { salida.packs = leerPacks(valor); continue; }
+      // El ajuste de direcciones tiene otra forma (topes, Google, Georef): se resume abajo.
+      if (clave === "direcciones") continue;
       const campo = forma[clave as keyof typeof forma];
       const r = campo.safeParse(valor);
       if (r.success) salida[clave] = r.data;
@@ -81,6 +84,10 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
     salida.packsEn = packsEn;
     salida.hayLiquidacion = !!hayLiquidacion.rowCount;
     salida.liquidacionEn = liquidacionEn;
+    // Etapa 11: qué ayudas para la dirección hay (configuradas y prendidas en Ajustes).
+    const dir = AjusteDirecciones.safeParse(filas.find((f) => f.clave === "direcciones")?.valor ?? DIRECCIONES_POR_DEFECTO);
+    const aj = dir.success ? dir.data : DIRECCIONES_POR_DEFECTO;
+    salida.direcciones = { sugerencias: !!deps.direcciones?.google && aj.google, revisar: !!deps.direcciones?.georef && aj.georef };
     return ConfigPublica.parse(salida);
   };
 

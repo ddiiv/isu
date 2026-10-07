@@ -187,3 +187,35 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - un pack de una prenda que no es pack;
   - eliminar, restaurar y Excel sin sesión;
   - un Excel de 7 MB.
+
+## Direcciones del checkout y aviso del carrito (etapa 11)
+
+- **Google Places sólo desde el servidor:**
+  - la clave (`GOOGLE_MAPS_API_KEY`) no llega al navegador: la tienda pregunta a la API y la API a Google;
+  - la auditoría revisa que no aparezca en respuestas, HTML ni JavaScript, y que el JS no llame a Google directo.
+- **Lo que llega se valida antes de llamar a nadie** (zod estricto, sin campos de más):
+  - texto de 3 a 120 caracteres;
+  - sesión que tiene que ser un UUID;
+  - el id del lugar, sólo letras, números, `_` y `-` (10 a 300), porque va en la URL de Google: nada de `../`, `?`, `%2F`.
+  - Lo que contesta Google también se filtra: ids raros se descartan, y los textos se cortan al largo de los campos.
+- **Costo acotado:**
+  - freno por IP: 150 búsquedas, 40 datos y 80 revisiones cada 10 minutos;
+  - topes por día de Argentina en Redis (Ajustes; de fábrica 300 y 300, dentro del uso gratis). Sin Redis no se cuenta, así que no se usa Google: mejor sin ayuda que una factura;
+  - sesiones de Google por compra: las búsquedas que terminan en una dirección elegida no se cobran;
+  - sólo se pide `addressComponents`, el nivel más barato.
+  - Lo peor que logra un abuso es agotar el tope del día: el checkout sigue a mano.
+- **Nada frena una compra:**
+  - Google o Georef caídos o lentos (3,5 y 4 segundos de tope): sin sugerencias, «escribila a mano» o nada, nunca un 500;
+  - los errores de afuera van al registro, no al cliente.
+- **Georef:** sin clave. Se cachea 10 minutos por dirección (hasta 2.000), así la misma dirección no sale dos veces.
+- **Datos personales:** a Google y Georef va sólo lo que se escribe en la calle (y altura y provincia a Georef), sin nombre, email ni teléfono. Está en la política de privacidad.
+- **Tienda (BFF):** sólo `POST /api/t/direcciones/{sugerencias,lugar,revisar}` con `x-isu`. `GET /v1/admin/direcciones` (si hay clave y el uso de hoy) pide sesión del dueño.
+- **Aviso del carrito:** es del navegador; el control de verdad sigue en la API, que cotiza con el stock sumando lo suelto y los packs. `disponible` de cada línea ahora descuenta lo de las otras líneas: es lo que el «+» deja sumar, nunca más del stock.
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7j):
+  - entradas malas → 400;
+  - sólo POST y sin caché;
+  - un lugar desconocido → 503 sin detalles de Google;
+  - la clave en ningún lado;
+  - ráfaga → 429;
+  - la tienda sin `x-isu` → 403;
+  - el backoffice sin sesión → 401.

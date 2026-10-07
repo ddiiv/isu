@@ -1,6 +1,6 @@
 # Carrito, checkout y backoffice (Etapa 10)
 
-Qué cambió y cómo se usa. Lo anterior de packs, Liquidación y menú sigue en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md).
+Qué cambió y cómo se usa. Lo anterior de packs, Liquidación y menú sigue en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md). Las sugerencias de calle, la revisión con Georef y el aviso «esa prenda ya está en un pack» (etapa 11) están en [`direcciones-checkout.md`](direcciones-checkout.md).
 
 ## 1. El pack va aparte en el carrito
 

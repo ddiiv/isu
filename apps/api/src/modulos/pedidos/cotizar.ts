@@ -145,6 +145,9 @@ export async function cotizar(
     else if (total > f.stock) { problemas.push({ sku, tipo: "stock_insuficiente", mensaje: `${nombreDe(f)}: quedan ${f.stock}.` }); conProblema.add(sku); }
   }
   let subtotal = 0;
+  // Hasta cuántas puede llevar en una línea: el stock menos lo que ya se lleva en las otras
+  // (la misma variante suelta y en un pack comparten el stock). Para el + del carrito.
+  const libre = (sku: string, stock: number, enEstaLinea: number) => Math.max(0, stock - ((pedidas.get(sku) ?? 0) - enEstaLinea));
 
   for (const [sku, cantidad] of sueltas) {
     const f = filas.get(sku);
@@ -153,7 +156,7 @@ export async function cotizar(
     const precio = conRebaja(f.precio, rebaja);
     lineas.push({
       sku, clave: sku, productoSlug: f.slug, nombre: f.nombre, color: colorDe(f), talle: f.talle,
-      foto: f.foto, precio, precioLista: rebaja ? f.precio : null, cantidad, disponible: Math.min(f.stock, 20), subtotal: precio * cantidad, pack: null,
+      foto: f.foto, precio, precioLista: rebaja ? f.precio : null, cantidad, disponible: Math.min(libre(sku, f.stock, cantidad), 20), subtotal: precio * cantidad, pack: null,
     });
     if (!conProblema.has(sku)) {
       subtotal += precio * cantidad;
@@ -178,11 +181,11 @@ export async function cotizar(
       detalle.push({ sku, color: colorDe(f!), talle: f!.talle, foto: f!.foto, cantidad: n, precio });
       lineas.push({
         sku, clave: `${clave}|${sku}`, productoSlug: f!.slug, nombre: f!.nombre, color: colorDe(f!), talle: f!.talle,
-        foto: f!.foto, precio, precioLista: pct ? f!.precio : null, cantidad: n * g.cantidad, disponible: Math.min(f!.stock, 20),
+        foto: f!.foto, precio, precioLista: pct ? f!.precio : null, cantidad: n * g.cantidad, disponible: Math.min(libre(sku, f!.stock, n * g.cantidad), 20),
         subtotal: precio * n * g.cantidad, pack: { clave, unidades, porcentaje: pct },
       });
     }
-    const disponible = Math.max(0, Math.min(MAX_PACKS_POR_LINEA, ...prendas.map((x) => Math.floor(x.f!.stock / x.n))));
+    const disponible = Math.max(0, Math.min(MAX_PACKS_POR_LINEA, ...prendas.map((x) => Math.floor(libre(x.sku, x.f!.stock, x.n * g.cantidad) / x.n))));
     packs.push({
       clave, productoSlug: f0.slug, nombre: f0.nombre, foto: f0.foto, unidades, porcentaje: pct, cantidad: g.cantidad,
       precio: precioPack, precioLista: listaPack, subtotal: precioPack * g.cantidad, disponible, prendas: detalle,

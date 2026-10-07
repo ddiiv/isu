@@ -70,6 +70,14 @@ const Entorno = z.object({
   // Etapa 5 ─────────────────────────────────────────────────────────
   // Asistente con IA (opcional): sin clave, el asistente responde sólo con las preguntas frecuentes.
   ANTHROPIC_API_KEY: z.string().min(20).optional(),
+
+  // Etapa 11 ────────────────────────────────────────────────────────
+  // Direcciones en el checkout. Google Places (opcional): sugerencias mientras se escribe la calle.
+  // Clave de Google Cloud con "Places API (New)" habilitada; se usa sólo desde el servidor.
+  GOOGLE_MAPS_API_KEY: z.string().min(20).max(200).optional(),
+  GOOGLE_PLACES_URL: z.string().url().default("https://places.googleapis.com"),
+  // Georef (Gobierno, gratis y sin clave): revisa calle y altura. "off" lo apaga.
+  GEOREF_URL: z.union([z.string().url(), z.literal("off")]).default("https://apis.datos.gob.ar/georef/api"),
   CHATBOT_MODELO: z.string().regex(/^[a-z0-9.-]{3,60}$/).default("claude-opus-5-5"),
 });
 

@@ -237,6 +237,7 @@ Para que los mails no caigan en spam, el dominio necesita SPF y DKIM (te los da 
 - Transportes: las credenciales de cada uno (`CORREO_AR_*`, `ANDREANI_*`, `OCA_*`, `CABIFY_*`, `MERCADO_ENVIOS_ACTIVO`). Detalle en `.env.example`. **Nunca** `TRANSPORTES_SIMULADOR`.
 - WhatsApp: `WHATSAPP_META_TOKEN` y `WHATSAPP_META_PHONE_NUMBER_ID`.
 - Asistente con IA (opcional): `ANTHROPIC_API_KEY`, y prenderlo en Ajustes.
+- Sugerencias de calle en el checkout (opcional): `GOOGLE_MAPS_API_KEY`, una clave de Google Cloud con «Places API (New)». Cómo sacarla y cuánto cuesta (con los topes de fábrica, nada) en [`direcciones-checkout.md`](direcciones-checkout.md). La revisión de calle y altura con Georef no necesita nada.
 
 ### Las que NO van
 

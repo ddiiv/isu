@@ -41,6 +41,8 @@ import { rutasSeo } from "./modulos/seo/rutas.js";
 import { rutasResenas } from "./modulos/resenas/rutas.js";
 import { rutasResenasAdmin } from "./modulos/admin/resenas.js";
 import { rutasTransferenciasAdmin } from "./modulos/admin/transferencias.js";
+import { crearGeoref, crearGoogle } from "./lib/direcciones.js";
+import { rutasDirecciones } from "./modulos/direcciones/rutas.js";
 
 export interface Dependencias {
   env: Entorno;
@@ -102,7 +104,11 @@ export async function construirApp(deps: Dependencias) {
   const cache = new CacheCorta(env.CACHE_SEGUNDOS);
 
   await rutasSalud(app, { pool, redis });
-  await rutasConfig(app, { db, pool, cache, pagoOnline: !!env.MP_ACCESS_TOKEN });
+  // Etapa 11: ayudas para la dirección del checkout (Google con clave; Georef, gratis, salvo que se apague).
+  const google = env.GOOGLE_MAPS_API_KEY ? crearGoogle({ url: env.GOOGLE_PLACES_URL, clave: env.GOOGLE_MAPS_API_KEY }) : null;
+  const georef = env.GEOREF_URL === "off" ? null : crearGeoref({ url: env.GEOREF_URL });
+  await rutasConfig(app, { db, pool, cache, pagoOnline: !!env.MP_ACCESS_TOKEN, direcciones: { google: !!google, georef: !!georef } });
+  await rutasDirecciones(app, { pool, redis, env, cache, google, georef });
   await rutasCategorias(app, { db, cache });
   const descuentos = crearDescuentos(pool, cache);
   await rutasProductos(app, { pool, cache, descuentos });

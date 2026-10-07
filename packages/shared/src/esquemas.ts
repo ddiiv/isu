@@ -54,6 +54,8 @@ export const ConfigPublica = z.object({
   cuidados: z.string().max(600).default(""),
   /** Números de la marca para el inicio ("+10 años · diseñando y fabricando"). */
   cifras: z.array(z.object({ valor: z.string().trim().min(1).max(20), texto: z.string().trim().min(1).max(60) })).max(4).default([]),
+  /** Etapa 11: ayudas para la dirección en el checkout (sugerencias de Google, revisión con Georef). */
+  direcciones: z.object({ sugerencias: z.boolean(), revisar: z.boolean() }).default({ sugerencias: false, revisar: false }),
 });
 export type ConfigPublica = z.infer<typeof ConfigPublica>;
 

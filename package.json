@@ -25,6 +25,7 @@
     "demo:fotos": "node --env-file-if-exists=.env scripts/demo/ajustes-demo.mjs && node scripts/demo/fotos-demo.mjs demo/fotos && pnpm fotos:importar ../../demo/fotos --reemplazar",
     "demo:mercadopago": "node --env-file-if-exists=.env scripts/demo/mercadopago-simulado.mjs",
     "demo:talo": "node --env-file-if-exists=.env scripts/demo/talo-simulado.mjs",
+    "demo:direcciones": "node --env-file-if-exists=.env scripts/demo/direcciones-simulado.mjs",
     "admin:crear": "pnpm --filter @isu/api build && node --env-file-if-exists=.env apps/api/dist/cli/crear-admin.js",
     "demo:backoffice": "pnpm --filter @isu/worker build && node --env-file-if-exists=.env scripts/demo/backoffice-demo.mjs",
     "demo:transportes": "pnpm --filter @isu/envios build && node --env-file-if-exists=.env scripts/demo/transportes-simulado.mjs",

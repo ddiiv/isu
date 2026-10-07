@@ -112,8 +112,10 @@ export function FichaPack({ p, config, unidades: inicial }: { p: ProductoDetalle
       if (ya) ya.cantidad++;
       else prendas.set(v!.sku, { sku: v!.sku, cantidad: 1, color: sinColor ? null : nombreColor(v!.color), talle: v!.talle, foto: foto(v!)?.clave ?? null });
     }
-    carrito.agregarPack({ slug: p.slug, nombre: p.nombre, foto: (p.exhibicion[0] ?? foto(variantes[0]!))?.clave ?? null, precio: total, prendas: [...prendas.values()] }, { abrir: !comprarYa });
-    if (comprarYa) router.push("/checkout");
+    // Con el stock de cada variante: si lo que ya hay en el carrito no deja armarlo, no agrega y lo explica.
+    const stock = Object.fromEntries(p.variantes.map((v) => [v.sku, v.stock]));
+    const agregado = carrito.agregarPack({ slug: p.slug, nombre: p.nombre, foto: (p.exhibicion[0] ?? foto(variantes[0]!))?.clave ?? null, precio: total, prendas: [...prendas.values()] }, { abrir: !comprarYa, stock });
+    if (agregado && comprarYa) router.push("/checkout");
   }
 
   const fotos = [...p.exhibicion, ...p.colores.flatMap((c) => c.fotos)].filter((f, i, a) => a.findIndex((g) => g.clave === f.clave) === i).slice(0, 8);

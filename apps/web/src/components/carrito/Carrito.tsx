@@ -1,8 +1,9 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { clavePack, MAX_LINEAS_CARRITO, MAX_PACKS_POR_LINEA, MAX_UNIDADES_POR_ARTICULO, type Cotizacion, type ItemCarrito } from "@isu/shared";
+import { clavePack, MAX_LINEAS_CARRITO, MAX_PACKS_POR_LINEA, MAX_UNIDADES_POR_ARTICULO, STOCK_VISIBLE_MAX, type Cotizacion, type ItemCarrito } from "@isu/shared";
 import { api } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
+import { AvisoYaEnCarrito } from "./AvisoYaEnCarrito";
 
 /*
  * El carrito vive en el navegador (localStorage): agregar y sacar es
@@ -18,6 +19,9 @@ import { evento, pesos } from "@/lib/ga";
  * también esté suelta. Su `sku` es la clave del pack ("pack:SKU*2,SKU*1"),
  * `pack` dice qué lleva UN pack, `precio` es el de un pack y `cantidad`,
  * cuántos packs iguales.
+ *
+ * La misma variante suelta y en un pack comparten el stock: si las que quedan
+ * ya están en el carrito, sumar otra no agrega y explica por qué (etapa 11).
  */
 export interface PrendaDePack { sku: string; cantidad: number; color: string | null; talle: string | null; foto: string | null }
 export interface LineaCarrito {
@@ -29,6 +33,36 @@ export const itemDe = (l: LineaCarrito): ItemCarrito =>
   (l.pack ? { pack: l.pack.prendas.map(({ sku, cantidad }) => ({ sku, cantidad })), cantidad: l.cantidad } : { sku: l.sku, cantidad: l.cantidad });
 /** Cuántas prendas son (un pack de 5 son 5). */
 export const prendasDe = (l: LineaCarrito) => (l.pack ? l.pack.unidades * l.cantidad : l.cantidad);
+/**
+ * Cuántas unidades de una variante hay en el carrito, sueltas y dentro de packs
+ * (comparten el stock). `excepto`: sin contar esa línea.
+ */
+export function usoDe(lineas: LineaCarrito[], sku: string, excepto?: string) {
+  let sueltas = 0;
+  const packs: Array<{ nombre: string; cantidad: number }> = [];
+  for (const l of lineas) {
+    if (l.sku === excepto) continue;
+    if (!l.pack) { if (l.sku === sku) sueltas += l.cantidad; continue; }
+    const n = l.pack.prendas.filter((x) => x.sku === sku).reduce((a, x) => a + x.cantidad, 0) * l.cantidad;
+    if (n) packs.push({ nombre: `${l.cantidad > 1 ? `${l.cantidad} × ` : ""}Pack x${l.pack.unidades} ${l.nombre}`, cantidad: n });
+  }
+  return { sueltas, packs, total: sueltas + packs.reduce((a, x) => a + x.cantidad, 0) };
+}
+
+/**
+ * Lo que dice el aviso cuando una variante no se puede sumar porque las que
+ * quedan ya están en el carrito (sueltas o dentro de un pack).
+ */
+export interface AvisoStock {
+  nombre: string; detalle: string; foto: string | null;
+  stock: number; uso: ReturnType<typeof usoDe>;
+  /** desde dónde se quiso sumar: la ficha, la página del pack o el + del carrito */
+  desde: "ficha" | "pack" | "carrito";
+}
+
+/** La tienda ve el stock hasta STOCK_VISIBLE_MAX: de ahí para arriba no se sabe cuántas hay (la API lo controla al cotizar). */
+const stockConocido = (s: number | undefined): s is number => s !== undefined && s < STOCK_VISIBLE_MAX;
+
 const valida = (l: unknown): l is LineaCarrito => {
   const x = l as LineaCarrito;
   return typeof x?.sku === "string" && Number.isInteger(x?.cantidad) && x.cantidad >= 1
@@ -41,12 +75,19 @@ interface Ctx {
   abierto: boolean;
   abrir(): void;
   cerrar(): void;
-  /** `abrir: false`: no abre el cajón ("Comprar ahora" va directo al checkout). */
-  agregar(l: Omit<LineaCarrito, "cantidad">, cantidad?: number, opciones?: { abrir?: boolean }): void;
+  /**
+   * `abrir: false`: no abre el cajón ("Comprar ahora" va directo al checkout).
+   * `stock`: el de la variante; si lo que ya hay en el carrito (suelto o en
+   * packs) no deja sumar más, no agrega, muestra el aviso y devuelve false.
+   */
+  agregar(l: Omit<LineaCarrito, "cantidad">, cantidad?: number, opciones?: { abrir?: boolean; stock?: number }): boolean;
   /** Varias prendas sueltas de una (un outfit): las iguales se suman y el cajón se abre una sola vez. */
   agregarVarias(ls: Array<Omit<LineaCarrito, "cantidad">>): void;
   /** Un pack: una línea aparte; el mismo pack otra vez suma uno más. */
-  agregarPack(p: { slug: string; nombre: string; foto: string | null; precio: number; prendas: PrendaDePack[] }, opciones?: { abrir?: boolean }): void;
+  agregarPack(p: { slug: string; nombre: string; foto: string | null; precio: number; prendas: PrendaDePack[] }, opciones?: { abrir?: boolean; stock?: Record<string, number> }): boolean;
+  /** El aviso de "ya está en tu carrito" (null: cerrado). */
+  avisoStock: AvisoStock | null;
+  avisarStock(a: AvisoStock | null): void;
   cambiar(sku: string, cantidad: number): void;
   quitar(sku: string): void;
   vaciar(): void;
@@ -76,6 +117,7 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
   const [cotizando, setCotizando] = useState(false);
   const [cupon, setCupon] = useState<string | null>(null);
   const [avisoCupon, setAvisoCupon] = useState<string | null>(null);
+  const [avisoStock, setAvisoStock] = useState<AvisoStock | null>(null);
   // Con qué se cotizó la última vez (el checkout manda entrega y pago): al cambiar el cupón se repite igual.
   const ultimas = useRef<OpcionesCotizar>({});
   // Nada se guarda hasta haber leído lo guardado: si no, el carrito vacío del
@@ -141,6 +183,13 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     abrir: () => { setAbierto(true); evento("view_cart", { currency: "ARS", value: pesos(lineas.reduce((a, l) => a + l.precio * l.cantidad, 0)) }); },
     cerrar: () => setAbierto(false),
     agregar: (l, cantidad = 1, opciones = {}) => {
+      if (stockConocido(opciones.stock)) {
+        const uso = usoDe(lineas, l.sku);
+        if (uso.total > 0 && uso.total + cantidad > opciones.stock) {
+          setAvisoStock({ nombre: l.nombre, detalle: [l.talle && `Talle ${l.talle}`, l.color].filter(Boolean).join(" · "), foto: l.foto, stock: opciones.stock, uso, desde: "ficha" });
+          return false;
+        }
+      }
       setLineas((ls) => {
         const ya = ls.find((x) => x.sku === l.sku);
         if (ya) return ls.map((x) => (x.sku === l.sku ? { ...x, ...l, cantidad: Math.min(MAX_UNIDADES_POR_ARTICULO, x.cantidad + cantidad) } : x));
@@ -149,6 +198,7 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
       });
       evento("add_to_cart", { currency: "ARS", value: pesos(l.precio * cantidad), items: [{ item_id: l.slug, item_name: l.nombre, item_variant: l.sku, price: pesos(l.precio), quantity: cantidad }] });
       if (opciones.abrir !== false) setAbierto(true);
+      return true;
     },
     agregarVarias: (nuevas) => {
       setLineas((ls) => {
@@ -165,6 +215,15 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
       setAbierto(true);
     },
     agregarPack: (p, opciones = {}) => {
+      // Cada prenda del pack, con lo que ya hay de esa variante en el carrito.
+      for (const x of p.prendas) {
+        const stock = opciones.stock?.[x.sku];
+        const uso = usoDe(lineas, x.sku);
+        if (stockConocido(stock) && uso.total > 0 && uso.total + x.cantidad > stock) {
+          setAvisoStock({ nombre: p.nombre, detalle: [x.talle && `Talle ${x.talle}`, x.color].filter(Boolean).join(" · "), foto: x.foto, stock, uso, desde: "pack" });
+          return false;
+        }
+      }
       const sku = clavePack(p.prendas);
       const unidades = p.prendas.reduce((a, x) => a + x.cantidad, 0);
       setLineas((ls) => {
@@ -174,7 +233,10 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
       });
       evento("add_to_cart", { currency: "ARS", value: pesos(p.precio), items: [{ item_id: p.slug, item_name: `Pack x${unidades} ${p.nombre}`, item_variant: sku, price: pesos(p.precio), quantity: 1 }] });
       if (opciones.abrir !== false) setAbierto(true);
+      return true;
     },
+    avisoStock,
+    avisarStock: setAvisoStock,
     cambiar: (sku, cantidad) => setLineas((ls) => ls.map((l) => (l.sku === sku ? { ...l, cantidad: Math.max(1, Math.min(l.pack ? MAX_PACKS_POR_LINEA : MAX_UNIDADES_POR_ARTICULO, cantidad)) } : l))),
     quitar: (sku) => {
       setLineas((ls) => {
@@ -188,9 +250,14 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     cupon,
     ponerCupon: (codigo) => { setAvisoCupon(null); setCupon(codigo ? normalizar(codigo).slice(0, 40) || null : null); },
     avisoCupon,
-  }), [lineas, abierto, cotizacion, cotizando, cotizar, cupon, avisoCupon]);
+  }), [lineas, abierto, cotizacion, cotizando, cotizar, cupon, avisoCupon, avisoStock]);
 
-  return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;
+  return (
+    <Contexto.Provider value={valor}>
+      {children}
+      <AvisoYaEnCarrito aviso={avisoStock} cerrar={() => setAvisoStock(null)} verCarrito={() => { setAvisoStock(null); setAbierto(true); }} />
+    </Contexto.Provider>
+  );
 }
 
 export function useCarrito(): Ctx {

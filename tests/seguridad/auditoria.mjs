@@ -757,13 +757,70 @@ async function respirar() {
   {
     const r = await pedir(`${API}/v1/admin/guias-talles/excel`, { method: "POST", headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x-isu-admin": "a".repeat(43) }, body: new Uint8Array(100) });
     chk(G, "POST guías en Excel con token inventado → 401", r.status === 401, String(r.status));
-    const g = await pedir(`${API}/v1/admin/guias-talles/excel`, { method: "POST", headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, body: new Uint8Array(7 * 1024 * 1024) });
-    chk(G, "POST guías en Excel de 7 MB → rechazado antes de leerlo", [401, 413].includes(g.status), String(g.status));
+    // Rechazado antes de leerlo: la API contesta y puede cortar la conexión mientras todavía se manda (EPIPE/ECONNRESET): también es rechazo.
+    const g = await pedir(`${API}/v1/admin/guias-talles/excel`, { method: "POST", headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, body: new Uint8Array(7 * 1024 * 1024) })
+      .catch((e) => ({ status: `corte ${e.cause?.code ?? e.message}` }));
+    chk(G, "POST guías en Excel de 7 MB → rechazado antes de leerlo", [401, 413].includes(g.status) || /^corte (EPIPE|ECONNRESET|UND_ERR_SOCKET)/.test(String(g.status)), String(g.status));
   }
   for (const [ruta, metodo] of [["/api/a/guias-talles/excel", "GET"], ["/api/a/productos/eliminar", "POST"]]) {
     const r = await pedir(ADMIN + ruta, { method: metodo, headers: metodo === "POST" ? { "content-type": "application/json", "x-isu": "1", origin: ADMIN } : {}, body: metodo === "POST" ? JSON.stringify({ ids: [1] }) : undefined });
     chk(G, `backoffice: ${metodo} ${ruta} sin sesión → 401/403`, [401, 403].includes(r.status), String(r.status));
   }
+}
+
+// ── 7j. Etapa 11: direcciones del checkout (Google y Georef) ──────────
+{
+  await respirar();
+  const G = "etapa 11";
+  const json = (url, body, h = {}) => pedir(url, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) });
+  const sesion = "3f2b8c1e-1d2a-4c3b-9e8f-0a1b2c3d4e5f";
+  // Lo que llega se valida antes de llamar a nadie; el id de Google va en su URL: nada que la cambie.
+  for (const [nombre, ruta, body] of [
+    ["sugerencias con 2 letras", "sugerencias", { texto: "ab", sesion }],
+    ["sugerencias con 500 letras", "sugerencias", { texto: "x".repeat(500), sesion }],
+    ["sugerencias con una sesión que no es UUID", "sugerencias", { texto: "thames", sesion: "' OR 1=1 --" }],
+    ["sugerencias con un campo de más", "sugerencias", { texto: "thames", sesion, key: "otra-clave" }],
+    ["sugerencias con texto que no es texto", "sugerencias", { texto: { $ne: null }, sesion }],
+    ["lugar con ../ en el id", "lugar", { id: "../../v1/places:autocomplete", sesion }],
+    ["lugar con ? en el id", "lugar", { id: "ChIJabcdef?fields=*", sesion }],
+    ["lugar con %2F en el id", "lugar", { id: "ChIJ%2F..%2Fabcdef", sesion }],
+    ["lugar con un id de 1000", "lugar", { id: "A".repeat(1000), sesion }],
+    ["revisar con un número de 50", "revisar", { calle: "Thames", numero: "1".repeat(50), provincia: "CABA" }],
+    ["revisar con un campo de más", "revisar", { calle: "Thames", numero: "1", provincia: "CABA", url: "http://169.254.169.254/" }],
+  ]) {
+    const r = await json(`${API}/v1/direcciones/${ruta}`, body);
+    chk(G, `direcciones: ${nombre} → 400`, r.status === 400, String(r.status));
+  }
+  chk(G, "direcciones: GET /v1/direcciones/sugerencias → 404", (await pedir(`${API}/v1/direcciones/sugerencias?texto=thames`)).status === 404);
+  const s = await json(`${API}/v1/direcciones/sugerencias`, { texto: "thames 15", sesion });
+  chk(G, "direcciones: las respuestas no se guardan en caché", s.headers.get("cache-control") === "no-store", s.headers.get("cache-control") ?? "");
+  // Un id que Google no conoce: «escribila a mano», sin detalles de Google.
+  const l = await json(`${API}/v1/direcciones/lugar`, { id: "ChIJ_no_existe_0000", sesion });
+  const lt = await l.text();
+  chk(G, "direcciones: un lugar que Google no conoce → 503 sin detalles de Google", l.status === 503 && !/Google contestó|googleapis|x-goog/i.test(lt), `${l.status} ${lt.slice(0, 80)}`);
+  // La clave de Google: nunca en respuestas, en la configuración pública ni en el HTML/JS.
+  const clave = process.env.GOOGLE_MAPS_API_KEY;
+  if (clave && clave.length >= 20) {
+    let texto = lt + await s.text() + await (await pedir(`${API}/v1/config`)).text();
+    for (const p of ["/", "/checkout"]) {
+      const h = await (await pedir(WEB + p)).text();
+      texto += h;
+      for (const m of [...h.matchAll(/\/_next\/static\/chunks\/[^"]+\.js/g)].slice(0, 15)) texto += await (await pedir(WEB + m[0])).text();
+    }
+    chk(G, "la clave de Google no aparece en respuestas, HTML ni JavaScript", !texto.includes(clave));
+    chk(G, "el navegador no llama a Google directo (no hay URL de Places en el JS)", !texto.includes("places.googleapis.com") && !texto.includes("x-goog-api-key"));
+  }
+  // Freno por IP de lo que cuesta (datos de Google): 40 cada 10 minutos.
+  let frenado = false;
+  for (let i = 0; i < 45 && !frenado; i++) frenado = (await json(`${API}/v1/direcciones/lugar`, { id: `ChIJ_freno_${String(i).padStart(4, "0")}`, sesion })).status === 429;
+  chk(G, "direcciones: ráfaga de datos de Google → 429", frenado);
+  // La tienda: sólo POST, con x-isu; nada más bajo /api/t/direcciones.
+  chk(G, "tienda: POST /api/t/direcciones/sugerencias sin x-isu → 403", (await json(`${WEB}/api/t/direcciones/sugerencias`, { texto: "thames", sesion })).status === 403);
+  chk(G, "tienda: GET /api/t/direcciones/sugerencias → 404", (await pedir(`${WEB}/api/t/direcciones/sugerencias`)).status === 404);
+  chk(G, "tienda: POST /api/t/direcciones/otra → 404", (await json(`${WEB}/api/t/direcciones/otra`, {}, { "x-isu": "1", origin: WEB })).status === 404);
+  // Backoffice: el estado (si hay clave, uso de hoy) sólo con sesión del dueño.
+  chk(G, "GET /v1/admin/direcciones con token inventado → 401", (await pedir(`${API}/v1/admin/direcciones`, { headers: { "x-isu-admin": "a".repeat(43) } })).status === 401);
+  chk(G, "backoffice: /api/a/direcciones sin sesión → 401", (await pedir(`${ADMIN}/api/a/direcciones`)).status === 401);
 }
 
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────

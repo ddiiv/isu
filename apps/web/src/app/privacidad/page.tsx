@@ -25,7 +25,7 @@ export default function Privacidad() {
       </ul>
 
       <h2>Con quién los compartimos</h2>
-      <p>Sólo con quienes necesitamos para completar tu compra: Mercado Pago (pagos), Correo Argentino, Andreani, OCA, Mercado Envíos y Cabify (entregas), el proveedor de mensajería de WhatsApp y de email (avisos), Google Analytics (estadísticas) y, si el asistente con inteligencia artificial está activo, Anthropic (sólo el texto de la consulta, para generar la respuesta). No vendemos tus datos.</p>
+      <p>Sólo con quienes necesitamos para completar tu compra: Mercado Pago (pagos), Correo Argentino, Andreani, OCA, Mercado Envíos y Cabify (entregas), el proveedor de mensajería de WhatsApp y de email (avisos), Google Analytics (estadísticas), Google Maps y el servicio de normalización de direcciones del Estado (Georef), sólo con la calle y la altura que escribís en el checkout, para sugerirla y revisar que exista, y, si el asistente con inteligencia artificial está activo, Anthropic (sólo el texto de la consulta, para generar la respuesta). No vendemos tus datos.</p>
 
       <h2>Cuánto tiempo los guardamos</h2>
       <p>Mientras tengas una cuenta o mientras sean necesarios para cumplir obligaciones fiscales y de defensa del consumidor.</p>

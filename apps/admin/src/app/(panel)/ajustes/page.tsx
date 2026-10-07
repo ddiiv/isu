@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { leerPacks, PACK_TOPE, type AjustePacks, type Local } from "@isu/shared";
+import { leerPacks, PACK_TOPE, type AjusteDirecciones, type AjustePacks, type Local } from "@isu/shared";
 import { api, fecha, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, EntradaPesos, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
 import { AjustesEnvios, type ValoresEnvios } from "@/components/AjustesEnvios";
@@ -21,7 +21,10 @@ type Valores = Record<string, unknown> & {
   cifras?: Array<{ valor: string; texto: string }>;
   // Transferencias que se confirman solas
   transferenciasAuto?: { talo: boolean; mercadoPago: boolean };
+  // Etapa 11
+  direcciones?: AjusteDirecciones;
 } & ValoresEnvios;
+type EstadoDirecciones = { google: boolean; georef: boolean; hoy: { sugerencias: number | null; lugares: number | null } };
 type EstadoTransferencias = { talo: { prendido: boolean; configurado: boolean }; mercadoPago: { prendido: boolean; configurado: boolean } };
 const HORAS: Array<[keyof Valores, string, number, number]> = [
   ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 240],
@@ -33,6 +36,8 @@ export default function Ajustes() {
   const [v, setV] = useState<Valores | null>(null);
   // Qué tiene credenciales en el servidor (Talo, Mercado Pago).
   const { datos: tr } = useDatos<{ estado: EstadoTransferencias }>("transferencias");
+  // Si la clave de Google está en el servidor y cuánto se usó hoy.
+  const { datos: dir } = useDatos<EstadoDirecciones>("direcciones");
   const aviso = useAviso();
   const original = datos ? Object.fromEntries(datos.ajustes.map((a) => [a.clave, a.valor])) as Valores : null;
   // Packs: el formato viejo ([x2…x5]) se muestra ya pasado al nuevo (al guardar queda así).
@@ -97,6 +102,39 @@ export default function Ajustes() {
             <p className="mt-3 text-xs text-tinta-tenue">Con las dos prendidas va Talo; si Talo no responde, la cuenta de Mercado Pago. Con ninguna, como siempre: se confirma a mano.</p>
           </Tarjeta>
         )}
+        {v.direcciones && (() => {
+          const d = v.direcciones;
+          const tope = (k: "topeSugerencias" | "topeLugares", x: string) => poner("direcciones", { ...d, [k]: Math.max(0, Math.min(5000, Math.trunc(Number(x)) || 0)) });
+          const uso = (n: number | null | undefined, t: number) => (n === null || n === undefined ? "" : `Hoy: ${Math.min(n, t)} de ${t}.`);
+          return (
+            <Tarjeta titulo="Direcciones en el checkout">
+              <p className="mb-3 text-xs text-tinta-tenue">Ayudan a que la dirección llegue bien escrita. Si algo no responde o se llega al tope del día, el checkout sigue como siempre: se escribe a mano.</p>
+              <div className="space-y-3">
+                <Casilla etiqueta="Sugerencias mientras se escribe la calle (Google)"
+                  ayuda={dir && !dir.google
+                    ? "Falta GOOGLE_MAPS_API_KEY en el servidor: mientras tanto no se muestran."
+                    : "Al elegir una, completa número, código postal, localidad y provincia."}
+                  marcada={d.google} onChange={(x) => poner("direcciones", { ...d, google: x })} />
+                {d.google && (
+                  <div className="grid grid-cols-2 gap-3 pl-7">
+                    <Campo etiqueta="Tope por día: búsquedas" ayuda={uso(dir?.hoy.sugerencias, d.topeSugerencias)}>
+                      <input type="number" min={0} max={5000} className={claseEntrada} value={d.topeSugerencias} onChange={(e) => tope("topeSugerencias", e.target.value)} />
+                    </Campo>
+                    <Campo etiqueta="Tope por día: direcciones completadas" ayuda={uso(dir?.hoy.lugares, d.topeLugares)}>
+                      <input type="number" min={0} max={5000} className={claseEntrada} value={d.topeLugares} onChange={(e) => tope("topeLugares", e.target.value)} />
+                    </Campo>
+                    <p className="col-span-2 text-xs text-tinta-tenue">Google da gratis 10.000 de cada cosa por mes. Con 300 por día no se pasa nunca. Si los subís, pasado lo gratis cuesta unos USD 5 cada 1.000 direcciones completadas y USD 2,83 cada 1.000 búsquedas que no terminan en una dirección elegida. Al llegar al tope, ese día se escribe a mano.</p>
+                  </div>
+                )}
+                <Casilla etiqueta="Revisar que la calle y la altura existan (Georef, gratis)"
+                  ayuda={dir && !dir.georef
+                    ? "Apagado en el servidor (GEOREF_URL=off)."
+                    : "Servicio del Gobierno, sin costo. Si no encuentra la calle o la altura, avisa; si está escrita distinto, propone la oficial. Nunca frena la compra."}
+                  marcada={d.georef} onChange={(x) => poner("direcciones", { ...d, georef: x })} />
+              </div>
+            </Tarjeta>
+          );
+        })()}
         <Tarjeta titulo="Tiempo para pagar (horas)">
           <p className="mb-3 text-xs text-tinta-tenue">Mientras tanto la mercadería queda apartada en Stocker. Si no paga, se libera sola.</p>
           <div className="grid grid-cols-2 gap-3">

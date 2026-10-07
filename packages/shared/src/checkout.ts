@@ -117,7 +117,8 @@ export const LineaCotizada = z.object({
   precio: z.number().int(),              // con el descuento masivo, si hay
   precioLista: z.number().int().nullable(),
   cantidad: z.number().int(),
-  disponible: z.number().int(),          // hasta 20
+  /** hasta cuántas en esta línea (hasta 20): el stock menos lo que se lleva de la misma variante en las otras líneas */
+  disponible: z.number().int(),
   subtotal: z.number().int(),
   /** Es parte de un pack (etapa 10: de cuál, cuántas prendas lleva cada pack y qué % le toca). Suelta: null. */
   pack: z.object({ clave: z.string(), unidades: z.number().int(), porcentaje: z.number().int() }).nullable().optional(),
@@ -141,7 +142,7 @@ export const PackCotizado = z.object({
   /** lo que saldrían esas prendas sueltas, sin descuento */
   precioLista: z.number().int(),
   subtotal: z.number().int(),
-  /** cuántos packs iguales se pueden llevar con el stock que hay (hasta 10) */
+  /** cuántos packs iguales se pueden llevar con el stock que hay (hasta 10), descontando lo que va en las otras líneas */
   disponible: z.number().int(),
   prendas: z.array(z.object({ sku: z.string(), color: z.string().nullable(), talle: z.string().nullable(), foto: z.string().nullable(), cantidad: z.number().int(), precio: z.number().int() })),
 });

@@ -16,7 +16,7 @@ import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
 import { rutasGuiasAdmin } from "./talles.js";
 import { auditar, exigir, type Admin } from "./sesion.js";
-import { AjusteChatbot, AjusteChatbotIa, AjusteTransportes, EnviosEnElDia, OrigenEnvios, PaqueteEnvios } from "@isu/shared";
+import { AjusteChatbot, AjusteDirecciones, AjusteChatbotIa, AjusteTransportes, EnviosEnElDia, OrigenEnvios, PaqueteEnvios } from "@isu/shared";
 
 /*
  * Backoffice. Todo exige sesión con doble factor y un rol:
@@ -695,7 +695,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   }).strict();
   const AJUSTES: Record<string, z.ZodType> = {
     // hayPacks, packsEn, hayLiquidacion y liquidacionEn no se guardan: salen de los productos y los descuentos.
-    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn"].includes(k))),
+    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "direcciones"].includes(k))),
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),
@@ -717,6 +717,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     resenas: z.object({ publicarSolas: z.boolean(), pedirDias: z.number().int().min(1).max(60) }).strict(),
     // Transferencias que se confirman solas: CVU por pedido (Talo) y/o alias de la cuenta de Mercado Pago con centavos únicos.
     transferenciasAuto: z.object({ talo: z.boolean(), mercadoPago: z.boolean() }).strict(),
+    // Etapa 11: ayudas para la dirección del checkout (Google con topes por día, Georef).
+    direcciones: AjusteDirecciones,
   };
   api.get("/v1/admin/ajustes", async (req) => {
     await exigir(pool, req, "dueno");

@@ -12,6 +12,7 @@ simuladores), pero no se puede abrir al público hasta completarlos.
 | Mercado Pago: clave secreta del webhook | `MP_WEBHOOK_SECRET` (api); URL del webhook: `https://api.<dominio>/v1/pagos/mercadopago/aviso` | Pendiente |
 | Datos para transferir: titular, CUIT, banco, CBU, alias | Backoffice → Ajustes → Transferencia | Pendiente |
 | Transferencias que se confirman solas (opcional): credenciales de Talo, o los datos de la cuenta de Mercado Pago | `TALO_USER_ID` `TALO_CLIENT_ID` `TALO_CLIENT_SECRET` (api) y Ajustes → Transferencias que se confirman solas. Ver `transferencias.md` | Pendiente |
+| Sugerencias de calle en el checkout (opcional): proyecto en Google Cloud con facturación y «Places API (New)». Con los topes de fábrica (300 y 300 por día) no se paga | `GOOGLE_MAPS_API_KEY` (api) y Ajustes → Direcciones en el checkout. Ver `direcciones-checkout.md` | Decidir |
 | Cuenta de correo transaccional (SMTP) + SPF/DKIM del dominio | `SMTP_URL`, `CORREO_DE` (worker) | Pendiente |
 | Credencial de Stocker (origen «Tienda online minorista») | `STOCKER_TOKEN` (worker y api) | Pendiente (se emite desde el backoffice de Stocker) |
 | Locales que abastecen online en Stocker | Stocker → Locales | Revisar |

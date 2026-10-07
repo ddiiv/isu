@@ -95,3 +95,28 @@ Ver [contrato-stocker.md](contrato-stocker.md).
   - `GET/POST /v1/admin/guias-talles/excel` (`?vista=1` para la vista previa);
   - migración `0017`: las 40 guías de la fábrica.
 - **Stocker:** `CatalogoStocker` descarta productos de evento, pack o combo y variantes de pack o combo, si vinieran marcados.
+
+## Direcciones del checkout y aviso del carrito (etapa 11)
+
+- **Shared `direcciones.ts`:**
+  - `PROVINCIAS` con el código INDEC, que es el que entiende Georef;
+  - `provinciaDelCheckout`, para pasar los nombres de Google y Georef a los del checkout;
+  - los esquemas de las tres rutas, `AjusteDirecciones` y `ConfigPublica.direcciones` (qué ayudas hay).
+- **API:**
+  - `lib/direcciones.ts`:
+    - `crearGoogle`: Places API (New), `places:autocomplete` y `places/{id}` con `X-Goog-FieldMask: addressComponents`;
+    - `crearGeoref`: `/v2.0/direcciones`;
+    - `evaluarGeoref`: ok, sugerencia, altura o no encontrada.
+  - `modulos/direcciones/rutas.ts`: `POST /v1/direcciones/sugerencias`, `/lugar` y `/revisar`, y `GET /v1/admin/direcciones`. Topes en Redis: `isu:direcciones:<tipo>:<día>`.
+  - Migración `0018`: el ajuste `direcciones`.
+- **Tienda:**
+  - `checkout/Direccion.tsx`:
+    - `CampoCalle`: un combobox ARIA, 350 ms de espera, desde 4 letras, un UUID de sesión por dirección y la atribución «Google Maps»;
+    - `AvisoDireccion`: revisa 900 ms después del último cambio.
+  - Las rutas pasan por el BFF (`/api/t/direcciones/*`).
+- **Aviso del carrito:**
+  - `usoDe(lineas, sku)` cuenta una variante suelta y en packs;
+  - `agregar` y `agregarPack` reciben el `stock` y devuelven `false` si no agregan;
+  - `AvisoYaEnCarrito` es el `alertdialog` (al centro desde `sm`, hoja abajo en el celular);
+  - el «+» del carrito usa `disponible`, que ahora descuenta las otras líneas.
+- **Simulador:** `scripts/demo/direcciones-simulado.mjs` (Google y Georef, puerto 3940), en `pnpm demo:direcciones` y `levantar-e2e.sh`.

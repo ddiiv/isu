@@ -15,6 +15,52 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 8 | Inicio completo (carrusel de portada, packs, pestañas por categoría, números de la marca, opiniones al final), packs de 2 a 5 unidades con su dirección `pack-xN`, descripción y composición en la ficha, reseñas de compras verificadas con moderación | **Cerrada** (abajo) · guía en [`inicio-packs-resenas.md`](inicio-packs-resenas.md) |
 | 9 | Packs de 2 a 10 (configurable) armados sobre la prenda padre con el stock de cada variante, sección Packs y Liquidación en la barra divididas por Hombre / Mujer / Niños, menú del celular con subcategorías y 1–2 fotos por categoría, barra de envío gratis en la ficha | **Cerrada** (abajo) · guía en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md) |
 | 10 | El pack va aparte en el carrito (como Deliver), carrito con el precio por transferencia y por tarjeta/Mercado Pago, checkout de una página, «Comprar ahora» y WhatsApp sólo sin stock, eliminar productos, backoffice rediseñado, guías de talles con Excel (y las 40 de la fábrica), sólo productos padre desde Stocker | **Cerrada** (abajo) · guía en [`carrito-checkout-backoffice.md`](carrito-checkout-backoffice.md) |
+| 11 | Direcciones en el checkout: sugerencias de calle con Google Places (la clave sólo en el servidor, topes por día dentro del uso gratis) y revisión de calle y altura con Georef (gratis); aviso en el carrito cuando una variante ya está dentro de un pack y no quedan para sumarla suelta | **Cerrada** (abajo) · guía en [`direcciones-checkout.md`](direcciones-checkout.md) |
+
+## Etapa 11 · resultados del cierre (06/10/2026)
+
+**Qué entró** (cómo se usa en [`direcciones-checkout.md`](direcciones-checkout.md))
+- **Sugerencias de calle con Google Places:**
+  - mientras se escribe la calle, hasta 5 direcciones de Argentina; elegir una completa calle, número, código postal, localidad (en CABA, el barrio) y provincia;
+  - la clave sólo en el servidor (`GOOGLE_MAPS_API_KEY`, opcional);
+  - sesiones de Google por dirección y sólo `addressComponents`, lo más barato;
+  - topes por día en Ajustes (de fábrica 300 y 300: no se pasa del uso gratis).
+- **Revisión con Georef (gratis):**
+  - con calle, número y provincia: «✓ Encontramos tu dirección», «¿Tu dirección es …?» con la oficial, o aviso de altura o calle que no existe;
+  - nunca frena la compra.
+- **Ajustes → «Direcciones en el checkout»:** prender o apagar cada ayuda, los topes y el uso de hoy.
+- **Aviso del carrito:**
+  - si las que quedan de una variante ya están en el carrito (dentro de un pack o sueltas), sumarla no la agrega y explica por qué, con «Ver mi carrito» y «Elegir otro talle o color»;
+  - en la ficha («Agregar» y «Comprar ahora»), en la página del pack y en el «+» del carrito;
+  - ventana al centro en la compu y la notebook, hoja desde abajo en el celular.
+- **El «+» del carrito** descuenta lo que la misma variante lleva en las otras líneas (`disponible` de la cotización).
+- **Migración 0018** (el ajuste `direcciones`), el simulador `pnpm demo:direcciones` y la política de privacidad con Google Maps y Georef.
+
+**QA**
+- Pruebas unitarias: **510/510**, 21 más.
+  - Funciones: código postal, provincias de Google y Georef, componentes de Google (barrio en CABA, nunca la comuna), calles escritas distinto, evaluación de Georef.
+  - Clientes de Google y Georef contra simuladores: región, sesión, máscara de campos, códigos de provincia, ids raros descartados, clave mala, caído y lento.
+  - Rutas: configuración pública sin la clave, validación, apagado en Ajustes, tope del día, Google o Georef caídos, caché de Georef y backoffice sin sesión.
+  - Carrito: lo que queda por línea descuenta las otras.
+- Pruebas en navegador: **141/141**, 6 más (compu y celular):
+  - elegir una sugerencia completa la dirección y Georef la confirma (con el teclado);
+  - Georef propone la calle bien escrita, avisa la altura y deja seguir;
+  - el aviso del carrito en compu, notebook y celular, con «Comprar ahora».
+- Hallazgos corregidos antes de entregar:
+  - la ficha ve el stock hasta 10: con 10 o más no se sabe el exacto, así que el aviso no bloquea y lo controla la API;
+  - la respuesta de sugerencias podía abrir la lista encima de otro campo si ya se había pasado a otro;
+  - en el celular el aviso de Georef quedaba lejos de la calle;
+  - una prueba de cupones leía el total antes del recálculo al cambiar el pago;
+  - la auditoría se cortaba entera si la API cerraba la conexión mientras se subía el Excel de 7 MB, aunque ese corte es justamente el rechazo que se busca. Ahora cuenta como rechazo.
+
+**Hacker**
+- Auditoría: **385/385**, con 22 chequeos nuevos (§ 7j, detalle en `seguridad.md`).
+- Decisiones:
+  - la clave de Google nunca sale del servidor;
+  - el id de Google se valida antes de ir en su URL;
+  - sin Redis no se usa Google (no se puede contar el tope);
+  - freno por IP y tope por día: lo peor de un abuso es un día sin sugerencias;
+  - a Google y Georef va sólo la dirección, nunca nombre, email ni teléfono.
 
 ## Etapa 10 · resultados del cierre (06/10/2026)
 

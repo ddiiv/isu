@@ -39,6 +39,10 @@ const REGLAS: Regla[] = [
   { metodo: "GET", patron: /^productos\/([a-z0-9-]{1,80})\/resenas$/, api: (m) => `/v1/productos/${m[1]}/resenas`, consulta: ["orden", "pagina"] },
   { metodo: "GET", patron: new RegExp(`^opinar/${NUM}$`), api: (m) => `/v1/opinar/${m[1]}`, consulta: ["t"] },
   { metodo: "POST", patron: new RegExp(`^opinar/${NUM}$`), api: (m) => `/v1/opinar/${m[1]}`, consulta: ["t"] },
+  // Etapa 11: ayudas para la dirección del checkout (Google y Georef, siempre a través de la API).
+  { metodo: "POST", patron: /^direcciones\/sugerencias$/, api: () => "/v1/direcciones/sugerencias" },
+  { metodo: "POST", patron: /^direcciones\/lugar$/, api: () => "/v1/direcciones/lugar" },
+  { metodo: "POST", patron: /^direcciones\/revisar$/, api: () => "/v1/direcciones/revisar" },
 ];
 const ACCESO = /^[A-Za-z0-9_-]{30,40}$/;
 const TIPOS_BINARIOS = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"]);

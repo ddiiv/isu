@@ -22,6 +22,7 @@
 | api y worker (etapa 4) | Las credenciales de cada transporte que se use (`CORREO_AR_*`, `ANDREANI_*`, `OCA_*`, `MERCADO_ENVIOS_ACTIVO=true`, `CABIFY_*`; ver `.env.example`) **en los dos servicios**: la API cotiza y genera etiquetas; el worker sigue los envíos. **Nunca** `TRANSPORTES_SIMULADOR` |
 | worker (etapa 4) | `SITIO_URL=https://www.<dominio>` (enlace de seguimiento de los avisos) · `WHATSAPP_META_TOKEN` · `WHATSAPP_META_PHONE_NUMBER_ID` (y opcionales `WHATSAPP_META_API_VERSION`, `WHATSAPP_IDIOMA`) · `MP_ACCESS_TOKEN` si se usa Mercado Envíos |
 | api (etapa 5) | Opcional: `ANTHROPIC_API_KEY` (respuestas con IA del asistente; además hay que prenderlo en Ajustes) y `CHATBOT_MODELO` |
+| api (etapa 11) | Opcional: `GOOGLE_MAPS_API_KEY` (sugerencias de calle en el checkout; clave de Google Cloud con «Places API (New)», cómo sacarla en `direcciones-checkout.md`). **No** poner `GOOGLE_PLACES_URL` ni `GEOREF_URL` (son para los simuladores); `GEOREF_URL=off` apaga la revisión de Georef |
 | worker | `DATABASE_URL` (igual que la API) · `REDIS_URL=${{Redis.REDIS_URL}}/1` (base 1 del Redis compartido: `redis-compartido.md`) · `STOCKER_API_URL=http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<puerto>` (sin `/api`) · `STOCKER_TOKEN` · `WEB_INTERNAL_URL=http://${{tienda-web.RAILWAY_PRIVATE_DOMAIN}}:${{tienda-web.PORT}}` (con `PORT=3000` fijo en la web) · `REVALIDAR_TOKEN` (el mismo que la web) · `R2_*` si se importan fotos desde el servidor |
 
 Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno distinto para cada uno.
