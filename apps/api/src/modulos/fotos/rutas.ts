@@ -14,7 +14,7 @@ import { noEncontrado } from "../../lib/errores.js";
  * extensiones.
  */
 // Fotos de productos (p/…) y banners de la portada (b/…, etapa 8).
-const ARCHIVO = /^(p\/\d{1,9}\/[a-z0-9]{8,40}-(400|800|1200)|b\/\d{1,9}\/[a-z0-9]{8,40}-(800|1600|2400))\.webp$/;
+const ARCHIVO = /^(p\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(400|800|1200)|b\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(800|1600|2400))\.webp$/;
 
 /* Una ruta relativa se toma desde la raíz del monorepo (donde está el .env), no desde apps/api. */
 export function desdeLaRaiz(dir: string): string {

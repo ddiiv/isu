@@ -17,3 +17,4 @@ export * from "./seo-datos.js";
 export * from "./packs.js";
 export * from "./resenas.js";
 export * from "./direcciones.js";
+export * from "./banners.js";

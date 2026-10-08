@@ -245,7 +245,7 @@ export function Checkout({ config }: { config: ConfigPublica }) {
                     <label className={`flex cursor-pointer items-start gap-3 p-4 ${medio === m.id ? "bg-marca-claro/40" : ""}`}>
                       <input type="radio" name="medio" checked={medio === m.id} onChange={() => setMedio(m.id)} className="mt-1 size-4 accent-tinta" />
                       <span className="flex-1">
-                        <b>{m.titulo}</b>{m.id === "transferencia" && config.descuentoTransferencia > 0 && <span className="ml-2 rounded-full bg-ahorro px-2 py-0.5 text-xs font-bold text-white">{config.descuentoTransferencia}% OFF</span>}
+                        <b>{m.titulo}</b>{m.id === "transferencia" && config.descuentoTransferencia > 0 && <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-ahorro px-2 py-0.5 text-xs font-bold text-white">{config.descuentoTransferencia}% OFF</span>}
                       </span>
                       {precio !== null && <span className={`shrink-0 font-bold ${m.id === "transferencia" ? "text-ahorro" : ""}`}>{formatearPesos(precio)}</span>}
                     </label>

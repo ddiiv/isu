@@ -1,5 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "noEmit": true, "module": "ESNext", "moduleResolution": "Bundler", "lib": ["ES2023", "DOM"] },
-  "include": ["src"]
+  "include": ["src"],
+  // El banner es un componente de React: lo revisan las apps que lo usan (web y admin).
+  "exclude": ["src/banner"]
 }

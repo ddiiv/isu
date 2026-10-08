@@ -1,8 +1,8 @@
-import { randomBytes } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type pg from "pg";
 import { aSlug, FOTOS_POR_COLOR } from "@isu/shared";
+import { claveNueva } from "@isu/almacen";
 import type { Almacen } from "./almacen.js";
 import { FotoInvalida, MAX_BYTES, procesarFoto, type FotoProcesada } from "./procesar.js";
 
@@ -62,7 +62,8 @@ export const esTraba = (e: unknown) => ["57014", "55P03", "40P01", "40001"].incl
  * de su grupo (mismo tipo y color). Devuelve null si entró o el motivo si no.
  */
 export async function guardarFoto(pool: pg.Pool, almacen: Almacen, f: NuevaFoto, proc: FotoProcesada, reintentos = 3): Promise<string | null> {
-  const clave = `p/${f.productoId}/${randomBytes(8).toString("hex")}`;
+  // Sin el id del producto: la dirección de la foto es pública.
+  const clave = claveNueva("p");
   const borrar = async () => { for (const w of [400, 800, 1200]) await almacen.borrar(`${clave}-${w}.webp`).catch(() => {}); };
   try {
     for (const t of proc.tamanos) await almacen.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");

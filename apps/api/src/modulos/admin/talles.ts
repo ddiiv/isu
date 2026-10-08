@@ -39,8 +39,8 @@ export async function rutasGuiasAdmin(app: FastifyInstance, { pool, ip, invalida
   const slugsConGuia = async (id: number) =>
     (await pool.query<{ slug: string }>("SELECT slug FROM tienda.productos WHERE guia_talles_id = $1", [id])).rows.map((r) => r.slug);
   const leer = async (id: number) => {
-    const { rows } = await pool.query<{ id: number; nombre: string; tipo: TipoGuia; medidas: string[]; filas: Array<{ talle: string; valores: unknown[] }>; nota: string | null }>(
-      "SELECT id, nombre, tipo, medidas, filas, nota FROM tienda.guias_talles WHERE id = $1", [id]);
+    const { rows } = await pool.query<{ id: number; slug: string; nombre: string; tipo: TipoGuia; medidas: string[]; filas: Array<{ talle: string; valores: unknown[] }>; nota: string | null }>(
+      "SELECT id, slug, nombre, tipo, medidas, filas, nota FROM tienda.guias_talles WHERE id = $1", [id]);
     if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe esa guía.");
     return rows[0];
   };
@@ -50,15 +50,26 @@ export async function rutasGuiasAdmin(app: FastifyInstance, { pool, ip, invalida
   api.get("/v1/admin/guias-talles", async (req) => {
     await exigir(pool, req);
     const { rows } = await pool.query(
-      `SELECT g.id, g.nombre, g.tipo, g.medidas, jsonb_array_length(g.filas) AS talles, g.actualizado_en AS "actualizadoEn", g.actualizado_por AS "actualizadoPor",
+      `SELECT g.id, g.slug, g.nombre, g.tipo, g.medidas, jsonb_array_length(g.filas) AS talles, g.actualizado_en AS "actualizadoEn", g.actualizado_por AS "actualizadoPor",
               (SELECT count(*)::int FROM tienda.productos p WHERE p.guia_talles_id = g.id) AS productos
          FROM tienda.guias_talles g ORDER BY g.tipo, lower(g.nombre)`);
     return { guias: rows };
   });
 
+  // El backoffice abre cada guía por su nombre en la dirección (/guias-talles/remera-regular-adulto), no por el id.
+  api.get("/v1/admin/guias-talles/s/:slug", { schema: { params: z.object({ slug: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/).max(80) }) } }, async (req) => {
+    await exigir(pool, req);
+    const r = await pool.query<{ id: number }>("SELECT id FROM tienda.guias_talles WHERE slug = $1", [req.params.slug]);
+    if (!r.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe esa guía.");
+    return detalle(r.rows[0].id);
+  });
   api.get("/v1/admin/guias-talles/:id", { schema: { params: z.object({ id: Id }) } }, async (req) => {
     await exigir(pool, req);
-    const g = ordenarGuia(await leer(req.params.id));
+    return detalle(req.params.id);
+  });
+  async function detalle(id: number) {
+    const leida = await leer(id);
+    const g = { ...ordenarGuia(leida), id: leida.id, slug: leida.slug };
     const { rows } = await pool.query(
       `SELECT p.id, p.nombre, p.stocker_padre AS sku, p.slug, p.visible,
               COALESCE((SELECT array_agg(DISTINCT v.talle) FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.talle IS NOT NULL), '{}') AS talles
@@ -68,7 +79,7 @@ export async function rutasGuiasAdmin(app: FastifyInstance, { pool, ip, invalida
       guia: g,
       productos: rows.map((p) => ({ ...p, talles: [...p.talles].sort(compararTalles), coincide: coincide(g.tipo, tallesGuia, p.talles) })),
     };
-  });
+  }
 
   /*
    * Excel (etapa 10): exportar todas las guías (una hoja por guía) e
@@ -133,26 +144,29 @@ export async function rutasGuiasAdmin(app: FastifyInstance, { pool, ip, invalida
     const a = await exigir(pool, req, "operador");
     const g = ordenarGuia(req.body);
     try {
-      const { rows } = await pool.query<{ id: number }>(
-        "INSERT INTO tienda.guias_talles (nombre, tipo, medidas, filas, nota, actualizado_por) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+      const { rows } = await pool.query<{ id: number; slug: string }>(
+        "INSERT INTO tienda.guias_talles (nombre, tipo, medidas, filas, nota, actualizado_por) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, slug",
         [g.nombre, g.tipo, JSON.stringify(g.medidas), JSON.stringify(g.filas), g.nota, a.email]);
       await auditar(pool, a, "crear_guia_talles", "guia_talles", rows[0]!.id, { nombre: g.nombre, tipo: g.tipo }, ip(req));
-      return reply.code(201).send({ id: rows[0]!.id });
+      return reply.code(201).send({ id: rows[0]!.id, slug: rows[0]!.slug });
     } catch (e) { throw errorNombre(e); }
   });
 
   api.put("/v1/admin/guias-talles/:id", { schema: { params: z.object({ id: Id }), body: GuiaTalles } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const g = ordenarGuia(req.body);
+    let slug: string;
     try {
-      const r = await pool.query(
-        "UPDATE tienda.guias_talles SET nombre=$2, tipo=$3, medidas=$4, filas=$5, nota=$6, actualizado_por=$7, actualizado_en=now() WHERE id = $1",
+      const r = await pool.query<{ slug: string }>(
+        "UPDATE tienda.guias_talles SET nombre=$2, tipo=$3, medidas=$4, filas=$5, nota=$6, actualizado_por=$7, actualizado_en=now() WHERE id = $1 RETURNING slug",
         [req.params.id, g.nombre, g.tipo, JSON.stringify(g.medidas), JSON.stringify(g.filas), g.nota, a.email]);
-      if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe esa guía.");
+      if (!r.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe esa guía.");
+      slug = r.rows[0].slug;
     } catch (e) { throw errorNombre(e); }
     await auditar(pool, a, "editar_guia_talles", "guia_talles", req.params.id, g, ip(req));
     await invalidar(await slugsConGuia(req.params.id));
-    return { ok: true };
+    // Con otro nombre cambia la dirección en el backoffice.
+    return { ok: true, slug };
   });
 
   api.delete("/v1/admin/guias-talles/:id", { schema: { params: z.object({ id: Id }) } }, async (req) => {

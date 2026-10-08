@@ -583,7 +583,9 @@ async function respirar() {
   // Portada: los banners sólo llevan a esta tienda.
   const portada = await (await pedir(`${API}/v1/portada`)).json().catch(() => ({ banners: [] }));
   chk(G, "los banners sólo enlazan a rutas propias", (portada.banners ?? []).every((b) => b.enlace === null || /^\/(?![/\\])/.test(b.enlace)));
-  chk(G, "las fotos de banners son claves propias (sin URLs ajenas)", (portada.banners ?? []).every((b) => /^b\/\d+\/[a-z0-9]+$/.test(b.foto.clave) && (!b.fotoMovil || /^b\/\d+\/[a-z0-9]+$/.test(b.fotoMovil.clave))));
+  // (etapa 12: un banner de texto no tiene foto; las claves nuevas van en una carpeta al azar)
+  const claveBanner = (f) => !f || /^b\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}$/.test(f.clave);
+  chk(G, "las fotos de banners son claves propias (sin URLs ajenas)", (portada.banners ?? []).every((b) => claveBanner(b.foto) && claveBanner(b.fotoMovil)));
 
   // Packs: el % lo pone la API; desde el navegador no se manda.
   const packs = await (await pedir(`${API}/v1/productos?coleccion=packs&limite=5`)).json().catch(() => null);
@@ -608,6 +610,7 @@ async function respirar() {
     ["GET", "/v1/admin/resenas"], ["PATCH", "/v1/admin/resenas/1", { estado: "publicada" }], ["POST", "/v1/admin/resenas/masivo", { ids: [1], estado: "publicada" }],
     ["GET", "/v1/admin/banners"], ["POST", "/v1/admin/banners", { alt: "Hackeo", enlace: "/" }], ["PATCH", "/v1/admin/banners/1", { enlace: "/" }],
     ["DELETE", "/v1/admin/banners/1"], ["POST", "/v1/admin/banners/1/foto?tipo=escritorio"], ["DELETE", "/v1/admin/banners/1/foto-movil"],
+    ["DELETE", "/v1/admin/banners/1/foto"], ["POST", "/v1/admin/banners/sugeridos"], ["GET", "/v1/admin/banners/producto?auto=nuevo"],
   ]) {
     const r = await pedir(API + ruta, { method: metodo, headers: { ...(body ? { "content-type": "application/json" } : {}), "x-isu-admin": "a".repeat(43) }, body: body ? JSON.stringify(body) : undefined });
     chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
@@ -837,6 +840,39 @@ async function respirar() {
   chk(G, `/locales: lo que abre otra pestaña va con noopener (${otraPestana.length})`, otraPestana.length > 0 && otraPestana.every((a) => /rel="[^"]*noopener/.test(a)));
   chk(G, "PUT /v1/admin/ajustes (locales) con token inventado → 401",
     (await pedir(`${API}/v1/admin/ajustes`, { method: "PUT", headers: { "content-type": "application/json", "x-isu-admin": "a".repeat(43) }, body: JSON.stringify({ locales: [{ nombre: "x", direccion: "x", localidad: "x", horario: "x", mapa: "javascript:alert(1)", retiro: true }] }) })).status === 401);
+}
+
+// ── 7l. Etapa 12: banners interactivos y direcciones sin ids ──────────
+{
+  await respirar();
+  const G = "banners y rutas";
+  const propia = (u) => typeof u === "string" && /^\/(?![/\\])[^\s\\]*$/.test(u);
+  const p = await (await pedir(`${API}/v1/portada`)).json().catch(() => ({ banners: [] }));
+  const bs = p.banners ?? [];
+  const botones = bs.flatMap((b) => b.botones ?? []);
+  chk(G, `portada: hay banners interactivos (${bs.filter((b) => b.titulo).length} con título, ${botones.length} botones)`, bs.some((b) => b.titulo) && botones.length > 0);
+  chk(G, "portada: los botones sólo llevan a páginas de la tienda", botones.every((x) => propia(x.enlace)), botones.map((x) => x.enlace).join(" "));
+  chk(G, "portada: un banner con botones o producto no es un link entero (no se anidan)", bs.every((b) => !(b.botones?.length || b.producto) || b.enlace === null));
+  chk(G, "portada: ninguna variable sin reemplazar ({descuento}…)", !/\{(descuento|cuotas|envioGratis|packsHasta|packsMinimo|packsMaximo)\}/.test(JSON.stringify(bs)));
+  chk(G, "portada: el producto del banner va por su slug (sin id de producto)", bs.every((b) => !b.producto || (/^[a-z0-9-]+$/.test(b.producto.slug) && !("id" in b.producto))) && !/producto_?id/i.test(JSON.stringify(bs)));
+  chk(G, "portada: las fotos nuevas de banners no llevan el id del banner", bs.every((b) => [b.foto, b.fotoMovil].every((f) => !f || !f.clave.startsWith(`b/${b.id}/`))));
+  // Los textos son texto: un título con HTML no se dibuja como HTML en el inicio.
+  const h = await (await pedir(`${WEB}/`)).text();
+  const hrefs = [...h.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+  chk(G, "inicio: ningún link javascript: ni data:", !hrefs.some((u) => /^\s*(javascript|data|vbscript):/i.test(u)));
+  // Fotos de productos: la dirección pública no dice qué id tiene el producto.
+  const lista = await (await pedir(`${API}/v1/productos?coleccion=nuevos&limite=24`)).json().catch(() => ({}));
+  const fotos = (Array.isArray(lista) ? lista : lista.productos ?? []).map((x) => x.foto?.clave).filter(Boolean);
+  chk(G, `fotos de productos con dirección sin id (${fotos.length})`, fotos.length > 0 && fotos.every((c) => /^p\/[a-f0-9]{12}\/[a-z0-9]{8,40}$/.test(c)), fotos.slice(0, 3).join(" "));
+  // El backoffice: el producto y la guía se abren por su nombre; un número viejo redirige (con sesión).
+  for (const ruta of ["/productos/remera-lisa", "/guias-talles/remera-y-top-adulto"]) {
+    const r = await pedir(ADMIN + ruta, { redirect: "manual" });
+    chk(G, `backoffice ${ruta} sin sesión no muestra datos`, r.status !== 200 || !/"(stock|precio)"/.test(await r.text()), String(r.status));
+  }
+  for (const [metodo, ruta] of [["GET", "/v1/admin/productos/s/remera-lisa"], ["GET", "/v1/admin/guias-talles/s/remera-y-top-adulto"], ["GET", "/v1/admin/pedidos/ISU-1001/comprobantes/1"]]) {
+    const r = await pedir(API + ruta, { method: metodo, headers: { "x-isu-admin": "a".repeat(43) } });
+    chk(G, `${metodo} ${ruta} con token inventado → 401`, r.status === 401, String(r.status));
+  }
 }
 
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────

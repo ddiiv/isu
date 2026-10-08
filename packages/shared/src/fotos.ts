@@ -81,4 +81,5 @@ export function urlFoto(base: string, clave: string, ancho: AnchoFoto | AnchoBan
 }
 
 /* Las claves las genera la tienda; igual se validan antes de armar una ruta con ellas. */
-export const CLAVE_FOTO = /^p\/\d{1,9}\/[a-z0-9]{8,40}$/;
+/** Clave de una foto de producto: p/<carpeta>/<azar>. La carpeta es al azar (las viejas, el id del producto). */
+export const CLAVE_FOTO = /^p\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}$/;

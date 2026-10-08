@@ -74,5 +74,9 @@ describe("talles y fotos", () => {
     expect(CLAVE_FOTO.test("p/12/abcd1234")).toBe(true);
     expect(CLAVE_FOTO.test("p/12/../../etc/passwd")).toBe(false);
     expect(CLAVE_FOTO.test("p/12/ABCD1234")).toBe(false);
+    // Etapa 12: sin el id del producto (una carpeta al azar).
+    expect(CLAVE_FOTO.test("p/3f9a0c1b2d4e/abcd1234ef567890")).toBe(true);
+    expect(CLAVE_FOTO.test("p/3f9a0c1b2d4X/abcd1234")).toBe(false);
+    expect(CLAVE_FOTO.test("p/3f9a0c1b2d/abcd1234")).toBe(false);
   });
 });

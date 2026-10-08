@@ -230,3 +230,43 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - `/locales` no tiene enlaces `javascript:` ni `data:`;
   - lo que abre otra pestaña va con `noopener`;
   - cambiar los locales pide sesión del dueño.
+
+## Banners interactivos y direcciones sin ids (etapa 12)
+
+- **Los links de los banners son sólo de esta tienda** (tres llaves):
+  - `RutaTienda` en shared: una dirección que empieza con `/`, sin `//`, `\\` ni espacios, hasta 300 caracteres;
+  - la API rechaza el resto al guardar (botones y link del banner entero);
+  - el dibujo (`@isu/ui/banner`) vuelve a revisarlo y, si no es propio, lo dibuja sin link.
+  - Nada de `https://`, `javascript:` ni `data:`. Los textos son texto: React no dibuja HTML.
+- **Validación estricta** (zod `.strict()`, sin campos de más):
+  - largos máximos (título 90, texto 220, etiqueta 40, botón 30);
+  - hasta 2 botones;
+  - colores y alineación de una lista fija;
+  - un dato `{…}` desconocido no se guarda.
+  - Producto elegido y automático a la vez → 400. Lo frena también la base: `banners_un_producto`.
+- **El producto va por su slug**, nunca por el id. La API lo traduce adentro y la respuesta no lleva `producto_id`. Si el producto se borra, el banner queda sin producto (`ON DELETE SET NULL`).
+- **La tarjeta del producto** sale de la misma consulta que la grilla:
+  - sólo productos visibles, con stock y con foto;
+  - al precio con descuentos de la tienda.
+  - El navegador nunca manda un precio.
+- **Permisos:**
+  - ver la lista y la vista previa pide sesión;
+  - crear, editar, sacar fotos, borrar y «Agregar banners sugeridos» pide operador;
+  - todo queda en la auditoría del backoffice;
+  - hasta 30 banners.
+- **Direcciones sin ids:**
+  - las fotos y banners nuevos van en una carpeta al azar (`p/3f9a0c1b2d4e/…`, 48 bits): por la dirección no se sabe qué id tiene un producto ni cuántos hay;
+  - los patrones del almacén (`PATRON_FOTOS`, `PATRON_BANNERS`) y de `/fotos/…` aceptan los dos formatos, sin `..` ni otra cosa;
+  - en el backoffice, productos y guías van por su slug;
+  - los comprobantes, por su número dentro del pedido (`/pedidos/ISU-1042/comprobantes/1`).
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7l, más § 7f ampliada):
+  - en la portada:
+    - hay banners con título y botones;
+    - los botones llevan sólo a rutas propias;
+    - con botones o producto, el banner entero no es un link;
+    - no queda ningún `{dato}` sin reemplazar;
+    - el producto va por slug, sin ids;
+    - las fotos nuevas no llevan el id del banner;
+  - el inicio no tiene links `javascript:` ni `data:`;
+  - las fotos de productos van sin id;
+  - las rutas nuevas del backoffice (por slug, sacar foto, sugeridos, vista previa del producto, comprobante por número) con token inventado → 401.

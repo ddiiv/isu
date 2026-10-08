@@ -30,6 +30,8 @@ De arriba hacia abajo:
 
 El carrusel pasa solo cada 6 segundos. Se frena con el mouse encima, y no se mueve si la persona pidió menos animaciones en su teléfono.
 
+> **Etapa 12:** los banners ahora pueden tener título, texto, botones, la tarjeta de un producto y un color de fondo (sin foto), con vista previa en compu y celular. Vienen 7 banners sugeridos. Todo en [`banners-y-direcciones.md`](banners-y-direcciones.md).
+
 ## 2. Packs: llevá más, pagá menos
 
 - **Qué prendas.** Productos → casilla **Pack**, en la lista o en la ficha. Se pueden marcar muchas juntas con «Vender en pack».

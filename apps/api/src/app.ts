@@ -166,9 +166,9 @@ export async function construirApp(deps: Dependencias) {
   await rutasSeo(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR });
 
   // ── Etapa 8: reseñas y portada del inicio ──
-  await rutasResenas(app, { pool, redis, cache, colas, canalInvalidar: CANAL_INVALIDAR, secreto: env.INTERNO_TOKEN });
+  await rutasResenas(app, { pool, redis, cache, colas, canalInvalidar: CANAL_INVALIDAR, secreto: env.INTERNO_TOKEN, descuentos });
   const banners: Almacen | null = (() => { try { return almacenDeBanners({ ...process.env, FOTOS_DIR: env.FOTOS_DIR }); } catch { return null; } })();
-  await rutasResenasAdmin(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR, banners });
+  await rutasResenasAdmin(app, { pool, redis, env, cache, colas, canalInvalidar: CANAL_INVALIDAR, banners, descuentos });
 
   // ── Transferencias que se confirman solas: lo que entró y no se pudo asignar solo ──
   await rutasTransferenciasAdmin(app, { pool, env, transferencias: servicio.transferencias, mpConfigurado: !!mp });

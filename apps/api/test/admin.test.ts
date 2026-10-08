@@ -14,6 +14,9 @@ import type { Colas } from "../src/lib/colas.js";
 import { codigo } from "../src/lib/totp.js";
 import { ARGON_ADMIN } from "../src/modulos/admin/ingreso.js";
 import { firmaOpinar } from "@isu/envios";
+import { BANNERS_SUGERIDOS } from "@isu/shared";
+import { armarBanner } from "../src/modulos/portada/banners.js";
+import { almacenDeComprobantes } from "@isu/almacen";
 
 /*
  * Etapa 3: el backoffice por la API. Ingreso con doble factor, roles,
@@ -31,6 +34,7 @@ const pool = crearPool({ url: DB, max: 6 });
 const redis = new Redis(REDIS, { maxRetriesPerRequest: 1 });
 let app: Awaited<ReturnType<typeof construirApp>>;
 let dirFotos = "";
+let dirComprobantes = "";
 
 const enviados: Array<{ tipo: string; nombre: string; datos: Record<string, unknown> }> = [];
 const colas: Colas = {
@@ -132,11 +136,12 @@ beforeAll(async () => {
   await redis.flushdb();
   await limpiar();
   dirFotos = await mkdtemp(path.join(os.tmpdir(), "fotos-adm-"));
+  dirComprobantes = await mkdtemp(path.join(os.tmpdir(), "comprobantes-adm-"));
   const urlStocker = await levantarStocker();
   app = await construirApp({
     env: leerEntorno({
       NODE_ENV: "test", LOG_LEVEL: "silent", DATABASE_URL: DB, REDIS_URL: REDIS, CACHE_SEGUNDOS: "0",
-      INTERNO_TOKEN: INTERNO, ADMIN_CLAVE_CIFRADO: CLAVE_CIFRADO, FOTOS_DIR: dirFotos,
+      INTERNO_TOKEN: INTERNO, ADMIN_CLAVE_CIFRADO: CLAVE_CIFRADO, FOTOS_DIR: dirFotos, COMPROBANTES_DIR: dirComprobantes,
       STOCKER_API_URL: urlStocker, STOCKER_TOKEN: "s".repeat(30),
     }),
     pool, redis, colas,
@@ -251,6 +256,15 @@ describe("usuarios y roles", () => {
 });
 
 describe("productos: destacados, nuevos, edición masiva", () => {
+  it("etapa 12: el producto se abre por su slug (la dirección del backoffice no lleva el id)", async () => {
+    const porId = (await req("GET", `/v1/admin/productos/${ids["qa-adm-2"]}`, operador)).json();
+    const porSlug = await req("GET", "/v1/admin/productos/s/qa-adm-2", operador);
+    expect(porSlug.statusCode, porSlug.body).toBe(200);
+    expect(porSlug.json()).toEqual(porId);
+    expect(porSlug.json().producto).toMatchObject({ slug: "qa-adm-2", nombre: "Jogger qa adm frisa" });
+    expect((await req("GET", "/v1/admin/productos/s/no-existe-qa", operador)).statusCode).toBe(404);
+    expect((await req("GET", "/v1/admin/productos/s/qa-adm-2")).statusCode).toBe(401);
+  });
   it("las casillas Destacado y Nuevo arman las colecciones de la tienda", async () => {
     const id = ids["qa-adm-3"]!;
     enviados.length = 0;
@@ -298,8 +312,11 @@ describe("fotos", () => {
     const color = (await pool.query("SELECT id FROM tienda.producto_colores WHERE producto_id = $1", [id])).rows[0].id;
     const r = await subir(id, `tipo=color&color=${color}`, await jpg());
     expect(r.statusCode, r.body).toBe(201);
-    const archivos = await readdir(path.join(dirFotos, "p", String(id)));
-    expect(archivos.filter((a) => a.startsWith(r.json().clave.split("/")[2])).sort()).toHaveLength(3);
+    // Etapa 12: la dirección pública de la foto no lleva el id del producto.
+    expect(r.json().clave).toMatch(/^p\/[a-f0-9]{12}\/[a-f0-9]{16}$/);
+    const [, carpeta, nombre] = r.json().clave.split("/");
+    const archivos = await readdir(path.join(dirFotos, "p", carpeta));
+    expect(archivos.filter((a) => a.startsWith(nombre)).sort()).toEqual([`${nombre}-1200.webp`, `${nombre}-400.webp`, `${nombre}-800.webp`]);
     for (let i = 0; i < 4; i++) expect((await subir(id, `tipo=exhibicion`, await jpg())).statusCode).toBe(201);
     // 1 color → tope 5 fotos en total.
     const tope = await subir(id, `tipo=color&color=${color}`, await jpg());
@@ -388,6 +405,32 @@ describe("guías de talles", () => {
   it("sin guía, la ficha no muestra ninguna", async () => {
     expect((await app.inject("/v1/productos/qa-adm-5")).json().guiaTalles).toBeNull();
   });
+  it("etapa 12: cada guía tiene su nombre en la dirección (slug), sin acentos y sin repetirse", async () => {
+    const l = (await req("GET", "/v1/admin/guias-talles", operador)).json().guias.find((g: { id: number }) => g.id === guiaId);
+    expect(l.slug).toBe("qa-adm-remera-regular");
+    const d = await req("GET", "/v1/admin/guias-talles/s/qa-adm-remera-regular", operador);
+    expect(d.statusCode, d.body).toBe(200);
+    expect(d.json().guia).toMatchObject({ id: guiaId, slug: "qa-adm-remera-regular", nombre: "QA adm remera regular" });
+    expect((await req("GET", "/v1/admin/guias-talles/s/no-existe-qa", operador)).statusCode).toBe(404);
+    const a = await req("POST", "/v1/admin/guias-talles", operador, guia({ nombre: "QA adm Ñandú tallé" }));
+    expect(a.statusCode, a.body).toBe(201);
+    expect(a.json().slug).toBe("qa-adm-nandu-talle");
+    // Otro nombre que da la misma dirección: se le agrega -2.
+    const b = (await req("POST", "/v1/admin/guias-talles", operador, guia({ nombre: "QA adm ñandu talle!" }))).json();
+    expect(b.slug).toBe("qa-adm-nandu-talle-2");
+    // Al cambiarle el nombre, cambia la dirección.
+    const c = await req("PUT", `/v1/admin/guias-talles/${b.id}`, operador, guia({ nombre: "QA adm Ñandú largo" }));
+    expect(c.json()).toMatchObject({ ok: true, slug: "qa-adm-nandu-largo" });
+    // Cambiarle otra cosa no la mueve.
+    expect((await req("PUT", `/v1/admin/guias-talles/${a.json().id}`, operador, guia({ nombre: "QA adm Ñandú tallé", nota: "otra" }))).json().slug).toBe("qa-adm-nandu-talle");
+    // «nueva» es la dirección de crear una guía: nunca es un slug.
+    const cli = await pool.connect();
+    try {
+      await cli.query("BEGIN");
+      const n = await cli.query(`INSERT INTO tienda.guias_talles (nombre, tipo, medidas, filas) VALUES ('Nueva', 'adulto', '["pecho"]', '[{"talle":"M"}]') RETURNING slug`);
+      expect(n.rows[0].slug).toBe("nueva-guia");
+    } finally { await cli.query("ROLLBACK"); cli.release(); }
+  });
 });
 
 describe("armá tu outfit", () => {
@@ -471,6 +514,27 @@ describe("pedidos", () => {
     expect((await req("GET", `/v1/admin/pedidos/${n}`, operador)).json().pedido.notas_internas).toBe("Viene el sábado");
     // Comodines de LIKE escapados: "%" no trae todo.
     expect((await req("GET", "/v1/admin/pedidos?q=%25%25%25", operador)).json().total).toBe(0);
+  });
+  it("etapa 12: los comprobantes se bajan por su número dentro del pedido, no por su id", async () => {
+    const n = await crear("esperando_transferencia", "transferencia");
+    const pid = (await pool.query("SELECT id FROM tienda.pedidos WHERE numero = $1", [n])).rows[0].id as number;
+    const alm = almacenDeComprobantes({ COMPROBANTES_DIR: dirComprobantes })!;
+    for (const [i, t] of ["uno", "dos"].entries()) {
+      const clave = `c/${pid}/${"a".repeat(23)}${i}.pdf`;
+      await alm.guardar(clave, Buffer.from(`%PDF-1.4 ${t}`), "application/pdf");
+      await pool.query("INSERT INTO tienda.comprobantes (pedido_id, clave, tipo, bytes) VALUES ($1, $2, 'application/pdf', 12)", [pid, clave]);
+    }
+    const d = (await req("GET", `/v1/admin/pedidos/${n}`, operador)).json();
+    expect(d.comprobantes.map((c: { n: number }) => c.n)).toEqual([1, 2]);
+    expect(JSON.stringify(d.comprobantes)).not.toMatch(/"(id|clave)"/);
+    const r = await req("GET", `/v1/admin/pedidos/${n}/comprobantes/2`, operador);
+    expect(r.statusCode).toBe(200);
+    expect(r.headers["content-type"]).toBe("application/pdf");
+    expect(r.headers["content-disposition"]).toBe(`attachment; filename="comprobante-${n}-2.pdf"`);
+    expect(r.body).toContain("dos");
+    expect((await req("GET", `/v1/admin/pedidos/${n}/comprobantes/3`, operador)).statusCode).toBe(404);
+    expect((await req("GET", `/v1/admin/pedidos/${n}/comprobantes/0`, operador)).statusCode).toBe(400);
+    expect((await req("GET", `/v1/admin/pedidos/${n}/comprobantes/1`)).statusCode).toBe(401);
   });
 });
 
@@ -950,12 +1014,13 @@ describe("portada (banners del inicio)", () => {
     expect((await subir(b.id, "escritorio", await foto(4000, 600))).json().error).toBe("foto_invalida");
     const e = await subir(b.id, "escritorio", await foto(1800, 700));
     expect(e.statusCode, e.body).toBe(200);
-    expect(e.json().clave).toMatch(/^b\/\d+\/[a-f0-9]{16}$/);
-    expect(e.json().clave.startsWith(`b/${b.id}/`)).toBe(true);
+    // Etapa 12: sin el id del banner en la dirección (una carpeta al azar por foto).
+    expect(e.json().clave).toMatch(/^b\/[a-f0-9]{12}\/[a-f0-9]{16}$/);
+    expect(e.json().clave.startsWith(`b/${b.id}/`)).toBe(false);
     const m = await subir(b.id, "movil", await foto(900, 1200));
     expect(m.statusCode).toBe(200);
-    const archivos = await readdir(path.join(dirFotos, "b", String(b.id)));
-    expect(archivos.length).toBe(6);
+    const carpetas = [e.json().clave, m.json().clave].map((c: string) => path.join(dirFotos, ...c.split("/").slice(0, 2)));
+    for (const c of carpetas) expect((await readdir(c)).length).toBe(3);
     const portada = (await app.inject("/v1/portada")).json().banners.find((x: { id: number }) => x.id === b.id);
     expect(portada).toMatchObject({ alt: "QA adm packs de remeras", enlace: "/packs", foto: { clave: e.json().clave, ancho: 1800, alto: 700 }, fotoMovil: { clave: m.json().clave } });
     // En disco (desarrollo), la API la sirve como las fotos de los productos.
@@ -967,7 +1032,123 @@ describe("portada (banners del inicio)", () => {
     await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { activo: false });
     expect((await app.inject("/v1/portada")).json().banners.some((x: { id: number }) => x.id === b.id)).toBe(false);
     expect((await req("DELETE", `/v1/admin/banners/${b.id}`, operador)).statusCode).toBe(200);
-    expect(await readdir(path.join(dirFotos, "b", String(b.id)))).toEqual([]);
+    for (const c of carpetas) expect(await readdir(c)).toEqual([]);
+  });
+
+  /* ── Etapa 12: banners interactivos ── */
+  const enPortada = async (id: number) => (await app.inject("/v1/portada")).json().banners.find((x: { id: number }) => x.id === id);
+
+  it("etapa 12: banner de texto con variables, botones y un producto elegido por su slug", async () => {
+    const desc = (await pool.query("SELECT valor FROM tienda.ajustes WHERE clave = 'descuentoTransferencia'")).rows[0].valor as number;
+    const r = await req("POST", "/v1/admin/banners", operador, {
+      alt: "QA adm texto {descuento}", titulo: "{descuento}% OFF con transferencia", texto: "La campera, con stock", etiqueta: "QA",
+      botones: [{ texto: "Ver packs", enlace: "/packs" }, { texto: "Ver la campera", enlace: "/producto/qa-adm-3", estilo: "borde" }],
+      fondo: "ahorro", alineacion: "centro", producto: "qa-adm-3", enlace: "/mujer", orden: -900,
+    });
+    expect(r.statusCode, r.body).toBe(200);
+    const b = r.json().banner;
+    expect(b).toMatchObject({
+      producto: "qa-adm-3", productoNombre: "Campera qa adm puffer", productoAuto: null, fondo: "ahorro", alineacion: "centro",
+      botones: [{ texto: "Ver packs", enlace: "/packs", estilo: "lleno" }, { texto: "Ver la campera", enlace: "/producto/qa-adm-3", estilo: "borde" }],
+    });
+    // El id del producto no sale de la base: va por su slug.
+    expect(JSON.stringify(b)).not.toMatch(/producto_?id/i);
+    const p = await enPortada(b.id);
+    expect(p).toMatchObject({
+      titulo: `${desc}% OFF con transferencia`, alt: `QA adm texto ${desc}`, etiqueta: "QA", foto: null, fondo: "ahorro",
+      // Con botones o producto, el banner entero no es un link (no se anidan links).
+      enlace: null,
+      producto: { slug: "qa-adm-3", nombre: "Campera qa adm puffer", precio: 5_000_000 },
+    });
+    expect(p.producto.foto.clave).toMatch(/^p\/[a-f0-9]{12}\//);
+    // La vista previa del backoffice muestra lo mismo, y los valores de las variables.
+    const l = (await req("GET", "/v1/admin/banners", operador)).json();
+    expect(l.vistas[b.id]).toMatchObject({ motivo: null, banner: { titulo: `${desc}% OFF con transferencia` } });
+    expect(l.variables).toMatchObject({ descuento: String(desc) });
+    expect((await req("GET", "/v1/admin/banners/producto?producto=qa-adm-3", operador)).json().producto).toMatchObject({ slug: "qa-adm-3" });
+    expect((await req("GET", "/v1/admin/banners/producto?producto=no-existe-qa", operador)).json().error).toBe("producto");
+    expect((await req("GET", "/v1/admin/banners/producto?auto=otro", operador)).statusCode).toBe(400);
+    // Sin botones ni producto, el banner entero vuelve a llevar a su link.
+    await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { botones: [], producto: null });
+    expect(await enPortada(b.id)).toMatchObject({ enlace: "/mujer", botones: [], producto: null });
+  });
+
+  it("etapa 12: valida variables, botones, links y el producto", async () => {
+    const base = { alt: "QA adm validar", titulo: "QA adm validar" };
+    const estado = async (extra: Record<string, unknown>) => (await req("POST", "/v1/admin/banners", operador, { ...base, ...extra })).statusCode;
+    expect(await estado({ titulo: "{descuentos}% OFF" })).toBe(400);
+    expect(await estado({ botones: [{ texto: "{envio}", enlace: "/packs" }] })).toBe(400);
+    expect(await estado({ botones: [1, 2, 3].map((i) => ({ texto: `B${i}`, enlace: "/packs" })) })).toBe(400);
+    for (const enlace of ["https://evil.com", "//evil.com", "/\\evil.com", "javascript:alert(1)", "packs", "/ espacio"]) {
+      expect(await estado({ botones: [{ texto: "Ir", enlace }] }), enlace).toBe(400);
+    }
+    expect(await estado({ botones: [{ texto: "", enlace: "/packs" }] })).toBe(400);
+    expect(await estado({ fondo: "violeta" })).toBe(400);
+    expect(await estado({ titulo: "x".repeat(91) })).toBe(400);
+    expect(await estado({ producto: "qa-adm-1", productoAuto: "nuevo" })).toBe(400);
+    expect(await estado({ productoId: ids["qa-adm-1"] })).toBe(400);
+    expect((await req("POST", "/v1/admin/banners", operador, { ...base, producto: "no-existe-qa" })).json().error).toBe("producto");
+    // Al editar, elegido + automático tampoco (lo frena la base).
+    const b = (await req("POST", "/v1/admin/banners", operador, { ...base, producto: "qa-adm-1" })).json().banner;
+    const e = await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { productoAuto: "nuevo" });
+    expect(e.statusCode).toBe(400);
+    expect(e.json().error).toBe("producto");
+    const ok = await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { producto: null, productoAuto: "nuevo" });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json().banner).toMatchObject({ producto: null, productoAuto: "nuevo" });
+    expect((await req("PATCH", `/v1/admin/banners/${b.id}`, lectura2, { activo: false })).json().error).toBe("sin_permiso");
+  });
+
+  it("etapa 12: no sale si usa un dato sin valor en Ajustes, o si pide un producto y no hay", async () => {
+    const fila = {
+      id: 0, alt: "QA adm envío", enlace: "/packs", foto: null, foto_ancho: null, foto_alto: null, foto_movil: null, movil_ancho: null, movil_alto: null,
+      titulo: "Envío gratis desde {envioGratis}", texto: null, etiqueta: null, botones: [], fondo: "tinta" as const, alineacion: "centro" as const,
+      producto_id: null, producto_auto: null, ocultar_sin_producto: false,
+    };
+    // (sin producto, armarBanner no usa los descuentos)
+    expect(await armarBanner(pool, null as never, fila, {})).toEqual({ banner: null, motivo: "Usa {envioGratis} y hoy no tiene valor en Ajustes." });
+    expect((await armarBanner(pool, null as never, fila, { envioGratis: "$ 80.000" })).banner).toMatchObject({ titulo: "Envío gratis desde $ 80.000", enlace: "/packs", producto: null });
+    expect((await armarBanner(pool, null as never, { ...fila, titulo: null }, {})).motivo).toBe("Le falta la foto o un título.");
+
+    // La remera de nena no tiene fotos: no hay tarjeta para mostrar.
+    const b = (await req("POST", "/v1/admin/banners", operador, { alt: "QA adm sin producto", titulo: "QA adm sin producto", producto: "qa-adm-4", ocultarSinProducto: true, orden: -800 })).json().banner;
+    expect(await enPortada(b.id)).toBeUndefined();
+    expect((await req("GET", "/v1/admin/banners", operador)).json().vistas[b.id]).toEqual({ banner: null, motivo: "No hay ningún producto con stock para mostrar." });
+    // Sin «no mostrar», sale igual, sin la tarjeta.
+    await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { ocultarSinProducto: false });
+    expect(await enPortada(b.id)).toMatchObject({ titulo: "QA adm sin producto", producto: null });
+  });
+
+  it("etapa 12: sacar la foto deja el banner de texto; sin título no se puede", async () => {
+    const foto = sharp({ create: { width: 1800, height: 700, channels: 3, background: "#2e6b3f" } }).jpeg().toBuffer();
+    const b = (await req("POST", "/v1/admin/banners", operador, { alt: "QA adm con foto", titulo: "QA adm con foto", fondo: "rosa" })).json().banner;
+    const e = await subir(b.id, "escritorio", await foto);
+    const m = await subir(b.id, "movil", await sharp({ create: { width: 900, height: 1200, channels: 3, background: "#fff" } }).jpeg().toBuffer());
+    expect(await enPortada(b.id)).toMatchObject({ foto: { clave: e.json().clave }, fotoMovil: { clave: m.json().clave } });
+    const r = await req("DELETE", `/v1/admin/banners/${b.id}/foto`, operador);
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json().banner).toMatchObject({ foto: null, fotoMovil: null, fondo: "rosa" });
+    expect(await enPortada(b.id)).toMatchObject({ foto: null, fotoMovil: null, titulo: "QA adm con foto", fondo: "rosa" });
+    for (const c of [e.json().clave, m.json().clave]) expect(await readdir(path.join(dirFotos, ...c.split("/").slice(0, 2)))).toEqual([]);
+    // Un banner que es sólo una foto necesita la foto.
+    const s = (await req("POST", "/v1/admin/banners", operador, { alt: "QA adm sólo foto" })).json().banner;
+    await subir(s.id, "escritorio", await foto);
+    expect((await req("DELETE", `/v1/admin/banners/${s.id}/foto`, operador)).json().error).toBe("sin_titulo");
+    expect((await req("DELETE", `/v1/admin/banners/${s.id}/foto`, lectura2)).json().error).toBe("sin_permiso");
+  });
+
+  it("etapa 12: los banners sugeridos son los de la migración y se pueden volver a agregar (apagados)", async () => {
+    const { rows } = await pool.query(
+      `SELECT sugerido, alt, titulo, texto, etiqueta, botones, fondo, alineacion, producto_auto AS "productoAuto", ocultar_sin_producto AS "ocultarSinProducto"
+         FROM tienda.banners WHERE sugerido IS NOT NULL ORDER BY orden`);
+    expect(rows).toEqual(BANNERS_SUGERIDOS);
+    // Todos llevan a páginas de la tienda que existen.
+    for (const s of BANNERS_SUGERIDOS) for (const x of s.botones) expect(["/nuevos", "/mujer", "/hombre", "/packs", "/liquidacion", "/outfits", "/locales"]).toContain(x.enlace);
+    await pool.query("DELETE FROM tienda.banners WHERE sugerido = 'outfit'");
+    expect((await req("POST", "/v1/admin/banners/sugeridos", operador)).json()).toEqual({ creados: 1 });
+    expect((await req("POST", "/v1/admin/banners/sugeridos", operador)).json()).toEqual({ creados: 0 });
+    expect((await pool.query("SELECT activo, titulo FROM tienda.banners WHERE sugerido = 'outfit'")).rows[0]).toEqual({ activo: false, titulo: "Armá tu outfit en un minuto" });
+    expect((await req("POST", "/v1/admin/banners/sugeridos", lectura2)).json().error).toBe("sin_permiso");
   });
 });
 

@@ -96,12 +96,4 @@ export function nombreParaResena(nombre: string, apellido: string): string {
   return (a ? `${limpio} ${a}.` : limpio) || "Cliente";
 }
 
-/** Banner del carrusel del inicio. */
-export const BannerPublico = z.object({
-  id: z.number().int(),
-  alt: z.string(),
-  enlace: z.string().nullable(),
-  foto: z.object({ clave: z.string(), ancho: z.number().int().nullable(), alto: z.number().int().nullable() }),
-  fotoMovil: z.object({ clave: z.string(), ancho: z.number().int().nullable(), alto: z.number().int().nullable() }).nullable(),
-});
-export type BannerPublico = z.infer<typeof BannerPublico>;
+// El banner del carrusel del inicio está en banners.ts (etapa 12: banners interactivos).

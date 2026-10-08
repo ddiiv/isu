@@ -2,14 +2,18 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
 import type { Redis } from "ioredis";
-import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { FotoInvalida, procesarBanner, type Almacen } from "@isu/almacen";
+import {
+  ALINEACIONES_BANNER, BANNERS_SUGERIDOS, BotonBanner, FONDOS_BANNER, PRODUCTO_AUTO, VARIABLES_BANNER, type BannerPublico,
+} from "@isu/shared";
+import { claveNueva, FotoInvalida, procesarBanner, type Almacen } from "@isu/almacen";
 import type { Entorno } from "../../entorno.js";
 import type { CacheCorta } from "../../lib/cache.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { ipDe } from "../../lib/cliente.js";
+import type { Descuentos } from "../../lib/descuentos.js";
+import { armarBanner, COLUMNAS_BANNER, productoDeBanner, variablesDeBanners, type FilaBanner } from "../portada/banners.js";
 import { auditar, exigir } from "./sesion.js";
 
 /*
@@ -25,7 +29,7 @@ const POR_PAGINA = 30;
 const Ruta = z.string().trim().max(300).regex(/^\/([^/\\\s]|$)[^\s\\]*$/, "Una dirección de esta tienda, que empiece con / (por ejemplo /mujer o /packs)");
 
 export async function rutasResenasAdmin(app: FastifyInstance, deps: {
-  pool: pg.Pool; redis: Redis; env: Entorno; cache: CacheCorta; colas: Colas; canalInvalidar: string; banners: Almacen | null;
+  pool: pg.Pool; redis: Redis; env: Entorno; cache: CacheCorta; colas: Colas; canalInvalidar: string; banners: Almacen | null; descuentos: Descuentos;
 }) {
   const api = app.withTypeProvider<ZodTypeProvider>();
   const { pool } = deps;
@@ -125,64 +129,142 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
   });
 
   // ── Portada: banners del inicio ──────────────────────────────────
-  const COLS = `id, alt, enlace, foto, foto_ancho AS "fotoAncho", foto_alto AS "fotoAlto", foto_movil AS "fotoMovil", movil_ancho AS "movilAncho",
-    movil_alto AS "movilAlto", orden, activo, desde, hasta, creado_en AS "creadoEn"`;
+  // Etapa 12: interactivos (título, texto, etiqueta, botones, fondo, producto). El producto va por su slug, nunca por el id.
+  const COLS = `b.id, b.alt, b.enlace, b.foto, b.foto_ancho AS "fotoAncho", b.foto_alto AS "fotoAlto", b.foto_movil AS "fotoMovil", b.movil_ancho AS "movilAncho",
+    b.movil_alto AS "movilAlto", b.orden, b.activo, b.desde, b.hasta, b.creado_en AS "creadoEn",
+    b.titulo, b.texto, b.etiqueta, b.botones, b.fondo, b.alineacion, p.slug AS producto, p.nombre AS "productoNombre", b.producto_auto AS "productoAuto",
+    b.ocultar_sin_producto AS "ocultarSinProducto", b.sugerido`;
+  const DESDE = "FROM tienda.banners b LEFT JOIN tienda.productos p ON p.id = b.producto_id";
+  const leerBanner = async (id: number) => (await pool.query(`SELECT ${COLS} ${DESDE} WHERE b.id = $1`, [id])).rows[0];
+  const textoOpcional = (max: number) => z.string().trim().max(max).nullable().transform((v) => v || null);
+  const SlugProducto = z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(160);
+  // Las variables que se pueden usar en los textos ({descuento}…): una desconocida es un error de tipeo.
+  const variablesConocidas = (t: string | null | undefined) => !t || [...t.matchAll(/\{(\w+)\}/g)].every((m) => m[1]! in VARIABLES_BANNER);
+  const MENSAJE_VARIABLES = `Variable desconocida. Las que hay: ${Object.keys(VARIABLES_BANNER).map((k) => `{${k}}`).join(", ")}.`;
+  const CamposBanner = {
+    alt: z.string().trim().min(2, "Describí qué se ve en el banner").max(160),
+    enlace: Ruta.nullable(),
+    orden: z.number().int().min(-1000).max(1000),
+    activo: z.boolean(),
+    desde: z.iso.datetime({ offset: true }).nullable(),
+    hasta: z.iso.datetime({ offset: true }).nullable(),
+    titulo: textoOpcional(90),
+    texto: textoOpcional(220),
+    etiqueta: textoOpcional(40),
+    botones: z.array(BotonBanner).max(2, "Hasta 2 botones"),
+    fondo: z.enum(FONDOS_BANNER),
+    alineacion: z.enum(ALINEACIONES_BANNER),
+    producto: SlugProducto.nullable(),
+    productoAuto: z.enum(PRODUCTO_AUTO).nullable(),
+    ocultarSinProducto: z.boolean(),
+  };
+  type Campos = { [K in keyof typeof CamposBanner]?: z.infer<(typeof CamposBanner)[K]> };
+  const revisar = (b: Campos, ctx: z.RefinementCtx) => {
+    for (const k of ["alt", "titulo", "texto", "etiqueta"] as const) if (!variablesConocidas(b[k])) ctx.addIssue({ code: "custom", path: [k], message: MENSAJE_VARIABLES });
+    (b.botones ?? []).forEach((x, i) => { if (!variablesConocidas(x.texto)) ctx.addIssue({ code: "custom", path: ["botones", i, "texto"], message: MENSAJE_VARIABLES }); });
+    if (b.producto && b.productoAuto) ctx.addIssue({ code: "custom", path: ["producto"], message: "Elegí un producto o uno automático, no los dos." });
+    if (b.desde && b.hasta && new Date(b.hasta) <= new Date(b.desde)) ctx.addIssue({ code: "custom", path: ["hasta"], message: "La fecha de fin tiene que ser posterior al inicio" });
+  };
   const Banner = z.object({
-    alt: z.string().trim().min(2, "Describí qué se ve en la foto").max(160),
-    enlace: Ruta.nullable().default(null).transform((v) => v || null),
-    orden: z.number().int().min(-1000).max(1000).default(0),
-    activo: z.boolean().default(true),
-    desde: z.iso.datetime({ offset: true }).nullable().default(null),
-    hasta: z.iso.datetime({ offset: true }).nullable().default(null),
-  }).strict().refine((b) => !b.desde || !b.hasta || new Date(b.hasta) > new Date(b.desde), { message: "La fecha de fin tiene que ser posterior al inicio", path: ["hasta"] });
+    ...CamposBanner,
+    enlace: CamposBanner.enlace.default(null).transform((v) => v || null),
+    orden: CamposBanner.orden.default(0), activo: CamposBanner.activo.default(true),
+    desde: CamposBanner.desde.default(null), hasta: CamposBanner.hasta.default(null),
+    titulo: CamposBanner.titulo.default(null), texto: CamposBanner.texto.default(null), etiqueta: CamposBanner.etiqueta.default(null),
+    botones: CamposBanner.botones.default([]), fondo: CamposBanner.fondo.default("marca"), alineacion: CamposBanner.alineacion.default("izquierda"),
+    producto: CamposBanner.producto.default(null), productoAuto: CamposBanner.productoAuto.default(null), ocultarSinProducto: CamposBanner.ocultarSinProducto.default(false),
+  }).strict().superRefine(revisar);
   // Para editar: todo opcional y SIN valores por defecto (un cambio de orden no tiene que apagar el banner).
-  const CambiosBanner = z.object({
-    alt: z.string().trim().min(2).max(160).optional(),
-    enlace: Ruta.nullable().optional(),
-    orden: z.number().int().min(-1000).max(1000).optional(),
-    activo: z.boolean().optional(),
-    desde: z.iso.datetime({ offset: true }).nullable().optional(),
-    hasta: z.iso.datetime({ offset: true }).nullable().optional(),
-  }).strict();
+  const CambiosBanner = z.object(Object.fromEntries(Object.entries(CamposBanner).map(([k, v]) => [k, v.optional()])) as { [K in keyof typeof CamposBanner]: z.ZodOptional<(typeof CamposBanner)[K]> })
+    .strict().superRefine(revisar);
+  const COLUMNA: Record<string, string> = {
+    alt: "alt", enlace: "enlace", orden: "orden", activo: "activo", desde: "desde", hasta: "hasta", titulo: "titulo", texto: "texto", etiqueta: "etiqueta",
+    botones: "botones", fondo: "fondo", alineacion: "alineacion", producto: "producto_id", productoAuto: "producto_auto", ocultarSinProducto: "ocultar_sin_producto",
+  };
+  /** El producto elegido por su slug → su id (sólo adentro de la base). */
+  const idDeProducto = async (slug: string | null | undefined) => {
+    if (!slug) return null;
+    const r = await pool.query<{ id: number }>("SELECT id FROM tienda.productos WHERE slug = $1 AND eliminado_en IS NULL", [slug]);
+    if (!r.rows[0]) throw new ErrorHttp(400, "producto", "No existe ese producto.");
+    return r.rows[0].id;
+  };
+  const valorDe = async (k: string, v: unknown) => (k === "botones" ? JSON.stringify(v) : k === "producto" ? idDeProducto(v as string | null) : k === "enlace" ? v || null : v);
+
+  /** La vista previa: el banner como lo ve la tienda (aunque esté apagado), o por qué no sale. */
+  const vistas = async (ids: number[]) => {
+    const vars = await variablesDeBanners(pool);
+    const { rows } = await pool.query<FilaBanner>(`SELECT ${COLUMNAS_BANNER} FROM tienda.banners WHERE id = ANY($1::int[])`, [ids]);
+    const salida: Record<number, { banner: BannerPublico | null; motivo: string | null }> = {};
+    for (const b of rows) salida[b.id] = await armarBanner(pool, deps.descuentos, b, vars);
+    return { vistas: salida, variables: vars };
+  };
 
   api.get("/v1/admin/banners", async (req) => {
     await exigir(pool, req);
-    const { rows } = await pool.query(`SELECT ${COLS} FROM tienda.banners ORDER BY orden, id`);
-    return { banners: rows };
+    const { rows } = await pool.query(`SELECT ${COLS} ${DESDE} ORDER BY b.orden, b.id`);
+    return { banners: rows, ...(await vistas(rows.map((r) => r.id))) };
+  });
+
+  // Para la vista previa mientras se edita: la tarjeta del producto elegido o del automático.
+  api.get("/v1/admin/banners/producto", {
+    schema: { querystring: z.object({ producto: SlugProducto.optional(), auto: z.enum(PRODUCTO_AUTO).optional() }).strict() },
+  }, async (req) => {
+    await exigir(pool, req);
+    const id = req.query.producto ? await idDeProducto(req.query.producto) : null;
+    return { producto: await productoDeBanner(pool, deps.descuentos, { producto_id: id, producto_auto: id ? null : req.query.auto ?? null }) };
   });
 
   api.post("/v1/admin/banners", { schema: { body: Banner } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const b = req.body;
     const n = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM tienda.banners");
-    if (n.rows[0]!.n >= 20) throw new ErrorHttp(409, "tope", "Hay 20 banners: borrá alguno viejo antes de crear otro.");
-    const { rows } = await pool.query(
-      `INSERT INTO tienda.banners (alt, enlace, orden, activo, desde, hasta) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLS}`,
-      [b.alt, b.enlace, b.orden, b.activo, b.desde, b.hasta],
+    if (n.rows[0]!.n >= 30) throw new ErrorHttp(409, "tope", "Hay 30 banners: borrá alguno viejo antes de crear otro.");
+    const { rows } = await pool.query<{ id: number }>(
+      `INSERT INTO tienda.banners (alt, enlace, orden, activo, desde, hasta, titulo, texto, etiqueta, botones, fondo, alineacion, producto_id, producto_auto, ocultar_sin_producto)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+      [b.alt, b.enlace, b.orden, b.activo, b.desde, b.hasta, b.titulo, b.texto, b.etiqueta, JSON.stringify(b.botones), b.fondo, b.alineacion,
+        await idDeProducto(b.producto), b.productoAuto, b.ocultarSinProducto],
     );
-    await auditar(pool, a, "crear_banner", "banner", rows[0].id, b, ip(req));
-    return { banner: rows[0] };
+    await auditar(pool, a, "crear_banner", "banner", rows[0]!.id, b, ip(req));
+    await invalidar([]);
+    return { banner: await leerBanner(rows[0]!.id) };
+  });
+
+  // Vuelve a agregar los sugeridos que falten (apagados, para revisarlos y prenderlos).
+  api.post("/v1/admin/banners/sugeridos", async (req) => {
+    const a = await exigir(pool, req, "operador");
+    let creados = 0;
+    for (const [i, s] of BANNERS_SUGERIDOS.entries()) {
+      const r = await pool.query(
+        `INSERT INTO tienda.banners (sugerido, orden, activo, alt, titulo, texto, etiqueta, botones, fondo, alineacion, producto_auto, ocultar_sin_producto)
+         VALUES ($1, $2, false, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (sugerido) DO NOTHING`,
+        [s.sugerido, 100 + i, s.alt, s.titulo, s.texto, s.etiqueta, JSON.stringify(s.botones), s.fondo, s.alineacion, s.productoAuto, s.ocultarSinProducto]);
+      creados += r.rowCount ?? 0;
+    }
+    if (creados) await auditar(pool, a, "banners_sugeridos", "banner", null, { creados }, ip(req));
+    return { creados };
   });
 
   api.patch("/v1/admin/banners/:id", { schema: { params: z.object({ id: Id }), body: CambiosBanner } }, async (req) => {
     const a = await exigir(pool, req, "operador");
-    const mapa: Record<string, string> = { alt: "alt", enlace: "enlace", orden: "orden", activo: "activo", desde: "desde", hasta: "hasta" };
     const sets: string[] = [];
     const params: unknown[] = [req.params.id];
     for (const [k, v] of Object.entries(req.body)) {
       if (v === undefined) continue;
-      params.push(k === "enlace" ? v || null : v);
-      sets.push(`${mapa[k]} = $${params.length}`);
+      params.push(await valorDe(k, v));
+      sets.push(`${COLUMNA[k]} = $${params.length}`);
     }
     if (!sets.length) throw new ErrorHttp(400, "nada", "Nada para cambiar.");
     try {
-      const { rows } = await pool.query(`UPDATE tienda.banners SET ${sets.join(", ")}, actualizado_en = now() WHERE id = $1 RETURNING ${COLS}`, params);
-      if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese banner.");
+      const r = await pool.query(`UPDATE tienda.banners SET ${sets.join(", ")}, actualizado_en = now() WHERE id = $1`, params);
+      if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese banner.");
       await auditar(pool, a, "editar_banner", "banner", req.params.id, req.body, ip(req));
       await invalidar([]);
-      return { banner: rows[0] };
+      return { banner: await leerBanner(req.params.id), ...(await vistas([req.params.id])) };
     } catch (e) {
-      if ((e as { code?: string }).code === "23514") throw new ErrorHttp(400, "fechas", "Revisá las fechas: el fin tiene que ser posterior al inicio.");
+      const c = (e as { code?: string; constraint?: string });
+      if (c.code === "23514" && c.constraint === "banners_un_producto") throw new ErrorHttp(400, "producto", "Elegí un producto o uno automático, no los dos.");
+      if (c.code === "23514") throw new ErrorHttp(400, "fechas", "Revisá las fechas: el fin tiene que ser posterior al inicio.");
       throw e;
     }
   });
@@ -216,7 +298,8 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
       try { proc = await procesarBanner(req.body as Buffer); } catch (e) {
         throw new ErrorHttp(400, "foto_invalida", e instanceof FotoInvalida ? e.message : "No se pudo procesar la imagen.");
       }
-      const clave = `b/${req.params.id}/${randomBytes(8).toString("hex")}`;
+      // Sin el id del banner: la dirección de la foto es pública.
+      const clave = claveNueva("b");
       try {
         for (const t of proc.tamanos) await deps.banners.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
       } catch (e) {
@@ -250,5 +333,25 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
     await invalidar([]);
     if (rows[0].vieja && deps.banners) for (const w of [800, 1600, 2400]) await deps.banners.borrar(`${rows[0].vieja}-${w}.webp`).catch(() => {});
     return { ok: true };
+  });
+
+  // Sacar la foto (las dos: la de celular sin la de compu no se usa): queda un banner de texto sobre el fondo de color.
+  api.delete("/v1/admin/banners/:id/foto", { schema: { params: z.object({ id: Id }) } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const ex = await pool.query<{ titulo: string | null }>("SELECT titulo FROM tienda.banners WHERE id = $1", [req.params.id]);
+    if (!ex.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese banner.");
+    if (!ex.rows[0].titulo) throw new ErrorHttp(409, "sin_titulo", "Un banner sin título necesita la foto: escribí un título antes de sacarla.");
+    const { rows } = await pool.query<{ foto: string | null; movil: string | null }>(
+      `UPDATE tienda.banners b SET foto = NULL, foto_ancho = NULL, foto_alto = NULL, foto_movil = NULL, movil_ancho = NULL, movil_alto = NULL, actualizado_en = now()
+         FROM (SELECT id, foto, foto_movil AS movil FROM tienda.banners WHERE id = $1 FOR UPDATE) x WHERE b.id = x.id AND b.titulo IS NOT NULL RETURNING x.foto, x.movil`,
+      [req.params.id],
+    );
+    if (!rows[0]) throw new ErrorHttp(409, "sin_titulo", "Un banner sin título necesita la foto: escribí un título antes de sacarla.");
+    await auditar(pool, a, "foto_banner", "banner", req.params.id, { tipo: "escritorio", borrada: true }, ip(req));
+    await invalidar([]);
+    for (const vieja of [rows[0].foto, rows[0].movil]) {
+      if (vieja && deps.banners) for (const w of [800, 1600, 2400]) await deps.banners.borrar(`${vieja}-${w}.webp`).catch(() => {});
+    }
+    return { banner: await leerBanner(req.params.id), ...(await vistas([req.params.id])) };
   });
 }

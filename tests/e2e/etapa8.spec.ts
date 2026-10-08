@@ -38,7 +38,8 @@ test.describe("inicio", () => {
     await page.goto("/");
     const carrusel = page.locator('section[aria-roledescription="carrusel"]');
     await expect(carrusel).toBeVisible();
-    await expect(carrusel.getByRole("img").first()).toHaveAttribute("alt", /\(demo\)/);
+    // Etapa 12: el banner de foto sola (con su descripción) y los de texto conviven.
+    await expect(carrusel.getByRole("img", { name: /\(demo\)/ }).first()).toBeAttached();
     const packs = page.locator("section", { has: page.getByRole("heading", { name: "Llevá más, pagá menos" }) });
     await expect(packs.getByText(/Elegí de 2 a 10 unidades/).first()).toBeVisible();
     // Las tarjetas de la sección llevan a la página del pack.

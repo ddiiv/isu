@@ -16,6 +16,49 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 9 | Packs de 2 a 10 (configurable) armados sobre la prenda padre con el stock de cada variante, sección Packs y Liquidación en la barra divididas por Hombre / Mujer / Niños, menú del celular con subcategorías y 1–2 fotos por categoría, barra de envío gratis en la ficha | **Cerrada** (abajo) · guía en [`packs-liquidacion-menu.md`](packs-liquidacion-menu.md) |
 | 10 | El pack va aparte en el carrito (como Deliver), carrito con el precio por transferencia y por tarjeta/Mercado Pago, checkout de una página, «Comprar ahora» y WhatsApp sólo sin stock, eliminar productos, backoffice rediseñado, guías de talles con Excel (y las 40 de la fábrica), sólo productos padre desde Stocker | **Cerrada** (abajo) · guía en [`carrito-checkout-backoffice.md`](carrito-checkout-backoffice.md) |
 | 11 | Direcciones en el checkout: sugerencias de calle con Google Places (la clave sólo en el servidor, topes por día dentro del uso gratis) y revisión de calle y altura con Georef (gratis); aviso en el carrito cuando una variante ya está dentro de un pack y no quedan para sumarla suelta | **Cerrada** (abajo) · guía en [`direcciones-checkout.md`](direcciones-checkout.md) |
+| 12 | Revisión pantalla por pantalla (tienda y backoffice, compu y celular); direcciones sin ids (fotos, banners, productos y guías del backoffice, comprobantes); banners interactivos (título, texto, etiqueta, hasta 2 botones, la tarjeta de un producto elegido o automático, colores, datos de Ajustes) con editor y vista previa, y 7 banners sugeridos armados con lo que dice la tienda | **Cerrada** (abajo) · guía en [`banners-y-direcciones.md`](banners-y-direcciones.md) |
+
+## Etapa 12 · resultados del cierre (08/10/2026)
+
+**Qué entró** (cómo se usa en [`banners-y-direcciones.md`](banners-y-direcciones.md))
+- **Revisión pantalla por pantalla**, en compu y celular, tienda y backoffice:
+  - con `pnpm revisar:pantallas` (nuevo, guarda una captura de cada pantalla);
+  - busca errores de JavaScript, pedidos que fallan, cosas que se salen de costado, imágenes rotas, textos «undefined» o «NaN», botones y campos sin nombre y links rotos.
+  - Lo encontrado se arregló: una nota interna sin etiqueta, precios que se partían, miniaturas rotas en el backoffice y la etiqueta «20% OFF» del checkout.
+- **Direcciones sin ids:**
+  - fotos y banners en una carpeta al azar;
+  - productos y guías de talles del backoffice por su nombre (un número viejo pasa solo al nombre);
+  - comprobantes por su número dentro del pedido;
+  - `pnpm fotos:sin-ids` para pasar las fotos que ya estaban.
+- **Banners interactivos:**
+  - título, texto, etiqueta, hasta 2 botones a páginas de la tienda, la tarjeta de un producto (elegido o automático) y 7 colores de fondo;
+  - los datos de Ajustes en los textos (`{descuento}`, `{cuotas}`, `{envioGratis}`, `{packsHasta}`, `{packsMinimo}`, `{packsMaximo}`);
+  - editor con vista previa en compu y celular, y el estado de cada banner («No sale: …»).
+- **7 banners sugeridos** armados con lo que dice la tienda (migración 0019), y «Agregar banners sugeridos» para recuperarlos.
+
+**QA**
+- Pruebas unitarias: **537/537**, 21 más:
+  - banners: datos de Ajustes, botones, links sólo propios, producto por slug, el que no sale y por qué, sacar la foto, sugeridos iguales a la migración;
+  - slugs de guías (acentos, repetidos, «nueva»), producto por slug, comprobante por número;
+  - `fotos:sin-ids` y el repaso al regenerar páginas.
+- Pruebas en navegador: **152/152**, 8 más (compu y celular):
+  - el inicio con banners de texto y foto, sus botones, la tarjeta del producto, y que nada se salga de costado;
+  - el editor arma un banner con dato, botón, producto y color, se ve en la tienda y se borra;
+  - productos y guías con su nombre en la dirección.
+- Revisión de pantallas: **sin hallazgos**.
+- Hallazgos corregidos antes de entregar:
+  - **Una página podía quedar vieja hasta 5 minutos** después de un cambio en el backoffice. Pasaba si se estaba regenerando justo en ese momento: carrera de ISR. Ahora hay un segundo aviso unos segundos después (repaso).
+  - Las pruebas de la base dejaban productos de prueba en la base que después usa el e2e.
+  - El velo de los banners con foto, en el celular, se aclaraba de un lado y el texto se leía mal.
+
+**Hacker**
+- Auditoría: **405/405**, 16 chequeos más (§ 7l y § 7f ampliada, detalle en `seguridad.md`).
+- Decisiones:
+  - los links de los banners son sólo de esta tienda, con tres llaves: shared, API y el dibujo;
+  - el producto va por slug, nunca por id;
+  - validación estricta;
+  - permisos de operador para editar;
+  - las direcciones públicas de fotos no dicen qué id tiene un producto ni cuántos hay.
 
 ## Etapa 11 · resultados del cierre (06/10/2026)
 
