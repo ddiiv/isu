@@ -16,7 +16,7 @@ interface Detalle {
   items: Array<{ sku: string; nombre: string; color: string | null; talle: string | null; precio: number; precioLista: number | null; cantidad: number }>;
   pagos: Array<{ proveedor: string; externo: string; estado: string; monto: number; registradoPor: string | null; creadoEn: string }>;
   eventos: Array<{ estado: string; detalle: string | null; actor: string; creadoEn: string }>;
-  comprobantes: Array<{ id: number; tipo: string; bytes: number; creadoEn: string }>;
+  comprobantes: Array<{ n: number; tipo: string; bytes: number; creadoEn: string }>;
 }
 const PENDIENTES = ["esperando_pago", "esperando_transferencia", "transferencia_informada", "a_pagar_en_local"];
 
@@ -56,7 +56,7 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
               {d.items.map((i) => (
                 <li key={i.sku} className="flex justify-between gap-3 py-2.5">
                   <span><span className="font-bold">{i.cantidad} ×</span> {i.nombre}<span className="text-tinta-tenue">{[i.color, i.talle].filter(Boolean).map((x) => ` · ${x}`).join("")}</span><br /><span className="text-xs text-tinta-tenue">{i.sku}</span></span>
-                  <span className="text-right">{i.precioLista && i.precioLista > i.precio && <s className="mr-1 text-xs text-tinta-tenue">{pesos(i.precioLista)}</s>}{pesos(i.precio * i.cantidad)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-right">{i.precioLista && i.precioLista > i.precio && <s className="mr-1 text-xs text-tinta-tenue">{pesos(i.precioLista)}</s>}{pesos(i.precio * i.cantidad)}</span>
                 </li>
               ))}
             </ul>
@@ -87,7 +87,7 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
               </ul>
               {d.comprobantes.length > 0 && (
                 <ul className="mt-3 space-y-1 text-sm">
-                  {d.comprobantes.map((c) => <li key={c.id}><a className="font-bold text-marca hover:underline" href={`/api/a/pedidos/${p.numero}/comprobantes/${c.id}`} download>Descargar comprobante ({c.tipo === "application/pdf" ? "PDF" : "imagen"}, {Math.ceil(c.bytes / 1024)} KB)</a> <span className="text-xs text-tinta-tenue">{fecha(c.creadoEn)}</span></li>)}
+                  {d.comprobantes.map((c) => <li key={c.n}><a className="font-bold text-marca hover:underline" href={`/api/a/pedidos/${p.numero}/comprobantes/${c.n}`} download>Descargar comprobante ({c.tipo === "application/pdf" ? "PDF" : "imagen"}, {Math.ceil(c.bytes / 1024)} KB)</a> <span className="text-xs text-tinta-tenue">{fecha(c.creadoEn)}</span></li>)}
                 </ul>
               )}
             </Tarjeta>
@@ -129,7 +129,7 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
           )}
 
           <Tarjeta titulo="Notas internas">
-            <textarea className={`${claseEntrada} min-h-24`} maxLength={1000} disabled={!operador} value={notas ?? p.notas_internas ?? ""} onChange={(e) => setNotas(e.target.value)} placeholder="Sólo las ve el equipo." />
+            <textarea aria-label="Notas internas del pedido" className={`${claseEntrada} min-h-24`} maxLength={1000} disabled={!operador} value={notas ?? p.notas_internas ?? ""} onChange={(e) => setNotas(e.target.value)} placeholder="Sólo las ve el equipo." />
             {operador && notas !== null && <Boton className="mt-2" onClick={() => void accion(() => api(`pedidos/${p.numero}/notas`, { cuerpo: { notas } }), "Notas guardadas.").then(() => setNotas(null))}>Guardar notas</Boton>}
           </Tarjeta>
 

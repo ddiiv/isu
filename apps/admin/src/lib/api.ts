@@ -65,7 +65,7 @@ export const pesos = (centavos: number | null | undefined) =>
 export const fecha = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const CDN = (process.env.NEXT_PUBLIC_CDN_IMAGENES ?? "").split(",")[0]?.trim() || "/fotos";
-export const fotoUrl = (clave: string, ancho: 400 | 800 = 400) => `${CDN.replace(/\/+$/, "")}/${clave}-${ancho}.webp`;
+export const fotoUrl = (clave: string, ancho: 400 | 800 | 1600 = 400) => `${CDN.replace(/\/+$/, "")}/${clave}-${ancho}.webp`;
 
 export const ESTADOS: Record<string, [string, string]> = {
   reservando: ["Reservando", "bg-fondo-suave text-tinta-suave"],

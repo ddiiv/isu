@@ -8,7 +8,8 @@
  *     (envío gratis desde $30.000).
  *   · etapa 9: liquidación de invierno (un descuento marcado como liquidación) y packs en las tres categorías;
  *   · etapa 8: prendas que se venden en pack, composición, opiniones de
- *     muestra (de pedidos de prueba entregados) y dos banners en la portada.
+ *     muestra (de pedidos de prueba entregados) y dos banners en la portada
+ *     (etapa 12: uno con foto, texto y botones; otro de foto sola con link).
  * En producción todo esto se hace desde el backoffice.
  *
  *   node --env-file=.env scripts/demo/backoffice-demo.mjs
@@ -106,27 +107,48 @@ for (const [producto, nombre, apellido, estrellas, calce, texto, general] of OPI
 console.warn(`Opiniones de muestra: ${numeroResena}`);
 if (process.env.FOTOS_DIR) {
   await pool.query("DELETE FROM tienda.banners WHERE alt LIKE '%(demo)'");
-  const BANNERS = [
-    ["Packs de remeras: llevá más, pagá menos (demo)", "/packs", "#2e6b3f", "Packs · Llevá más, pagá menos", "Hasta 25% OFF armando tu pack de 2 a 10"],
-    ["Nuevos ingresos de temporada (demo)", "/nuevos", "#2c5f91", "Nuevos ingresos", "Lo último que salió del taller"],
-  ];
-  for (const [i, [alt, enlace, color, titulo, bajada]] of BANNERS.entries()) {
-    const svg = (w, h, t) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${color}"/>
-      <circle cx="${w * 0.82}" cy="${h * 0.5}" r="${h * 0.38}" fill="#ffffff" opacity="0.12"/>
-      <text x="${w * 0.07}" y="${h * 0.48}" font-family="Arial, sans-serif" font-weight="bold" font-size="${t}" fill="#fff">${titulo}</text>
-      <text x="${w * 0.07}" y="${h * 0.48 + t * 1.1}" font-family="Arial, sans-serif" font-size="${t * 0.5}" fill="#fff" opacity="0.9">${bajada}</text></svg>`);
-    const b = (await pool.query("INSERT INTO tienda.banners (alt, enlace, orden) VALUES ($1, $2, $3) RETURNING id", [alt, enlace, i])).rows[0];
-    for (const [tipo, w, h, t] of [["foto", 2400, 900, 120], ["foto_movil", 1080, 1350, 48]]) {
-      const proc = await procesarBanner(await sharp(svg(w, h, t)).png().toBuffer());
-      const clave = `b/${b.id}/${randomBytes(8).toString("hex")}`;
-      await mkdir(path.join(process.env.FOTOS_DIR, "b", String(b.id)), { recursive: true });
-      for (const x of proc.tamanos) await writeFile(path.join(process.env.FOTOS_DIR, `${clave}-${x.ancho}.webp`), x.datos);
-      await pool.query(tipo === "foto"
-        ? "UPDATE tienda.banners SET foto = $2, foto_ancho = $3, foto_alto = $4 WHERE id = $1"
-        : "UPDATE tienda.banners SET foto_movil = $2, movil_ancho = $3, movil_alto = $4 WHERE id = $1", [b.id, clave, proc.ancho, proc.alto]);
-    }
+  // Etapa 12: la dirección de la foto va sin el id del banner (como las sube el backoffice).
+  const guardar = async (b, tipo, imagen) => {
+    const proc = await procesarBanner(imagen);
+    const clave = `b/${randomBytes(6).toString("hex")}/${randomBytes(8).toString("hex")}`;
+    await mkdir(path.join(process.env.FOTOS_DIR, ...clave.split("/").slice(0, 2)), { recursive: true });
+    for (const x of proc.tamanos) await writeFile(path.join(process.env.FOTOS_DIR, `${clave}-${x.ancho}.webp`), x.datos);
+    await pool.query(tipo === "foto"
+      ? "UPDATE tienda.banners SET foto = $2, foto_ancho = $3, foto_alto = $4 WHERE id = $1"
+      : "UPDATE tienda.banners SET foto_movil = $2, movil_ancho = $3, movil_alto = $4 WHERE id = $1", [b, clave, proc.ancho, proc.alto]);
+  };
+
+  // 1) Foto con el texto y los botones encima (etapa 12): la foto, armada con prendas del catálogo de muestra.
+  const prendas = (await pool.query(
+    `SELECT DISTINCT ON (p.id) f.clave FROM tienda.fotos f JOIN tienda.productos p ON p.id = f.producto_id
+      WHERE p.visible AND p.en_stocker AND p.eliminado_en IS NULL ORDER BY p.id DESC, f.orden LIMIT 3`)).rows.map((x) => x.clave);
+  const archivo = (clave) => path.join(process.env.FOTOS_DIR, `${clave}-1200.webp`);
+  const tira = async (w, h, claves) => {
+    const ancho = Math.round(w / claves.length);
+    // (sin el pie de las fotos de muestra: se recorta la parte de abajo)
+    const alto = Math.round(h * 1.12);
+    const partes = await Promise.all(claves.map((c) => sharp(archivo(c)).resize(ancho, alto, { fit: "cover" }).extract({ left: 0, top: 0, width: ancho, height: h }).toBuffer()));
+    return sharp({ create: { width: w, height: h, channels: 3, background: "#d9d2c5" } })
+      .composite(partes.map((input, i) => ({ input, left: i * ancho, top: 0 }))).jpeg({ quality: 88 }).toBuffer();
+  };
+  if (prendas.length === 3) {
+    const b = (await pool.query(
+      `INSERT INTO tienda.banners (alt, orden, titulo, texto, etiqueta, botones, alineacion) VALUES ($1, 0, $2, $3, $4, $5, 'izquierda') RETURNING id`,
+      ["Prendas de la nueva temporada (demo)", "Nueva temporada", "Diseñamos y fabricamos nuestra ropa, con talles reales. Envíos a todo el país.", "Recién llegado",
+        JSON.stringify([{ texto: "Ver lo nuevo", enlace: "/nuevos", estilo: "lleno" }, { texto: "Comprar Mujer", enlace: "/mujer", estilo: "borde" }])])).rows[0];
+    await guardar(b.id, "foto", await tira(2400, 1000, prendas));
+    await guardar(b.id, "foto_movil", await tira(1080, 1350, prendas.slice(0, 1)));
   }
-  console.warn(`Portada: ${BANNERS.length} banners`);
+
+  // 2) Una foto sola con link (por ejemplo, una diseñada en Canva con el texto incluido).
+  const svg = (w, h, t) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#2e6b3f"/>
+    <circle cx="${w * 0.82}" cy="${h * 0.5}" r="${h * 0.38}" fill="#ffffff" opacity="0.12"/>
+    <text x="${w * 0.07}" y="${h * 0.48}" font-family="Arial, sans-serif" font-weight="bold" font-size="${t}" fill="#fff">Packs · Llevá más, pagá menos</text>
+    <text x="${w * 0.07}" y="${h * 0.48 + t * 1.1}" font-family="Arial, sans-serif" font-size="${t * 0.5}" fill="#fff" opacity="0.9">Armá tu pack con tu talle y tu color</text></svg>`);
+  const b2 = (await pool.query("INSERT INTO tienda.banners (alt, enlace, orden) VALUES ($1, '/packs', 1) RETURNING id", ["Packs de remeras: llevá más, pagá menos (demo)"])).rows[0];
+  await guardar(b2.id, "foto", await sharp(svg(2400, 900, 120)).png().toBuffer());
+  await guardar(b2.id, "foto_movil", await sharp(svg(1080, 1350, 48)).png().toBuffer());
+  console.warn(`Portada: ${prendas.length === 3 ? 2 : 1} banners de muestra + los sugeridos (etapa 12)`);
 }
 await pool.end();
 

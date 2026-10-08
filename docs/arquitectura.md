@@ -120,3 +120,42 @@ Ver [contrato-stocker.md](contrato-stocker.md).
   - `AvisoYaEnCarrito` es el `alertdialog` (al centro desde `sm`, hoja abajo en el celular);
   - el «+» del carrito usa `disponible`, que ahora descuenta las otras líneas.
 - **Simulador:** `scripts/demo/direcciones-simulado.mjs` (Google y Georef, puerto 3940), en `pnpm demo:direcciones` y `levantar-e2e.sh`.
+
+## Etapa 12: banners interactivos y direcciones sin ids
+
+- **Migración `0019`:**
+  - `guias_talles.slug`, que sale solo del nombre con el trigger `tienda.guia_slug()`, único;
+  - los banners: `titulo`, `texto`, `etiqueta`, `botones` (jsonb, hasta 2), `fondo`, `alineacion`, `producto_id` / `producto_auto`, `ocultar_sin_producto` y `sugerido`;
+  - los 7 banners sugeridos;
+  - las claves de foto de banners en los dos formatos.
+- **Shared `banners.ts`:**
+  - `BotonBanner`, `RutaTienda`, `BannerPublico`;
+  - `VARIABLES_BANNER` y `conVariables` (los `{descuento}`… que salen de Ajustes);
+  - `BANNERS_SUGERIDOS`, igual a la migración: una prueba lo controla.
+- **API:**
+  - `modulos/portada/banners.ts`:
+    - `variablesDeBanners`;
+    - `productoDeBanner`, con las mismas colecciones y tarjetas que la grilla;
+    - `armarBanner`, que devuelve el banner o el motivo por el que no sale;
+    - `bannersPublicos`, hasta 8.
+  - `/v1/portada` los usa. En `admin/resenas.ts`:
+    - `GET /v1/admin/banners`, con la vista de cada uno y los valores de los datos;
+    - `GET /v1/admin/banners/producto`;
+    - `POST /v1/admin/banners/sugeridos`;
+    - `DELETE /v1/admin/banners/:id/foto`.
+- **`@isu/ui/banner`:** el dibujo del banner, el mismo en el carrusel de la tienda y en la vista previa del backoffice. Usa consultas de contenedor (`@container`), así la vista previa muestra la compu o el celular por el ancho de su caja. El backoffice lo escanea con `@source` en su `globals.css`.
+- **Backoffice → Portada:**
+  - la lista con el estado de cada banner;
+  - el editor con vista previa (compu y celular, achicada con `transform`);
+  - el selector de destino (páginas, categorías, packs, un producto o una dirección);
+  - el buscador de productos.
+- **Direcciones sin ids:**
+  - `claveNueva("p" | "b")` en `@isu/almacen`: `p/<12 hex>/<16 hex>`. La usan la API (fotos y banners), el importador de fotos y el del mayorista;
+  - `apps/worker/src/fotos/sin-ids.ts` y `pnpm fotos:sin-ids`: pasa las viejas;
+  - el backoffice:
+    - `productos/[slug]` (`GET /v1/admin/productos/s/:slug`) y `guias-talles/[slug]` (`GET /v1/admin/guias-talles/s/:slug`): un número viejo pasa al slug;
+    - los comprobantes por su número en el pedido: `GET /v1/admin/pedidos/:numero/comprobantes/:n`.
+- **Repaso al regenerar páginas** (`apps/worker/src/stocker/invalidar.ts`):
+  - **El problema:** una página que se estaba regenerando con datos de antes de un cambio podía terminar después del aviso, y Next la guardaba como nueva. Quedaba vieja hasta vencer (5 minutos).
+  - **El arreglo:** el worker manda un segundo aviso 2,5 segundos después. Va aparte, sin frenar la cola de Stocker. Los cambios seguidos se juntan en un solo repaso, en tandas de 500 productos.
+- **Guía:** [`banners-y-direcciones.md`](banners-y-direcciones.md).

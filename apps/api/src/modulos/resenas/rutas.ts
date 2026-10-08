@@ -13,6 +13,8 @@ import type { Colas } from "../../lib/colas.js";
 import { ErrorHttp, noEncontrado } from "../../lib/errores.js";
 import { frenar } from "../../lib/frenos.js";
 import { ipDe } from "../../lib/cliente.js";
+import type { Descuentos } from "../../lib/descuentos.js";
+import { bannersPublicos } from "../portada/banners.js";
 
 /*
  * Reseñas y portada (etapa 8).
@@ -42,7 +44,7 @@ const publica = (r: FilaResena): ResenaPublica => ({
 });
 const COLUMNAS = "r.id, r.nombre, r.estrellas, r.texto, r.calce, r.talle, r.color, r.creado_en, r.respuesta";
 
-export async function rutasResenas(app: FastifyInstance, deps: { pool: pg.Pool; redis: Redis; cache: CacheCorta; colas: Colas; canalInvalidar: string; secreto?: string }) {
+export async function rutasResenas(app: FastifyInstance, deps: { pool: pg.Pool; redis: Redis; cache: CacheCorta; colas: Colas; canalInvalidar: string; secreto?: string; descuentos: Descuentos }) {
   const api = app.withTypeProvider<ZodTypeProvider>();
   const { pool } = deps;
 
@@ -122,20 +124,8 @@ export async function rutasResenas(app: FastifyInstance, deps: { pool: pg.Pool; 
 
   api.get("/v1/portada", { schema: { response: { 200: z.object({ banners: z.array(BannerPublico) }) } } }, async (_req, reply) => {
     reply.header("cache-control", CACHE_PUBLICO);
-    return deps.cache.obtener("portada", async () => {
-      const { rows } = await pool.query<{ id: number; alt: string; enlace: string | null; foto: string; foto_ancho: number | null; foto_alto: number | null; foto_movil: string | null; movil_ancho: number | null; movil_alto: number | null }>(
-        `SELECT id, alt, enlace, foto, foto_ancho, foto_alto, foto_movil, movil_ancho, movil_alto FROM tienda.banners
-          WHERE activo AND foto IS NOT NULL AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())
-          ORDER BY orden, id LIMIT 8`,
-      );
-      return {
-        banners: rows.map((b) => ({
-          id: b.id, alt: b.alt, enlace: b.enlace,
-          foto: { clave: b.foto, ancho: b.foto_ancho, alto: b.foto_alto },
-          fotoMovil: b.foto_movil ? { clave: b.foto_movil, ancho: b.movil_ancho, alto: b.movil_alto } : null,
-        })),
-      };
-    });
+    // Etapa 12: banners interactivos (texto, botones, producto) y con las variables de Ajustes (portada/banners.ts).
+    return deps.cache.obtener("portada", async () => ({ banners: await bannersPublicos(pool, deps.descuentos) }));
   });
 
   // ── Opinar desde el enlace del mail ──

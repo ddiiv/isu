@@ -5,7 +5,7 @@ import type { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { hash } from "@node-rs/argon2";
-import { procesarFoto, FotoInvalida, type Almacen } from "@isu/almacen";
+import { claveNueva, procesarFoto, FotoInvalida, type Almacen } from "@isu/almacen";
 import { ConfigPublica, ESTADOS_PENDIENTES, Local, parteDe, slug as esquemaSlug } from "@isu/shared";
 import type { Entorno } from "../../entorno.js";
 import type { CacheCorta } from "../../lib/cache.js";
@@ -109,7 +109,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       pool.query("SELECT sku, nombre, color, talle, precio, precio_lista AS \"precioLista\", cantidad FROM tienda.pedido_items WHERE pedido_id = $1 ORDER BY id", [p.id]),
       pool.query("SELECT proveedor, externo, estado, monto, registrado_por AS \"registradoPor\", creado_en AS \"creadoEn\" FROM tienda.pagos WHERE pedido_id = $1 ORDER BY id", [p.id]),
       pool.query("SELECT estado, detalle, actor, creado_en AS \"creadoEn\" FROM tienda.pedido_eventos WHERE pedido_id = $1 ORDER BY id", [p.id]),
-      pool.query("SELECT id, tipo, bytes, creado_en AS \"creadoEn\" FROM tienda.comprobantes WHERE pedido_id = $1 ORDER BY id", [p.id]),
+      // `n`: el número del comprobante dentro del pedido (1, 2…): va en la dirección de descarga en vez del id.
+      pool.query("SELECT row_number() OVER (ORDER BY id)::int AS n, tipo, bytes, creado_en AS \"creadoEn\" FROM tienda.comprobantes WHERE pedido_id = $1 ORDER BY id", [p.id]),
     ]);
     const { acceso_hash: _a, ip: _ip, ...publico } = p;
     return { pedido: publico, items: items.rows, pagos: pagos.rows, eventos: eventos.rows, comprobantes: comprobantes.rows };
@@ -171,18 +172,18 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   });
 
   // Comprobante: se descarga (nunca se muestra en línea: un PDF o una imagen ajena no se ejecuta en nuestro dominio).
-  api.get("/v1/admin/pedidos/:numero/comprobantes/:id", { schema: { params: z.object({ numero: NUMERO, id: Id }) } }, async (req, reply) => {
+  api.get("/v1/admin/pedidos/:numero/comprobantes/:n", { schema: { params: z.object({ numero: NUMERO, n: z.coerce.number().int().min(1).max(1000) }) } }, async (req, reply) => {
     const a = await exigir(pool, req);
     if (!deps.comprobantes) throw new ErrorHttp(503, "sin_almacen", "No hay almacén de comprobantes configurado.");
     const { rows } = await pool.query<{ clave: string; tipo: string }>(
-      "SELECT c.clave, c.tipo FROM tienda.comprobantes c JOIN tienda.pedidos p ON p.id = c.pedido_id WHERE p.numero = $1 AND c.id = $2", [req.params.numero, req.params.id]);
+      "SELECT c.clave, c.tipo FROM tienda.comprobantes c JOIN tienda.pedidos p ON p.id = c.pedido_id WHERE p.numero = $1 ORDER BY c.id OFFSET $2 LIMIT 1", [req.params.numero, req.params.n - 1]);
     if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese comprobante.");
     const datos = await deps.comprobantes.leer(rows[0].clave);
     if (!datos) throw new ErrorHttp(404, "no_encontrado", "El archivo no está.");
-    await auditar(pool, a, "ver_comprobante", "pedido", req.params.numero, { id: req.params.id }, ip(req));
+    await auditar(pool, a, "ver_comprobante", "pedido", req.params.numero, { n: req.params.n }, ip(req));
     return reply
       .header("content-type", rows[0].tipo)
-      .header("content-disposition", `attachment; filename="comprobante-${req.params.numero}-${req.params.id}.${rows[0].tipo === "application/pdf" ? "pdf" : "webp"}"`)
+      .header("content-disposition", `attachment; filename="comprobante-${req.params.numero}-${req.params.n}.${rows[0].tipo === "application/pdf" ? "pdf" : "webp"}"`)
       .header("content-security-policy", "default-src 'none'; sandbox")
       .send(datos);
   });
@@ -230,11 +231,21 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     return { productos: rows.map(({ totalFilas: _t, ...r }) => r), total: rows[0]?.totalFilas ?? 0, porPagina: POR_PAGINA };
   });
 
+  // El backoffice abre cada producto por su nombre en la dirección (/productos/remera-basica), no por el id.
+  api.get("/v1/admin/productos/s/:slug", { schema: { params: z.object({ slug: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/).max(160) }) } }, async (req) => {
+    await exigir(pool, req);
+    const { rows } = await pool.query("SELECT * FROM tienda.productos WHERE slug = $1", [req.params.slug]);
+    if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+    return detalleProducto(rows[0]);
+  });
   api.get("/v1/admin/productos/:id", { schema: { params: z.object({ id: Id }) } }, async (req) => {
     await exigir(pool, req);
     const { rows } = await pool.query("SELECT * FROM tienda.productos WHERE id = $1", [req.params.id]);
-    const p = rows[0];
-    if (!p) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+    if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+    return detalleProducto(rows[0]);
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- la fila completa de tienda.productos
+  async function detalleProducto(p: any) {
     const [colores, fotos, variantes, cats] = await Promise.all([
       pool.query("SELECT id, clave, nombre, hex, orden, activo, nombre_fijo AS \"nombreFijo\" FROM tienda.producto_colores WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
       pool.query("SELECT id, tipo, color_id AS \"colorId\", orden, clave, ancho, alto, alt FROM tienda.fotos WHERE producto_id = $1 ORDER BY tipo, color_id NULLS FIRST, orden, id", [p.id]),
@@ -256,7 +267,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       // El tope del padre sale solo: 5 por cada color.
       topeFotos: nColores * 5,
     };
-  });
+  }
 
   const CambiosProducto = z.object({
     nombre: z.string().trim().min(2).max(150).optional(),
@@ -461,7 +472,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       try { proc = await procesarFoto(req.body as Buffer); } catch (e) {
         throw new ErrorHttp(400, "foto_invalida", e instanceof FotoInvalida ? e.message : "No se pudo procesar la imagen.");
       }
-      const clave = `p/${req.params.id}/${randomBytes(8).toString("hex")}`;
+      // Sin el id del producto: la dirección de la foto es pública.
+      const clave = claveNueva("p");
       const p = await pool.query<{ nombre: string }>("SELECT nombre FROM tienda.productos WHERE id = $1", [req.params.id]);
       if (!p.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
       const borrar = async () => { for (const w of [400, 800, 1200]) await deps.fotos!.borrar(`${clave}-${w}.webp`).catch(() => {}); };

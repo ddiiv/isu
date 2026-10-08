@@ -150,8 +150,8 @@ function Productos() {
                   <tr key={p.id} className={elegidos.has(p.id) ? "bg-marca-claro/50" : "hover:bg-fondo-suave"}>
                     {operador && <td className="px-3 py-2"><input type="checkbox" aria-label={`Elegir ${p.nombre}`} checked={elegidos.has(p.id)} onChange={() => setElegidos((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })} /></td>}
                     <td className="px-3 py-2">
-                      <Link href={`/productos/${p.id}`} className="flex items-center gap-3">
-                        <span className="size-12 shrink-0 overflow-hidden rounded-lg bg-fondo-suave">{p.foto && <img src={fotoUrl(p.foto)} alt="" className="size-full object-cover" />}</span>
+                      <Link href={`/productos/${p.slug}`} className="flex items-center gap-3">
+                        <span className="size-12 shrink-0 overflow-hidden rounded-lg bg-fondo-suave">{p.foto && <img src={fotoUrl(p.foto)} alt="" className="size-full object-cover" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />}</span>
                         <span><span className="font-bold text-marca hover:underline">{p.nombre}</span><br /><span className="text-xs text-tinta-tenue">{p.sku}{!p.enStocker && " · baja en Stocker"}{p.resenas > 0 && ` · ★ ${p.estrellas?.toFixed(1)} (${p.resenas})`}</span></span>
                       </Link>
                     </td>

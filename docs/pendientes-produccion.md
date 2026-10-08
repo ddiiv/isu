@@ -28,6 +28,8 @@ simuladores), pero no se puede abrir al público hasta completarlos.
 | Día del cambio de dominio Jumpseller → tienda nueva | `seo.md` § «El día del cambio de dominio» | Pendiente |
 | Guías de talles con las medidas reales de cada molde | Backoffice → Guías de talles (y asociarlas a los productos) | Pendiente (las de muestra son de ejemplo) |
 | Destacados y Nuevos iniciales | Backoffice → Productos (casillas) | Pendiente |
+| Pasar las fotos ya subidas a direcciones sin ids (una vez, con la versión de la etapa 12 subida) | `pnpm fotos:sin-ids` y, unas semanas después, `pnpm fotos:sin-ids --borrar-viejas` — ver `banners-y-direcciones.md` § 2 | Pendiente (correr después del deploy) |
+| Revisar los banners sugeridos (textos, botones, colores) y subirles fotos si se quiere | Backoffice → Portada | Revisar |
 | Fotos reales de productos | `pnpm mayorista:importar --aplicar` (trae las del sitio mayorista, ver `salida-produccion.md` § 2), `pnpm fotos:importar` o Backoffice → Productos → Fotos | Pendiente (correr la importación en producción) |
 | Fotos de los 13 productos que el mayorista no tiene (SOFT, MONTAN, Cruze, Cloe, Sasha, Sidney, Berlin, Visa, Zara, Garo, Letra, Maev, Mara) | Backoffice → Productos → Fotos, y después tildar **Visible** | Pendiente (quedan ocultos) |
 | Medidas de Cloe en su guía de talles (se vende en talle Único) | Backoffice → Guías de talles | Pendiente |

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -20,8 +21,15 @@ export interface Almacen {
   borrar(archivo: string): Promise<void>;
 }
 
-export const PATRON_FOTOS = /^p\/\d{1,9}\/[a-z0-9]{8,40}-(400|800|1200)\.webp$/;
-export const PATRON_BANNERS = /^b\/\d{1,9}\/[a-z0-9]{8,40}-(800|1600|2400)\.webp$/;
+/*
+ * Fotos y banners son públicos: su dirección no lleva el id del producto ni
+ * del banner. Las nuevas van en una carpeta al azar (p/3f9a0c1b2d4e/…); las
+ * viejas (p/139/…) siguen sirviendo hasta pasarlas con `pnpm fotos:sin-ids`.
+ */
+export const PATRON_FOTOS = /^p\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(400|800|1200)\.webp$/;
+export const PATRON_BANNERS = /^b\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(800|1600|2400)\.webp$/;
+/** Una clave nueva para una foto ("p") o un banner ("b"): sin ids, todo al azar. */
+export const claveNueva = (tipo: "p" | "b") => `${tipo}/${randomBytes(6).toString("hex")}/${randomBytes(8).toString("hex")}`;
 export const PATRON_COMPROBANTES = /^c\/\d{1,9}\/[a-z0-9]{16,40}\.(webp|pdf)$/;
 export const PATRON_ETIQUETAS = /^e\/\d{1,9}\/[a-z0-9]{16,40}\.pdf$/;
 

@@ -36,6 +36,9 @@ afterAll(async () => {
   await pool.query("DELETE FROM tienda.descuentos WHERE creado_por = 'qa'").catch(() => {});
   await pool.query("DELETE FROM tienda.admins WHERE email LIKE 'qa-db%'").catch(() => {});
   await pool.query("DELETE FROM tienda.productos WHERE stocker_padre LIKE 'QA-%'").catch(() => {});
+  // Los de las pruebas de fotos y del catálogo (si no, quedan en la base que después usa el e2e).
+  await pool.query(`DELETE FROM tienda.productos WHERE (stocker_padre, slug) IN
+    (('ISUTEST', 'test'), ('ISUOTRO', 'otro'), ('ISUCARRERA', 'carrera'), ('ISU-C1', 'remera-basica-algodon'), ('ISU-C1', 'otra-c1'), ('X', 'dup-c1'))`).catch(() => {});
   await pool.query("DELETE FROM tienda.pedidos WHERE email IN ('a@b.c', 'qa-db@test.com', 'qa-db-envio@test.com')").catch(() => {});
   await pool.end();
 });

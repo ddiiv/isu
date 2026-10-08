@@ -286,6 +286,14 @@ node apps/worker/dist/mayorista/cli.js             # muestra qué haría
 node apps/worker/dist/mayorista/cli.js --aplicar   # trae fotos y categorías (~15 min)
 ```
 
+**Si la tienda ya tenía fotos subidas antes de la etapa 12**, una vez, desde la *Shell*:
+
+```bash
+node apps/worker/dist/fotos/sin-ids-cli.js   # las direcciones de las fotos pasan a ir sin el id del producto
+```
+
+Los archivos viejos quedan para que nada se rompa. Unas semanas después se pueden borrar con `--borrar-viejas`. Ver [`banners-y-direcciones.md`](banners-y-direcciones.md) § 2.
+
 ## Paso 8. Comprobar (desde tu compu)
 
 ```bash

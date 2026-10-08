@@ -86,7 +86,7 @@ export default function Guias() {
             <tbody className="divide-y divide-linea">
               {datos.guias.map((g) => (
                 <tr key={g.id} className="hover:bg-fondo-suave">
-                  <td className="px-4 py-3"><Link href={`/guias-talles/${g.id}`} className="font-bold text-marca hover:underline">{g.nombre}</Link></td>
+                  <td className="px-4 py-3"><Link href={`/guias-talles/${g.slug}`} className="font-bold text-marca hover:underline">{g.nombre}</Link></td>
                   <td className="px-4 py-3"><Insignia>{NOMBRE_TIPO_GUIA[g.tipo]}</Insignia></td>
                   <td className="px-4 py-3 text-xs" data-etiqueta="Medidas">{g.medidas.map((m) => infoMedida(m).nombre).join(", ")}</td>
                   <td className="px-4 py-3 text-right" data-etiqueta="Talles">{g.talles}</td>

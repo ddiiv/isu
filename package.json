@@ -19,6 +19,7 @@
     "paquetes": "pnpm --filter @isu/shared --filter @isu/db --filter @isu/almacen --filter @isu/stocker --filter @isu/envios build",
     "postinstall": "pnpm paquetes",
     "fotos:importar": "pnpm --filter @isu/worker build && pnpm --filter @isu/worker fotos:importar",
+    "fotos:sin-ids": "pnpm --filter @isu/worker build && pnpm --filter @isu/worker fotos:sin-ids",
     "mayorista:importar": "pnpm --filter @isu/worker build && pnpm --filter @isu/worker mayorista:importar",
     "seo:tienda-anterior": "pnpm --filter @isu/worker build && pnpm --filter @isu/worker seo:tienda-anterior",
     "demo:stocker": "node --env-file-if-exists=.env scripts/demo/stocker-simulado.mjs",
@@ -31,6 +32,7 @@
     "demo:transportes": "pnpm --filter @isu/envios build && node --env-file-if-exists=.env scripts/demo/transportes-simulado.mjs",
     "seo": "node scripts/seo.mjs",
     "diagnostico": "node scripts/diagnostico.mjs",
+    "revisar:pantallas": "node scripts/ci/revisar-pantallas.mjs",
     "start": "node scripts/todo-en-uno.mjs"
   },
   "devDependencies": {

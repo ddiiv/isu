@@ -44,6 +44,7 @@ Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno 
 10. **Envíos (etapa 4).** Aplicar el patch de Stocker de la etapa 4 (backend y frontend). Cargar las credenciales de cada transporte (arriba) y **homologar** uno por uno: cotizar, preparar un envío real, imprimir la etiqueta, despacharlo en Envíos del día y ver que el seguimiento avance. Aprobar en Meta las 5 plantillas de WhatsApp (textos en `pendientes-produccion.md`). En Backoffice → Ajustes: transportes a ofrecer, remitente, paquete y envíos en el día. Las etiquetas se guardan en el bucket privado (`R2_BUCKET_PRIVADO`, el de los comprobantes).
 11. **Asistente (etapa 5).** Nada que configurar para las preguntas frecuentes (se siembran con la migración 0009): revisarlas en Backoffice → Asistente. Para la IA, `ANTHROPIC_API_KEY` en la api y prenderla en Ajustes con un tope diario.
 12. **Healthchecks**: la API usa `/healthz` (proceso vivo; no se reinicia si la base parpadea). `/readyz` dice si base y Redis responden.
+13. **Fotos sin ids (etapa 12), una sola vez:** con la versión nueva subida, `pnpm fotos:sin-ids` pasa las fotos y banners ya subidos a direcciones sin el id. Con `REDIS_URL`, `WEB_INTERNAL_URL` y `REVALIDAR_TOKEN` regenera también las fichas. Los archivos viejos quedan hasta correrlo con `--borrar-viejas`. Después, revisar en Backoffice → Portada los banners sugeridos que cargó la migración 0019. Ver [`banners-y-direcciones.md`](banners-y-direcciones.md).
 
 ## Cloudflare
 

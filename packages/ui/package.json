@@ -6,7 +6,8 @@
   "exports": {
     "./tokens.css": "./src/tokens.css",
     "./fuentes": "./src/fuentes.ts",
-    "./marca/*": "./src/marca/*"
+    "./marca/*": "./src/marca/*",
+    "./banner": "./src/banner/Banner.tsx"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"

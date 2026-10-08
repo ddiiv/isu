@@ -193,8 +193,8 @@ describe("importar del mayorista", () => {
         ...disco,
         async guardar(archivo, datos, tipo) {
           if (pruebas.length < 3) {
-            const pid = Number(archivo.split("/")[1]);
-            pruebas.push(await otro.query("SELECT 1 FROM tienda.productos WHERE id = $1 FOR UPDATE NOWAIT", [pid]).then(() => "libre", (e: { code?: string }) => e.code ?? "error"));
+            // (la dirección de la foto ya no dice de qué producto es: se prueban todos los de la prueba)
+            pruebas.push(await otro.query("SELECT 1 FROM tienda.productos WHERE stocker_id >= $1 AND stocker_id < $2 FOR UPDATE NOWAIT", [BASE, BASE + 100]).then(() => "libre", (e: { code?: string }) => e.code ?? "error"));
           }
           return disco.guardar(archivo, datos, tipo);
         },

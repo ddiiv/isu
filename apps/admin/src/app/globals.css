@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @import "@isu/ui/tokens.css";
+
+/* Tailwind 4 no escanea paquetes del monorepo por su cuenta (el banner de la vista previa de Portada vive en @isu/ui). */
+@source "../../../../packages/ui/src";
 @layer base { body { @apply bg-fondo-suave font-sans text-tinta antialiased; } h1, h2 { @apply font-display tracking-tight; } }
 
 /*
