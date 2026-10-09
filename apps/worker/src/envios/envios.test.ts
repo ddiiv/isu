@@ -50,7 +50,7 @@ async function conEnvio(n: string, extra: Record<string, unknown> = {}) {
   await pool.query("DELETE FROM tienda.envios WHERE seguimiento = $1", [creado.seguimiento]);
   const e = await pool.query("INSERT INTO tienda.envios (pedido_id, transporte, servicio, seguimiento) VALUES ($1, 'andreani', $2, $3) RETURNING id",
     [p.id, extra.servicio_envio ?? "domicilio", creado.seguimiento]);
-  return { ...p, envioId: e.rows[0].id as number, seguimiento: creado.seguimiento };
+  return { ...p, envioId: e.rows[0].id as number, seguimiento: creado.seguimiento! };
 }
 const avisos = async (pedidoId: number) => (await pool.query("SELECT tipo, canal FROM tienda.avisos WHERE pedido_id = $1 ORDER BY id", [pedidoId])).rows.map((r) => `${r.tipo}:${r.canal}`);
 const estado = async (pedidoId: number) => (await pool.query("SELECT estado FROM tienda.pedidos WHERE id = $1", [pedidoId])).rows[0].estado;
@@ -204,6 +204,18 @@ describe("seguimiento", () => {
     expect(f.errores_seguidos).toBe(1);
     expect(f.ultimo_error).toBeTruthy();
     expect(f.espera).toBe(true);
+  });
+  it("Correo Argentino sin el número del rótulo (MiCorreo): no se pregunta; con el número, sí", async () => {
+    const p = await pedido("s7", { transporte: "correo_argentino" });
+    const e = await pool.query(
+      "INSERT INTO tienda.envios (pedido_id, transporte, servicio, seguimiento, externo_id, despachado_en, proximo_chequeo) VALUES ($1, 'correo_argentino', 'domicilio', NULL, 'x', now(), now() - interval '1 minute') RETURNING id", [p.id]);
+    const id = e.rows[0].id as number;
+    expect(await envios.seguir(id)).toEqual({ eventos: 0, motivo: "sin_numero" });
+    await envios.seguirPendientes(500);
+    // No lo tomó la vuelta periódica (no movió su próximo chequeo) ni le sumó errores.
+    const f = (await pool.query("SELECT proximo_chequeo < now() AS pendiente, errores_seguidos FROM tienda.envios WHERE id = $1", [id])).rows[0];
+    expect(f).toEqual({ pendiente: true, errores_seguidos: 0 });
+    await pool.query("UPDATE tienda.envios SET activo = false WHERE id = $1", [id]);
   });
   it("la vuelta periódica toma los que tocan (y los reserva para que otra réplica no los repita)", async () => {
     const p = await conEnvio("s6");

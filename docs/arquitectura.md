@@ -159,3 +159,42 @@ Ver [contrato-stocker.md](contrato-stocker.md).
   - **El problema:** una página que se estaba regenerando con datos de antes de un cambio podía terminar después del aviso, y Next la guardaba como nueva. Quedaba vieja hasta vencer (5 minutos).
   - **El arreglo:** el worker manda un segundo aviso 2,5 segundos después. Va aparte, sin frenar la cola de Stocker. Los cambios seguidos se juntan en un solo repaso, en tandas de 500 productos.
 - **Guía:** [`banners-y-direcciones.md`](banners-y-direcciones.md).
+
+## Etapa 14: movimiento liviano
+
+- **Tokens** (`packages/ui/src/tokens.css`, dentro de `@theme`): curvas `--ease-suave` (entrar) y `--ease-sale` (salir), y animaciones `animate-fundido`, `animate-desvanece`, `animate-sube`, `animate-entra-izq/der`, `animate-sale-izq/der`, `animate-entra-abajo` y `animate-desliza`. Sólo `transform` y `opacity`.
+- **`apps/web/src/app/globals.css`:**
+  - la regla global de «menos animaciones» apaga todo;
+  - `interpolate-size: allow-keywords` y `::details-content` para los desplegables;
+  - la entrada de cada banner con `[data-activa]` (`.banner-texto > *`, `.banner-producto`, `.banner-foto`) y la barrita `.progreso-banner`;
+  - con `@supports (animation-timeline: view())`: `.revelar` (tarjetas que aparecen al bajar) y la sombra del `.encabezado`.
+- **Carrusel** (`components/inicio/CarruselBanners.tsx`): un solo reloj, la animación de la barrita: cuando termina (`onAnimationEnd`) pasa al próximo. Se pausa con mouse o foco, el botón, `IntersectionObserver` (fuera de la pantalla) y `visibilitychange`.
+- **`lib/animacion.ts` · `useSalida(abierto, ms)`:** deja montado el menú o el carrito mientras sale (con `inert`) y lo saca del todo al terminar.
+- **`@isu/ui/banner`:** la foto va en un `<picture>` que la recorta (el zoom de entrada no desborda el banner).
+- **Fuentes** (`packages/ui/src/fuentes.ts`): WOFF2 con el subconjunto latino.
+
+## Etapa 15: Correo Argentino con MiCorreo, todo en una bolsa y datos de clientes
+
+- **Migración `0020`:**
+  - `productos.alto_cm`, `ancho_cm` y `largo_cm` (la prenda doblada; con `peso_gramos`);
+  - `paqueteEnvios` pasa de «cajas por cantidad de prendas» a `{ prendaPorDefecto, bolsas }`;
+  - `envios.seguimiento` puede quedar vacío, sólo en Correo Argentino (cargado en MiCorreo, todavía sin rótulo).
+- **Shared (`envios.ts`):** `armarBolsa(prendas, bolsas)`: apila (en 1, 2 o 3 pilas) y elige la bolsa más chica en la que entra (cada lado de la bolsa ≥ lado de la pila + su grosor). `leerPaqueteEnvios` lee también el formato viejo.
+- **API:**
+  - el cotizador arma el paquete con `armarBolsa` para todos los transportes (`paqueteDe`, que usa también «Preparar» con los pedidos viejos);
+  - `POST /v1/admin/envios/preparar`: el id del envío se reserva antes de crearlo y va como referencia única del intento (`extOrderId` en MiCorreo);
+  - `POST /v1/admin/envios/:numero/seguimiento` (operador): el número del rótulo de Correo; le avisa a Stocker y le pregunta a MiCorreo si lo conoce;
+  - productos: `altoCm`, `anchoCm`, `largoCm` (uno o de a muchos), filtro `sin_medidas` y su cuenta en el panel;
+  - `registrarAcceso` (`admin/sesion.ts`): quién abrió datos de clientes, en Auditoría (`datos_cliente`), una vez por persona, dato y hora.
+- **`@isu/envios` · `correo-argentino.ts`**, como el manual de MiCorreo (2026-05-18):
+  - token con `expires`, y uno nuevo si Correo lo rechaza;
+  - `/rates` sin `deliveredType` (domicilio y sucursal en una consulta, compartida un minuto); se cobra el Clásico (`CP`); límites de 50 kg, 200 cm por lado y 300 cm sumados;
+  - `/agencies` con `services=pickup_availability`, sólo activas, con su horario;
+  - `/shipping/import` con `productType: "CP"`, piso y departamento de hasta 3 caracteres; devuelve sólo la fecha: el envío queda sin número; «ya fue importada» es un reintento;
+  - `/shipping/tracking` es un GET con cuerpo (`pedirGetConCuerpo` en `http.ts`, porque `fetch` no lo permite);
+  - los errores `{ code, message }` llegan con el mensaje de Correo.
+- **Worker:** no sigue los envíos sin número.
+- **Backoffice:** Productos (peso y medidas obligatorios, de a muchos, filtro), Ajustes (bolsas), Envíos (la bolsa de cada pedido; para Correo, «Pagar e imprimir en MiCorreo» y el número del rótulo, a mano o con lector), Auditoría («Quién vio datos de clientes»).
+- **Simulador:** MiCorreo como el manual, más su portal (`/correo/portal`), donde «pagar e imprimir» da el número.
+- **Guía:** [`correo-argentino.md`](correo-argentino.md).
+

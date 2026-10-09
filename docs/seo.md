@@ -81,6 +81,48 @@ hacer una vez (cuentas de Google, día del cambio de dominio).
 
 Mantené las redirecciones **al menos un año**. Google las necesita mientras siga habiendo enlaces a la tienda vieja.
 
+## Cómo se ve Isuwaya al buscarla en Google (etapa 13)
+
+Al buscar «Isuwaya», el primer resultado es el inicio, como el de Deliver: la marca, el título, la frase de debajo y, más abajo, accesos a las páginas principales.
+
+```
+Isuwaya · https://www.isuwaya.com.ar
+Isuwaya · Ropa urbana y casual para todos tus días
+Isuwaya — Tienda online de ropa que fabricamos con talles reales, para mujer, hombre y niños — Envíos a todo el país y 20% OFF con transferencia.
+
+  Mujer             Explorá toda la ropa de mujer Isuwaya: remeras y tops, pantalones y calzas…
+  Hombre            Explorá toda la ropa de hombre Isuwaya: remeras, buzos…
+  Contacto          ¿Necesitás ayuda? WhatsApp +54 9 11 … · Email … · Locales en Flores y La Salada…
+  Quiénes somos     Somos Isuwaya: diseñamos y fabricamos ropa urbana y casual… desde hace más de 10 años…
+  Venta por mayor   ¿Tenés un local o revendés ropa? Hacé tu pedido en la tienda mayorista…
+  Nuestros locales  Locales de Isuwaya en …: probate las prendas y retirá gratis…
+```
+
+**Lo que hace la tienda:**
+- **Inicio:**
+  - el título es «Isuwaya · Ropa urbana y casual para todos tus días»;
+  - la frase de debajo se arma sola con las categorías y las condiciones de Ajustes (envíos, % por transferencia, cuotas), en lo que entra en Google;
+  - con los datos de la marca: logo, Instagram, contacto, el lema, la política de cambios y la tienda mayorista.
+- **Categorías de arriba:** «Explorá toda la ropa de mujer Isuwaya: …», con sus subcategorías de verdad. Si en Categorías se carga una «Descripción para Google», se usa esa.
+- **Páginas nuevas:**
+  - **Quiénes somos** (`/nosotros`): lo que la marca ya cuenta en el inicio;
+  - **Contacto** (`/contacto`): WhatsApp, email y locales, sacados de Ajustes;
+  - **Venta por mayor** (`/venta-por-mayor`): el botón «Hacer mi pedido mayorista» lleva a la tienda mayorista (pasa por `/mayorista`, que redirige a `MAYORISTA_URL`).
+- **Enlaces y sitemap:**
+  - las tres páginas están enlazadas en el pie de todas las páginas y en el menú del celular;
+  - están en el sitemap, con su título, su descripción y su canónica.
+  - El botón «Pedido mayorista» de arriba sigue yendo directo a la tienda mayorista.
+
+**Lo que no depende de la tienda:**
+- **Los accesos de debajo** («sitelinks») los elige Google solo, cuando el sitio tiene buen tráfico y una estructura clara. No se pueden forzar ni elegir.
+  - Lo que se puede hacer es que las páginas estén bien armadas y enlazadas en todo el sitio. Eso ya está hecho.
+  - Suelen aparecer a las pocas semanas de que Google indexa el dominio nuevo.
+- **El panel de la derecha** («En línea desde…», descripción, redes) sale del **Perfil de Empresa de Google** (business.google.com). Para tenerlo:
+  - crear el perfil con el nombre, la categoría «Tienda de ropa», el sitio web, la descripción y la **fecha de apertura**;
+  - con los locales, un perfil por local (Vía Flores, La Salada), que además aparecen en Google Maps.
+- **Para que Google vea todo antes:** en **Search Console**, mandar el sitemap y pedir «Solicitar indexación» del inicio, `/nosotros`, `/contacto` y `/venta-por-mayor`.
+- **Para revisarlo:** `pnpm seo https://<dominio>` muestra, en «La marca en Google», el título y la frase del inicio, y cada acceso con su título y descripción.
+
 ## Chequeo
 
 ```bash

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -35,6 +35,10 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
   // Si el cliente ya cargó sus medidas (acá o en "Armá tu outfit"), se marca su talle.
   const recomendado = useRecomendado(p.guiaTalles);
   const [avisoTalle, setAvisoTalle] = useState(false);
+  // Etapa 14: al elegir otro color, las fotos cambian con un fundido; en el celular, los puntitos dicen qué foto se ve.
+  const [cambioColor, setCambioColor] = useState(false);
+  const [fotoVista, setFotoVista] = useState(0);
+  const galeria = useRef<HTMLUListElement>(null);
 
   // ?color=… desde la tarjeta de la grilla (la página es estática: se lee al hidratar).
   useEffect(() => {
@@ -90,15 +94,29 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-14">
       {/* Galería: carrusel con scroll en el celular, grilla en la compu. */}
       <section aria-label="Fotos" className="-mx-4 sm:mx-0">
-        <ul className="flex snap-x snap-mandatory gap-2 overflow-x-auto px-4 sm:px-0 lg:grid lg:grid-cols-2 lg:gap-3 lg:overflow-visible">
+        <ul ref={galeria} className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain px-4 [scrollbar-width:none] sm:px-0 lg:grid lg:grid-cols-2 lg:gap-3 lg:overflow-visible [&::-webkit-scrollbar]:hidden"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const ancho = (el.firstElementChild as HTMLElement | null)?.offsetWidth ?? el.clientWidth;
+            setFotoVista(Math.round(el.scrollLeft / Math.max(1, ancho + 8)));
+          }}>
           {fotos.length ? fotos.map((f, i) => (
-            <li key={f.clave} className={`aspect-[4/5] w-[85%] shrink-0 snap-center overflow-hidden rounded-[var(--radius-foto)] bg-fondo-suave sm:w-[60%] lg:w-auto ${i === 0 ? "lg:col-span-2" : ""}`}>
-              <Foto foto={f} alt={`${p.nombre}${colorActual ? ` ${colorActual.nombre}` : ""}`} sizes={i === 0 ? "(min-width:1024px) 55vw, 85vw" : "(min-width:1024px) 28vw, 85vw"} prioridad={i === 0} />
+            <li key={f.clave} className={`group/foto aspect-[4/5] w-[85%] shrink-0 snap-center overflow-hidden rounded-[var(--radius-foto)] bg-fondo-suave sm:w-[60%] lg:w-auto ${i === 0 ? "lg:col-span-2" : ""} ${cambioColor ? "animate-fundido" : ""}`}>
+              <Foto foto={f} alt={`${p.nombre}${colorActual ? ` ${colorActual.nombre}` : ""}`} sizes={i === 0 ? "(min-width:1024px) 55vw, 85vw" : "(min-width:1024px) 28vw, 85vw"} prioridad={i === 0}
+                className="transition-transform duration-700 ease-suave group-hover/foto:scale-[1.03]" />
             </li>
           )) : (
             <li className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-foto)]"><SinFoto alt={p.nombre} tono={colorActual?.hex} /></li>
           )}
         </ul>
+        {/* En el celular, qué foto se ve (en la compu están todas a la vista). */}
+        {fotos.length > 1 && (
+          <div aria-hidden="true" className="mt-3 flex justify-center gap-1.5 lg:hidden">
+            {fotos.map((f, i) => (
+              <span key={f.clave} className={`h-1.5 rounded-full transition-all duration-300 ease-suave ${i === Math.min(fotoVista, fotos.length - 1) ? "w-5 bg-tinta" : "w-1.5 bg-linea"}`} />
+            ))}
+          </div>
+        )}
       </section>
 
       <section aria-label="Comprar" className="lg:sticky lg:top-28 lg:self-start">
@@ -137,7 +155,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
                 const activo = c.clave === color;
                 return (
                   <button key={c.clave} type="button" aria-pressed={activo} aria-label={`${c.nombre}${hay ? "" : " (agotado)"}`} title={c.nombre}
-                    onClick={() => { setColor(c.clave); setTalle(null); }}
+                    onClick={() => { setCambioColor(true); setFotoVista(0); galeria.current?.scrollTo({ left: 0 }); setColor(c.clave); setTalle(null); }}
                     className={`relative size-16 overflow-hidden rounded-xl border-2 transition ${activo ? "border-tinta" : "border-transparent hover:border-linea"} ${hay ? "" : "opacity-45"}`}>
                     {c.fotos[0]
                       ? <Foto foto={c.fotos[0]} alt="" sizes="64px" />
@@ -253,7 +271,7 @@ function Acordeon({ titulo, abierto = false, children }: { titulo: string; abier
     <details open={abierto} className="group py-1">
       <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-lg font-bold [&::-webkit-details-marker]:hidden">
         {titulo}
-        <span aria-hidden="true" className="text-2xl leading-none text-tinta-tenue transition group-open:rotate-45">+</span>
+        <span aria-hidden="true" className="text-2xl leading-none text-tinta-tenue transition-transform duration-300 ease-suave group-open:rotate-45">+</span>
       </summary>
       <div className="pb-4 leading-relaxed text-tinta-suave">{children}</div>
     </details>

@@ -146,10 +146,12 @@ export function crearEnvios(d: DepsEnvios) {
 
   /** Le pregunta al transporte por un envío y guarda lo nuevo. */
   async function seguir(envioId: number) {
-    const { rows } = await d.pool.query<{ id: number; pedido_id: number; transporte: string; seguimiento: string; externo_id: string | null; estado: EstadoEnvio; despachado_en: Date | null; errores_seguidos: number; servicio: string }>(
+    const { rows } = await d.pool.query<{ id: number; pedido_id: number; transporte: string; seguimiento: string | null; externo_id: string | null; estado: EstadoEnvio; despachado_en: Date | null; errores_seguidos: number; servicio: string }>(
       "SELECT * FROM tienda.envios WHERE id = $1 AND activo", [envioId]);
     const e = rows[0];
     if (!e || FINALES.includes(e.estado)) return { eventos: 0 };
+    // Correo Argentino (MiCorreo) sin el número del rótulo todavía: no hay qué preguntar.
+    if (!e.seguimiento) return { eventos: 0, motivo: "sin_numero" };
     const ad = adaptadorDe(e.transporte);
     if (!ad) return { eventos: 0, motivo: "sin_transporte" };
 
@@ -215,7 +217,7 @@ export function crearEnvios(d: DepsEnvios) {
     const { rows } = await d.pool.query<{ id: number }>(
       `UPDATE tienda.envios SET proximo_chequeo = now() + interval '15 minutes'
         WHERE id IN (SELECT id FROM tienda.envios
-                      WHERE activo AND estado NOT IN ('entregado', 'devuelto', 'cancelado') AND despachado_en IS NOT NULL
+                      WHERE activo AND estado NOT IN ('entregado', 'devuelto', 'cancelado') AND despachado_en IS NOT NULL AND seguimiento IS NOT NULL
                         AND despachado_en > now() - interval '60 days' AND proximo_chequeo <= now()
                       ORDER BY proximo_chequeo LIMIT $1 FOR UPDATE SKIP LOCKED)
         RETURNING id`, [limite]);

@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import type pg from "pg";
+import type { Redis } from "ioredis";
 import { ErrorHttp } from "../../lib/errores.js";
 import { sha256, tokenNuevo } from "../../lib/cripto.js";
 
@@ -59,6 +60,19 @@ export async function exigir(pool: pg.Pool, req: FastifyRequest, rol: Rol = "lec
 }
 
 /** Deja constancia de un cambio. La tabla no se puede editar ni borrar. */
+/**
+ * Datos de clientes (etapa 15): sólo los ve el cliente (su sesión o el enlace
+ * de su pedido) o alguien del backoffice identificado (usuario, contraseña y
+ * doble factor). Cada vez que alguien del backoffice los abre queda en
+ * Auditoría quién, qué y desde dónde: uno por persona, dato y hora (recargar
+ * la página no llena la auditoría).
+ */
+export async function registrarAcceso(db: pg.Pool, redis: Redis, a: Pick<Admin, "id" | "email">, que: string, id: string | number | null, ip: string, detalle: unknown = null) {
+  const nuevo = await redis.set(`isu:acceso:${a.id}:${que}:${id ?? "-"}`, "1", "EX", 3600, "NX").catch(() => "OK");
+  // En Auditoría, todos juntos bajo «datos cliente» (para ver de un vistazo quién los miró).
+  if (nuevo === "OK") await auditar(db, a, "ver_datos_cliente", "datos_cliente", `${que}${id === null ? "" : ` ${id}`}`, detalle, ip);
+}
+
 export async function auditar(db: pg.Pool | pg.PoolClient, a: Pick<Admin, "email">, accion: string, entidad: string, entidadId: string | number | null, detalle: unknown, ip: string) {
   await db.query(
     "INSERT INTO tienda.auditoria (actor, accion, entidad, entidad_id, detalle, ip) VALUES ($1, $2, $3, $4, $5, $6)",

@@ -7,7 +7,8 @@ import type { EstadoEnvio } from "./tipos.js";
  * contiene "entregado", y "Devuelto" gana a "en tránsito".
  */
 const REGLAS: Array<[RegExp, EstadoEnvio]> = [
-  [/\b(anulad|cancelad)/, "cancelado"],
+  // "CADUCA": la preimposición de Correo venció sin despacharse.
+  [/\b(anulad|cancelad|caduc)/, "cancelado"],
   [/(devuel|devoluci|retorno al remitente|regreso al remitente)/, "devuelto"],
   [/(no entregad|no se pudo entregar|visita|ausente|rechazad|domicilio (cerrado|inexistente|incorrecto)|direcci[oó]n incorrecta|intento fallido)/, "no_entregado"],
   [/\bentregad/, "entregado"],

@@ -18,7 +18,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITIO.url),
-  title: { default: `${SITIO.nombre} · Ropa urbana y casual`, template: `%s · ${SITIO.nombre}` },
+  title: { default: `${SITIO.nombre} · Ropa urbana y casual para todos tus días`, template: `%s · ${SITIO.nombre}` },
   description: SITIO.descripcion,
   applicationName: SITIO.nombre,
   alternates: { canonical: "/" },

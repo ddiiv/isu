@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionProducto, feedXml, horarioSchema, itemsFeed, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, feedXml, horarioSchema, itemsFeed, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -117,6 +117,26 @@ describe("descripciones automáticas", () => {
     const t = (precio: number, talles: string[]) => ({ precio, talles }) as unknown as ProductoTarjeta;
     const d = descripcionCategoria("Remeras de hombre", [t(1_800_000, ["S", "M"]), t(2_500_000, ["XL"])], ctx);
     expect(d.replace(/\s/g, " ")).toBe("2 modelos de remeras de hombre de Isuwaya desde $ 18.000, talles S al XL. 20% OFF con transferencia, 3 cuotas sin interés, envíos a todo el país.");
+  });
+});
+
+describe("cómo se ve la marca en Google (etapa 13)", () => {
+  it("inicio: qué es, para quién y las condiciones, en lo que entra", () => {
+    const d = descripcionInicio(["Mujer", "Hombre", "Niños"], ctx);
+    expect(d).toBe("Isuwaya — Tienda online de ropa que fabricamos con talles reales, para mujer, hombre y niños — Envíos a todo el país y 20% OFF con transferencia.");
+    expect(d.length).toBeLessThanOrEqual(158);
+    // Sin descuento ni cuotas, quedan los envíos.
+    expect(descripcionInicio(["Mujer"], { ...ctx, descuentoTransferencia: 0, cuotas: 1 })).toBe("Isuwaya — Tienda online de ropa urbana y casual. La fabricamos con talles reales para mujer — Envíos a todo el país.");
+  });
+  it("categoría de arriba: «Explorá toda la ropa de…» con sus subcategorías", () => {
+    const d = descripcionCategoriaPrincipal("Mujer", ["Remeras y tops", "Pantalones y calzas", "Buzos y camperas"], ctx);
+    expect(d).toBe("Explorá toda la ropa de mujer Isuwaya: remeras y tops, pantalones y calzas, buzos y camperas. Talles reales, 20% OFF con transferencia, 3 cuotas sin interés.");
+    expect(d.length).toBeLessThanOrEqual(158);
+    // Muchas subcategorías: las que entran, «y más».
+    const muchas = descripcionCategoriaPrincipal("Hombre", ["Remeras", "Chombas", "Camisas", "Buzos", "Camperas", "Joggers", "Jeans", "Bermudas"], ctx);
+    expect(muchas).toMatch(/^Explorá toda la ropa de hombre Isuwaya: remeras, chombas, .+ y más\. Talles reales/);
+    expect(muchas.length).toBeLessThanOrEqual(158);
+    expect(descripcionCategoriaPrincipal("Niños", [], ctx)).toBe("Explorá toda la ropa de niños Isuwaya. Talles reales, 20% OFF con transferencia, 3 cuotas sin interés, envíos a todo el país.");
   });
 });
 

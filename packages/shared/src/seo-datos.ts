@@ -236,6 +236,44 @@ export function descripcionCategoria(titulo: string, productos: ProductoTarjeta[
   return laQueEntra(conds.map((_, i) => `${inicio} ${conds.slice(0, conds.length - i).join(", ").replace(/^./, (c) => c.toUpperCase())}.`));
 }
 
+/*
+ * Cómo se ve la marca en Google (etapa 13). Al buscar «Isuwaya», el primer
+ * resultado es el inicio, con estas frases debajo del título, y Google le
+ * suma accesos a las páginas principales (Mujer, Hombre, Contacto…).
+ */
+
+/** La del inicio: qué es la tienda, para quién y las condiciones de hoy (los envíos primero). */
+export function descripcionInicio(categorias: string[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia">): string {
+  const para = categorias.length ? ` para ${lista(categorias.map((c) => c.toLowerCase()), 4)}` : "";
+  const conds = ["envíos a todo el país", ...condicionesLista(ctx).filter((c) => !c.startsWith("envíos"))];
+  const versiones: string[] = [];
+  // Más condiciones antes que una frase más larga: de cada cantidad, la versión larga y la corta.
+  for (let k = conds.length; k >= 1; k--) {
+    const c = lista(conds.slice(0, k), 4);
+    const cond = `${c.charAt(0).toUpperCase()}${c.slice(1)}`;
+    versiones.push(`${ctx.marca} — Tienda online de ropa urbana y casual. La fabricamos con talles reales${para} — ${cond}.`);
+    versiones.push(`${ctx.marca} — Tienda online de ropa que fabricamos con talles reales${para ? `,${para}` : ""} — ${cond}.`);
+  }
+  return laQueEntra(versiones);
+}
+
+/**
+ * La de una categoría de arriba (Mujer, Hombre, Niños), con sus
+ * subcategorías de verdad: «Explorá toda la ropa de mujer Isuwaya: remeras y
+ * tops, pantalones y calzas…».
+ */
+export function descripcionCategoriaPrincipal(nombre: string, hijas: string[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia">): string {
+  const base = `Explorá toda la ropa de ${nombre.toLowerCase()} ${ctx.marca}`;
+  const subs = [...new Set(hijas.map((h) => h.trim().toLowerCase()).filter(Boolean))];
+  const conds = condicionesLista(ctx);
+  const versiones: string[] = [];
+  for (let n = Math.min(subs.length, 6); n >= 0; n--) {
+    const que = n ? `: ${subs.slice(0, n).join(", ")}${subs.length > n ? " y más" : ""}` : "";
+    for (let k = conds.length; k >= 1; k--) versiones.push(`${base}${que}. Talles reales, ${conds.slice(0, k).join(", ")}.`);
+  }
+  return laQueEntra(versiones);
+}
+
 /* ── Horario de los locales ("Lunes a viernes de 8 a 14 h") → schema.org ── */
 const DIAS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"] as const;
 const DIAS_SCHEMA = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];

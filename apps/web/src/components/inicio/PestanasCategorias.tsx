@@ -11,6 +11,7 @@ export function PestanasCategorias({ grupos, descuento, cuotas }: {
 }) {
   const con = grupos.filter((g) => g.productos.length);
   const [activa, setActiva] = useState(con[0]?.slug ?? "");
+  const [tocada, setTocada] = useState(false);
   if (!con.length) return null;
   const g = con.find((x) => x.slug === activa) ?? con[0]!;
   return (
@@ -22,13 +23,13 @@ export function PestanasCategorias({ grupos, descuento, cuotas }: {
       <div role="tablist" aria-label="Categorías" className="mt-6 flex gap-2 overflow-x-auto">
         {con.map((x) => (
           <button key={x.slug} type="button" role="tab" id={`pestana-${x.slug}`} aria-selected={x.slug === g.slug} aria-controls={`panel-${x.slug}`}
-            onClick={() => setActiva(x.slug)}
-            className={`shrink-0 rounded-full px-5 py-2 text-[15px] font-bold transition ${x.slug === g.slug ? "bg-tinta text-white" : "bg-fondo-suave hover:bg-linea"}`}>
+            onClick={() => { setTocada(true); setActiva(x.slug); }}
+            className={`shrink-0 rounded-full px-5 py-2 text-[15px] font-bold transition duration-200 ease-suave active:scale-95 ${x.slug === g.slug ? "bg-tinta text-white" : "bg-fondo-suave hover:bg-linea"}`}>
             {x.nombre}
           </button>
         ))}
       </div>
-      <div role="tabpanel" id={`panel-${g.slug}`} aria-labelledby={`pestana-${g.slug}`}>
+      <div key={g.slug} role="tabpanel" id={`panel-${g.slug}`} aria-labelledby={`pestana-${g.slug}`} className={tocada ? "animate-fundido" : ""}>
         <Grilla key={g.slug} productos={g.productos} lista={`Inicio · ${g.nombre}`} descuento={descuento} cuotas={cuotas} filtros={false} />
       </div>
     </section>

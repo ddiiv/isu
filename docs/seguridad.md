@@ -270,3 +270,25 @@ Cada etapa cierra con el chequeo "hacker" (`tests/seguridad/`) y no pasa a la si
   - el inicio no tiene links `javascript:` ni `data:`;
   - las fotos de productos van sin id;
   - las rutas nuevas del backoffice (por slug, sacar foto, sugeridos, vista previa del producto, comprobante por número) con token inventado → 401.
+
+## Datos de clientes y Correo Argentino con MiCorreo (etapa 15)
+
+- **Los datos de un cliente** (nombre, email, teléfono, DNI, dirección) los ve sólo quien se identifica como el cliente o como alguien del backoffice. Si no, se rechaza:
+  - **el cliente:**
+    - su pedido, con la sesión de su cuenta o con el token de acceso del enlace que le llegó por mail (en la base, sólo su hash);
+    - el seguimiento público, con el enlace firmado: muestra el nombre de pila y el envío, nada más;
+    - el chat: número de pedido **y** email, con freno; responde sólo el estado.
+  - **el backoffice:** usuario, contraseña y doble factor. Preparar envíos, imprimir etiquetas y cargar el número del rótulo piden operador.
+- **Queda registrado quién miró:** cada vez que alguien del backoffice abre un pedido o la lista de pedidos, de clientes o de envíos, va a la auditoría (`ver_datos_cliente`, entidad `datos_cliente`): quién, qué, cuándo y desde qué IP. Una vez por persona, dato y hora (con Redis), para no llenarla al recargar. La auditoría no se puede editar ni borrar.
+- **A Correo le llega sólo lo del envío:** nombre, email, teléfono y dirección (o sucursal). El DNI no.
+- **MiCorreo:**
+  - las credenciales de la API sólo en el servidor (`CORREO_AR_*`); `pnpm correo:cliente` pide la contraseña de MiCorreo sin mostrarla ni guardarla;
+  - el seguimiento de MiCorreo (un GET con cuerpo) usa el mismo cuidado que el resto: tiempo máximo, sin redirecciones y hasta 2 MB de respuesta;
+  - la referencia de cada envío en MiCorreo es el id interno del intento (no se repite);
+  - el número del rótulo: sólo letras y números (8 a 40); no se puede repetir en otro pedido ni cambiar después del despacho, y cada carga queda en la auditoría.
+  - El simulador (y su portal) no se usa nunca en producción: con `NODE_ENV=production` se ignora `TRANSPORTES_SIMULADOR`.
+- **Auditoría** (`tests/seguridad/auditoria.mjs` § 7n):
+  - sin sesión o con un token inventado, los pedidos, clientes, envíos, etiquetas, preparar, el número del rótulo y el peso y las medidas → 401, sin datos;
+  - un pedido de la tienda sin la sesión de su dueño o con un acceso inventado no se muestra;
+  - el seguimiento con firma inventada → 404;
+  - un número de rótulo con HTML se rechaza.

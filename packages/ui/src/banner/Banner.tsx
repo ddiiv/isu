@@ -54,13 +54,15 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
     return <Link href={destino} className={clase} aria-label={etiqueta}>{hijos}</Link>;
   };
   const fotoDe = b.foto && (movil && b.fotoMovil ? b.fotoMovil : b.foto);
+  // El <picture> es el marco que recorta la foto: al entrar se acomoda con un zoom suave y no tiene
+  // que asomar (ni hacer que el banner «desborde») mientras está agrandada.
   const foto = fotoDe && (
-    <picture>
+    <picture className={b.titulo ? "absolute inset-0 block overflow-hidden" : "block overflow-hidden"}>
       {!movil && b.fotoMovil && <source media="(max-width: 767px)" srcSet={srcSetBanner(b.fotoMovil.clave)} sizes="100vw" />}
       <img src={srcBanner(fotoDe.clave)} srcSet={srcSetBanner(fotoDe.clave)} sizes="100vw" alt={b.titulo ? "" : b.alt}
         width={fotoDe.ancho ?? 2400} height={fotoDe.alto ?? 900}
         loading={prioridad ? "eager" : "lazy"} fetchPriority={prioridad ? "high" : "auto"} decoding="async"
-        className={b.titulo ? "absolute inset-0 size-full object-cover" : "block h-auto max-h-[78vh] w-full object-cover"} />
+        className={`banner-foto ${b.titulo ? "block size-full object-cover" : "block h-auto max-h-[78vh] w-full object-cover"}`} />
     </picture>
   );
 
@@ -93,7 +95,8 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
         </>
       )}
       <div className={`relative mx-auto grid w-full max-w-6xl gap-8 px-6 pb-14 pt-12 @3xl:px-16 @3xl:py-16 ${b.producto ? "@3xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)] @3xl:items-center" : ""}`}>
-        <div className={centro ? "mx-auto max-w-2xl text-center" : "max-w-2xl"}>
+        {/* banner-texto / banner-producto / banner-foto: la entrada al llegar al banner (globals.css de la tienda). */}
+        <div className={`banner-texto ${centro ? "mx-auto max-w-2xl text-center" : "max-w-2xl"}`}>
           {b.etiqueta && (
             <p className={`mb-4 inline-block rounded-full px-3.5 py-1 text-sm font-bold ${claro ? "bg-white/15 text-white ring-1 ring-white/30" : "bg-tinta text-white"}`}>{b.etiqueta}</p>
           )}
@@ -106,12 +109,12 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
           )}
         </div>
         {b.producto && (
-          <div className="flex justify-start @3xl:justify-end">
+          <div className="banner-producto flex justify-start @3xl:justify-end">
             {ir(`/producto/${b.producto.slug}`,
               "group flex w-full max-w-[19rem] gap-3 rounded-2xl bg-white p-3 text-tinta shadow-2xl ring-1 ring-black/5 transition hover:-translate-y-0.5 @3xl:max-w-[17rem] @3xl:flex-col",
               <>
                 <span className="block aspect-[4/5] w-24 shrink-0 overflow-hidden rounded-xl bg-fondo-suave @3xl:w-full">
-                  {b.producto.foto && <img src={srcProducto(b.producto.foto.clave)} alt={b.producto.foto.alt ?? b.producto.nombre} loading="lazy" decoding="async" className="size-full object-cover transition duration-300 group-hover:scale-[1.03]" />}
+                  {b.producto.foto && <img src={srcProducto(b.producto.foto.clave)} alt={b.producto.foto.alt ?? b.producto.nombre} loading="lazy" decoding="async" className="size-full object-cover transition duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.04]" />}
                 </span>
                 <span className="flex min-w-0 flex-col justify-center gap-1 @3xl:px-1 @3xl:pb-1">
                   <span className="line-clamp-2 text-[15px] font-bold leading-snug">{b.producto.nombre}</span>

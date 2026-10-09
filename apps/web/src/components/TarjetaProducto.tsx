@@ -20,6 +20,8 @@ export function TarjetaProducto({
   packs?: AjustePacks;
 }) {
   const [color, setColor] = useState<string | null>(null);
+  // Después del primer toque a un color, la foto cambia con un fundido (al cargar la página, no).
+  const [tocado, setTocado] = useState(false);
   const elegido = p.colores.find((c) => c.clave === color);
   const foto = elegido?.foto ?? p.foto;
   const comoPack = !!packs && p.pack;
@@ -28,20 +30,23 @@ export function TarjetaProducto({
   const MAX = 5;
 
   return (
-    <article className="group relative flex flex-col">
+    <article className="revelar group relative flex flex-col">
       {/* La foto es un segundo enlace a lo mismo: fuera del tabulador y de los lectores de pantalla (el nombre ya es el enlace). */}
       <Link
         href={href}
         tabIndex={-1}
         aria-hidden="true"
         onClick={() => evento("select_item", { item_list_name: lista, items: [item(p, { index: indice, item_list_name: lista })] })}
-        className="relative block aspect-[4/5] overflow-hidden rounded-[var(--radius-foto)] bg-fondo-suave"
+        className="relative block aspect-[4/5] overflow-hidden rounded-[var(--radius-foto)] bg-fondo-suave transition-transform duration-200 ease-suave active:scale-[0.985]"
       >
-        <Foto foto={foto} alt={p.nombre} sizes="(min-width:1024px) 25vw, 50vw" prioridad={prioridad} tono={elegido?.hex ?? p.colores[0]?.hex}
-          className="transition duration-500 group-hover:scale-[1.02]" />
+        {/* Al pasar el mouse: un zoom lento y la segunda foto que aparece de a poco. */}
+        <div key={foto?.clave ?? "sin-foto"} className={`size-full ${tocado ? "animate-fundido" : ""}`}>
+          <Foto foto={foto} alt={p.nombre} sizes="(min-width:1024px) 25vw, 50vw" prioridad={prioridad} tono={elegido?.hex ?? p.colores[0]?.hex}
+            className="transition-transform duration-700 ease-suave group-hover:scale-[1.04]" />
+        </div>
         {!elegido && p.fotoHover && (
-          <div className="absolute inset-0 opacity-0 transition duration-300 group-hover:opacity-100">
-            <Foto foto={p.fotoHover} alt={p.nombre} sizes="(min-width:1024px) 25vw, 50vw" />
+          <div className="absolute inset-0 opacity-0 transition-opacity duration-500 ease-suave group-hover:opacity-100">
+            <Foto foto={p.fotoHover} alt={p.nombre} sizes="(min-width:1024px) 25vw, 50vw" className="scale-[1.04] transition-transform duration-700 ease-suave group-hover:scale-100" />
           </div>
         )}
         <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
@@ -61,11 +66,11 @@ export function TarjetaProducto({
               <li key={c.clave}>
                 <button
                   type="button"
-                  onClick={() => setColor(c.clave === color ? null : c.clave)}
+                  onClick={() => { setTocado(true); setColor(c.clave === color ? null : c.clave); }}
                   aria-pressed={c.clave === color}
                   aria-label={`${c.nombre}${c.hay ? "" : " (agotado)"}`}
                   title={c.nombre}
-                  className={`relative grid size-7 place-items-center rounded-full ${c.clave === color ? "ring-2 ring-tinta ring-offset-1" : ""}`}
+                  className={`relative grid size-7 place-items-center rounded-full transition duration-200 ease-suave hover:scale-110 active:scale-95 ${c.clave === color ? "ring-2 ring-tinta ring-offset-1" : ""}`}
                 >
                   <span
                     className={`block size-5 rounded-full ${c.hex && esClaro(c.hex) ? "border border-linea" : ""} ${c.hay ? "" : "opacity-40"}`}
@@ -78,7 +83,7 @@ export function TarjetaProducto({
           </ul>
         )}
         <h3 className="font-sans text-[15px] font-normal leading-snug">
-          <Link href={href} onClick={() => evento("select_item", { item_list_name: lista, items: [item(p, { index: indice, item_list_name: lista })] })} className="hover:underline">{p.nombre}</Link>
+          <Link href={href} onClick={() => evento("select_item", { item_list_name: lista, items: [item(p, { index: indice, item_list_name: lista })] })} className="underline decoration-transparent underline-offset-4 transition-colors duration-200 hover:decoration-current">{p.nombre}</Link>
         </h3>
         <ResumenEstrellas promedio={p.resenas.promedio} cantidad={p.resenas.cantidad} className="text-xs" />
         {comoPack ? (

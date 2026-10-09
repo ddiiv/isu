@@ -32,7 +32,11 @@ export interface Direccion {
 export interface Persona { nombre: string; apellido: string; email: string; telefono: string; dni: string }
 /** De dónde sale el paquete (la tienda / el depósito). */
 export interface Origen extends Direccion { nombre: string; email: string; telefono: string; cuit: string }
-export interface Paquete { pesoGramos: number; altoCm: number; anchoCm: number; largoCm: number; valorDeclarado: number }
+export interface Paquete {
+  pesoGramos: number; altoCm: number; anchoCm: number; largoCm: number; valorDeclarado: number;
+  /** Etapa 15: la bolsa en la que va todo el pedido (para el depósito) y si entra en ella. */
+  bolsa?: string | null; entra?: boolean;
+}
 
 export interface Cotizacion {
   transporte: Transporte;
@@ -50,6 +54,8 @@ export interface Sucursal {
 
 export interface NuevoEnvio {
   pedido: string;
+  /** Id único de este intento (si se descarta y se rehace, es otro): MiCorreo no acepta dos veces el mismo. */
+  referencia?: string;
   servicio: Servicio;
   destinatario: Persona;
   /** Envío a domicilio. */
@@ -61,7 +67,8 @@ export interface NuevoEnvio {
 }
 
 export interface EnvioCreado {
-  seguimiento: string;
+  /** null = el transporte lo da después (MiCorreo: sale en el rótulo, que se paga e imprime en su portal). */
+  seguimiento: string | null;
   /** Id propio del transporte si es distinto del número de seguimiento (orden de retiro, id de viaje…). */
   externoId: string | null;
   /** La etiqueta si vino con la creación (si no, se pide aparte). */
@@ -87,4 +94,6 @@ export interface Adaptador {
   seguimiento(envio: { seguimiento: string; externoId: string | null }): Promise<EventoEnvio[]>;
   /** Página pública del transporte para seguir el envío (null si no hay). */
   urlSeguimiento(seguimiento: string): string | null;
+  /** Si la etiqueta no viene por API: el portal donde se paga e imprime (MiCorreo). */
+  portalEtiquetas?: string | null;
 }

@@ -5,7 +5,7 @@ import { Cargando, Insignia, Mensaje, Tarjeta, Titulo } from "@/components/ui";
 
 interface Resumen {
   pedidosHoy: number; ventasHoy: number; ventasMes: number; porEstado: Record<string, number>;
-  catalogo: { publicados: number; sin_fotos: number; agotados: number };
+  catalogo: { publicados: number; sin_fotos: number; agotados: number; sin_medidas: number };
   resenasPorModerar?: number;
   transferenciasPorResolver?: number;
   sincronizacion: Array<{ tipo: string; inicio: string; fin: string | null; error: string | null; cambios: number | null }>;
@@ -49,6 +49,7 @@ export default function Panel() {
           <ul className="divide-y divide-linea">
             <li className="flex justify-between py-2.5"><Link href="/productos?filtro=visibles" className="hover:underline">Publicados</Link><span className="font-bold">{r.catalogo.publicados}</span></li>
             <li className="flex justify-between py-2.5"><Link href="/productos?filtro=sin_fotos" className="hover:underline">Publicados sin fotos</Link><span className={`font-bold ${r.catalogo.sin_fotos ? "text-oferta" : ""}`}>{r.catalogo.sin_fotos}</span></li>
+            <li className="flex justify-between py-2.5"><Link href="/productos?filtro=sin_medidas" className="hover:underline">Publicados sin peso o medidas</Link><span className={`font-bold ${r.catalogo.sin_medidas ? "text-oferta" : ""}`}>{r.catalogo.sin_medidas}</span></li>
             <li className="flex justify-between py-2.5"><Link href="/productos?filtro=agotados" className="hover:underline">Agotados</Link><span className="font-bold">{r.catalogo.agotados}</span></li>
             <li className="flex justify-between py-2.5"><Link href="/resenas" className="hover:underline">Reseñas por revisar</Link><span className={`font-bold ${r.resenasPorModerar ? "text-marca" : ""}`}>{r.resenasPorModerar ?? 0}</span></li>
             <li className="flex justify-between py-2.5"><Link href="/transferencias" className="hover:underline">Transferencias sin asignar</Link><span className={`font-bold ${r.transferenciasPorResolver ? "text-marca" : ""}`}>{r.transferenciasPorResolver ?? 0}</span></li>

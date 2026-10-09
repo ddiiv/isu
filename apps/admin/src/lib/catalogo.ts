@@ -3,6 +3,8 @@ export interface FilaProducto {
   categoriaStocker: string | null; stock: number; precio: number | null; fotos: number; colores: number; foto: string | null; categorias: number[];
   /** Etapa 8: se vende en pack; cuántas reseñas publicadas y su promedio. */
   pack: boolean; resenas: number; estrellas: number | null;
+  /** Etapa 15: tiene peso y las tres medidas (si no, el envío se cotiza con la prenda por defecto). */
+  conMedidas: boolean;
 }
 export interface Categoria { id: number; nombre: string; slug: string; padreId: number | null; orden: number; visible: boolean; productos: number; seoTitulo: string | null; seoDescripcion: string | null; texto: string | null }
 export interface GuiaResumen { id: number; slug: string; nombre: string; tipo: "nino" | "adulto" | "otro"; medidas: string[]; talles: number; productos: number; actualizadoEn: string; actualizadoPor: string | null }

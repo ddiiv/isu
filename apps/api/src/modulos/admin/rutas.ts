@@ -15,7 +15,7 @@ import { ipDe } from "../../lib/cliente.js";
 import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
 import { rutasGuiasAdmin } from "./talles.js";
-import { auditar, exigir, type Admin } from "./sesion.js";
+import { auditar, exigir, registrarAcceso, type Admin } from "./sesion.js";
 import { AjusteChatbot, AjusteDirecciones, AjusteChatbotIa, AjusteTransportes, EnviosEnElDia, OrigenEnvios, PaqueteEnvios } from "@isu/shared";
 
 /*
@@ -63,8 +63,10 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       pool.query<{ estado: string; n: number }>(
         `SELECT estado, count(*)::int AS n FROM tienda.pedidos
           WHERE estado IN ('esperando_pago','esperando_transferencia','transferencia_informada','a_pagar_en_local','pagado','pagado_tarde','listo_para_retirar') GROUP BY estado`),
-      pool.query<{ publicados: number; sin_fotos: number; agotados: number }>(
+      pool.query<{ publicados: number; sin_fotos: number; agotados: number; sin_medidas: number }>(
         `SELECT count(*) FILTER (WHERE p.visible AND p.en_stocker)::int AS publicados,
+                -- Etapa 15: sin peso o medidas se cotizan con la prenda por defecto de Ajustes.
+                count(*) FILTER (WHERE p.visible AND p.en_stocker AND p.eliminado_en IS NULL AND (p.peso_gramos IS NULL OR p.alto_cm IS NULL OR p.ancho_cm IS NULL OR p.largo_cm IS NULL))::int AS sin_medidas,
                 count(*) FILTER (WHERE p.visible AND p.en_stocker AND NOT EXISTS (SELECT 1 FROM tienda.fotos f WHERE f.producto_id = p.id))::int AS sin_fotos,
                 count(*) FILTER (WHERE p.visible AND p.en_stocker AND NOT EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0))::int AS agotados
            FROM tienda.productos p`),
@@ -86,7 +88,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
 
   // ── Pedidos ──────────────────────────────────────────────────────
   api.get("/v1/admin/pedidos", { schema: { querystring: z.object({ estado: z.string().regex(/^[a-z_]{3,30}$/).optional(), q: z.string().trim().max(80).optional(), pagina: Pagina }).strict() } }, async (req) => {
-    await exigir(pool, req);
+    const a = await exigir(pool, req);
+    await registrarAcceso(pool, deps.redis, a, "pedidos", req.query.q ? `buscar:${req.query.q.slice(0, 40)}` : `${req.query.estado ?? "todos"}:${req.query.pagina}`, ip(req));
     const { estado, q, pagina } = req.query;
     const filtro: string[] = ["estado NOT IN ('reservando')"];
     const params: unknown[] = [];
@@ -101,7 +104,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   });
 
   api.get("/v1/admin/pedidos/:numero", { schema: { params: z.object({ numero: NUMERO }) } }, async (req) => {
-    await exigir(pool, req);
+    const a = await exigir(pool, req);
+    await registrarAcceso(pool, deps.redis, a, "pedido", req.params.numero, ip(req));
     const { rows } = await pool.query("SELECT * FROM tienda.pedidos WHERE numero = $1", [req.params.numero]);
     const p = rows[0];
     if (!p) throw new ErrorHttp(404, "no_encontrado", "No existe ese pedido.");
@@ -194,7 +198,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       querystring: z.object({
         q: z.string().trim().max(80).optional(),
         categoria: Id.optional(),
-        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "de_baja", "eliminados"]).default("todos"),
+        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "sin_medidas", "de_baja", "eliminados"]).default("todos"),
         pagina: Pagina,
       }).strict(),
     },
@@ -211,6 +215,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       agotados: "p.en_stocker AND NOT EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0)",
       destacados: "p.destacado", nuevos: "p.nuevo", packs: "p.pack",
       sin_descripcion: "p.en_stocker AND p.descripcion IS NULL AND p.stocker_descripcion IS NULL",
+      // Etapa 15: peso y medidas para cotizar el envío.
+      sin_medidas: "p.en_stocker AND (p.peso_gramos IS NULL OR p.alto_cm IS NULL OR p.ancho_cm IS NULL OR p.largo_cm IS NULL)",
     };
     // Los eliminados sólo aparecen en su filtro (para restaurarlos).
     w.push(filtro === "eliminados" ? "p.eliminado_en IS NOT NULL" : `(${filtros[filtro]}) AND p.eliminado_en IS NULL`);
@@ -218,6 +224,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const { rows } = await pool.query(
       `SELECT p.id, p.slug, p.nombre, p.stocker_padre AS sku, p.visible, p.en_stocker AS "enStocker", p.destacado, p.destacado_orden AS "destacadoOrden", p.nuevo,
               p.pack, p.resenas_cantidad AS "resenas", p.resenas_promedio::float AS "estrellas", p.eliminado_en AS "eliminadoEn",
+              NOT (p.peso_gramos IS NULL OR p.alto_cm IS NULL OR p.ancho_cm IS NULL OR p.largo_cm IS NULL) AS "conMedidas",
               p.stocker_categoria AS "categoriaStocker", p.stocker_genero AS "generoStocker", p.categorias_fijas AS "categoriasFijas",
               (SELECT COALESCE(sum(v.stock), 0)::int FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo) AS stock,
               (SELECT min(v.precio) FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo) AS precio,
@@ -255,7 +262,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const nColores = colores.rows.filter((c) => c.activo).length;
     return {
       producto: {
-        id: p.id, slug: p.slug, nombre: p.nombre, nombreFijo: p.nombre_fijo, pesoGramos: p.peso_gramos, sku: p.stocker_padre, visible: p.visible, enStocker: p.en_stocker,
+        id: p.id, slug: p.slug, nombre: p.nombre, nombreFijo: p.nombre_fijo, sku: p.stocker_padre, visible: p.visible, enStocker: p.en_stocker,
+        pesoGramos: p.peso_gramos, altoCm: p.alto_cm, anchoCm: p.ancho_cm, largoCm: p.largo_cm,
         descripcion: p.descripcion, descripcionStocker: p.stocker_descripcion, seoTitulo: p.seo_titulo, seoDescripcion: p.seo_descripcion,
         categoriaStocker: p.stocker_categoria, generoStocker: p.stocker_genero, categoriasFijas: p.categorias_fijas,
         destacado: p.destacado, destacadoOrden: p.destacado_orden, nuevo: p.nuevo, categorias: cats.rows.map((c) => c.categoria_id),
@@ -283,8 +291,12 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     guiaTallesId: Id.nullable().optional(),
     // null = automático (según la categoría).
     parteOutfit: z.enum(["arriba", "abajo", "abrigo", "ninguna"]).nullable().optional(),
-    // Etapa 4: para cotizar el envío. null = el peso por defecto de Ajustes.
+    // Etapa 4: para cotizar el envío. null = el de la prenda por defecto de Ajustes.
     pesoGramos: z.number().int().min(10).max(30_000).nullable().optional(),
+    // Etapa 15: la prenda doblada como va en la bolsa (alto = el grosor), en cm.
+    altoCm: z.number().int().min(1).max(100).nullable().optional(),
+    anchoCm: z.number().int().min(1).max(150).nullable().optional(),
+    largoCm: z.number().int().min(1).max(150).nullable().optional(),
     // Etapa 8: se vende en pack de 2 a 5, su orden en "Packs" y de qué está hecha.
     pack: z.boolean().optional(),
     packOrden: z.number().int().min(-1000).max(1000).optional(),
@@ -305,6 +317,9 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     if (c.destacadoOrden !== undefined) poner("destacado_orden", c.destacadoOrden);
     if (c.parteOutfit !== undefined) poner("parte_outfit", c.parteOutfit);
     if (c.pesoGramos !== undefined) poner("peso_gramos", c.pesoGramos);
+    if (c.altoCm !== undefined) poner("alto_cm", c.altoCm);
+    if (c.anchoCm !== undefined) poner("ancho_cm", c.anchoCm);
+    if (c.largoCm !== undefined) poner("largo_cm", c.largoCm);
     if (c.pack !== undefined) poner("pack", c.pack);
     if (c.packOrden !== undefined) poner("pack_orden", c.packOrden);
     if (c.composicion !== undefined) poner("composicion", c.composicion || null);
@@ -344,12 +359,14 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     return { ok: true };
   });
 
-  // Edición masiva: los mismos cambios a muchos productos a la vez (visible, destacado, nuevo, categorías).
+  // Edición masiva: los mismos cambios a muchos productos a la vez (visible, destacado, nuevo, categorías, peso y medidas).
   api.post("/v1/admin/productos/masivo", {
     schema: {
       body: z.object({
         ids: z.array(Id).min(1).max(500),
-        cambios: CambiosProducto.pick({ visible: true, destacado: true, nuevo: true, categorias: true, guiaTallesId: true, parteOutfit: true, pesoGramos: true, pack: true, composicion: true }).extend({
+        cambios: CambiosProducto.pick({
+          visible: true, destacado: true, nuevo: true, categorias: true, guiaTallesId: true, parteOutfit: true, pesoGramos: true, altoCm: true, anchoCm: true, largoCm: true, pack: true, composicion: true,
+        }).extend({
           agregarCategoria: Id.optional(), quitarCategoria: Id.optional(),
         }).strict(),
       }).strict(),
@@ -673,7 +690,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
 
   // ── Clientes ─────────────────────────────────────────────────────
   api.get("/v1/admin/clientes", { schema: { querystring: z.object({ q: z.string().trim().max(80).optional(), pagina: Pagina }).strict() } }, async (req) => {
-    await exigir(pool, req);
+    const a = await exigir(pool, req);
+    await registrarAcceso(pool, deps.redis, a, "clientes", req.query.q ? `buscar:${req.query.q.slice(0, 40)}` : `pagina:${req.query.pagina}`, ip(req));
     const params: unknown[] = [];
     let w = "true";
     if (req.query.q) { params.push(`%${req.query.q.replace(/[%_\\]/g, "\\$&")}%`); w = "(c.email ILIKE $1 OR (c.nombre || ' ' || COALESCE(c.apellido,'')) ILIKE $1 OR c.dni ILIKE $1 OR c.telefono ILIKE $1)"; }

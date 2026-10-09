@@ -10,7 +10,7 @@ export async function envioPublico(pool: pg.Pool | pg.PoolClient, transportes: T
   id: number; entrega: string; transporte: string | null; servicio_envio: string | null; sucursal_envio: { nombre?: string; direccion?: string } | null;
 }): Promise<EnvioPublico | null> {
   if (pedido.entrega !== "envio" || !pedido.transporte) return null;
-  const { rows } = await pool.query<{ id: number; seguimiento: string; estado: EstadoEnvioTienda }>(
+  const { rows } = await pool.query<{ id: number; seguimiento: string | null; estado: EstadoEnvioTienda }>(
     "SELECT id, seguimiento, estado FROM tienda.envios WHERE pedido_id = $1 AND activo", [pedido.id]);
   const e = rows[0];
   const eventos = e
@@ -25,8 +25,9 @@ export async function envioPublico(pool: pg.Pool | pg.PoolClient, transportes: T
     servicio: (pedido.servicio_envio ?? "domicilio") as EnvioPublico["servicio"],
     sucursal: pedido.sucursal_envio?.nombre ? { nombre: pedido.sucursal_envio.nombre, direccion: pedido.sucursal_envio.direccion ?? "" } : null,
     // Mercado Envíos: el número interno de Mercado Libre no le sirve al cliente (lo sigue desde acá).
-    seguimiento: e && t !== "mercado_envios" && t !== "cabify" ? e.seguimiento : null,
-    url: e && adaptador ? adaptador.urlSeguimiento(e.seguimiento) : null,
+    // Correo Argentino: hasta que se imprime el rótulo en MiCorreo no hay número.
+    seguimiento: e?.seguimiento && t !== "mercado_envios" && t !== "cabify" ? e.seguimiento : null,
+    url: e?.seguimiento && adaptador ? adaptador.urlSeguimiento(e.seguimiento) : null,
     estado: e?.estado ?? null,
     eventos: eventos.map((x) => ({ fecha: x.fecha.toISOString(), estado: x.estado, descripcion: x.descripcion, ubicacion: x.ubicacion })),
   };

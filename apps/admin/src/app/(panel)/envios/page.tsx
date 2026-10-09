@@ -12,6 +12,10 @@ import { puede, useYo } from "@/components/Marco";
  *   despachar en Envíos del día de Stocker) → En camino → Entregados.
  * Lo que no se pudo entregar, se devolvió o el transporte no responde
  * aparece en Problemas.
+ *
+ * Etapa 15: todo el pedido va en una bolsa (la columna Pedido dice cuál).
+ * Correo Argentino (MiCorreo): «Preparar» lo carga en MiCorreo; el rótulo se
+ * paga e imprime allá y su número se carga acá (a mano o con el lector).
  */
 const VISTAS = [
   ["preparar", "Para preparar"], ["etiquetados", "Etiquetados"], ["en_camino", "En camino"], ["problemas", "Problemas"], ["entregados", "Entregados"],
@@ -28,8 +32,9 @@ interface Fila {
   numero: string; estado: string; cliente: string; transporte: string; nombreTransporte: string; servicio: string; cp: string | null; localidad: string | null; sucursal: string | null;
   pagadoEn: string | null; avisosWhatsapp: boolean; prendas: number; seguimiento: string | null; estadoEnvio: string | null; tieneEtiqueta: boolean;
   despachadoEn: string | null; entregadoEn: string | null; ultimoError: string | null; erroresSeguidos: number | null; urlSeguimiento: string | null;
+  faltaNumero: boolean; bolsa: string | null; bolsaNoEntra: boolean;
 }
-interface Resultado { numero: string; ok: boolean; seguimiento?: string; etiqueta?: boolean; mensaje?: string }
+interface Resultado { numero: string; ok: boolean; seguimiento?: string | null; etiqueta?: boolean; portal?: string | null; mensaje?: string }
 
 function Envios() {
   const sp = useSearchParams();
@@ -38,7 +43,7 @@ function Envios() {
   const operador = puede(yo, "operador");
   const vista = (VISTAS.some(([v]) => v === sp.get("vista")) ? sp.get("vista") : "preparar") as Vista;
   const [q, setQ] = useState(sp.get("q") ?? "");
-  const { datos, error, cargando, recargar } = useDatos<{ envios: Fila[]; conteo: Record<Vista, number>; transportes: string[] }>("envios", { vista, q: sp.get("q") });
+  const { datos, error, cargando, recargar } = useDatos<{ envios: Fila[]; conteo: Record<Vista, number>; transportes: string[]; portales: Record<string, string> }>("envios", { vista, q: sp.get("q") });
   const [elegidos, setElegidos] = useState<Set<string>>(new Set());
   const [trabajando, setTrabajando] = useState(false);
   const [resultados, setResultados] = useState<Resultado[] | null>(null);
@@ -61,7 +66,8 @@ function Envios() {
       const r = await api<{ resultados: Resultado[] }>("envios/preparar", { cuerpo: { numeros: lista } });
       setResultados(r.resultados);
       const ok = r.resultados.filter((x) => x.ok).length;
-      if (ok) aviso.ok(`${ok} ${ok === 1 ? "envío preparado" : "envíos preparados"}. Ahora imprimí las etiquetas en "Etiquetados".`);
+      const enPortal = r.resultados.filter((x) => x.ok && x.portal).length;
+      if (ok) aviso.ok(`${ok} ${ok === 1 ? "envío preparado" : "envíos preparados"}. Ahora imprimí las etiquetas en "Etiquetados".${enPortal ? ` ${enPortal} de Correo Argentino ${enPortal === 1 ? "quedó cargado" : "quedaron cargados"} en MiCorreo: pagá e imprimí ${enPortal === 1 ? "el rótulo" : "los rótulos"} allá y cargá acá ${enPortal === 1 ? "su número" : "el número de cada uno"}.` : ""}`);
       setElegidos(new Set(r.resultados.filter((x) => !x.ok).map((x) => x.numero)));
       await recargar();
     } catch (e) { aviso.error(e); } finally { setTrabajando(false); }
@@ -119,7 +125,12 @@ function Envios() {
       <form className="mb-4 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); ir({ q }); }}>
         <input className={`${claseEntrada} max-w-xs`} placeholder="Pedido, cliente o seguimiento" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" />
       </form>
-      {vista === "etiquetados" && <p className="mb-4 text-sm text-tinta-suave">Imprimí, armá cada caja y despachala desde <b>Envíos del día en Stocker</b>: ahí se descuenta el stock y el pedido pasa solo a "En camino" (y se le avisa al cliente).</p>}
+      {vista === "etiquetados" && (
+        <p className="mb-4 text-sm text-tinta-suave">
+          Imprimí, armá cada pedido en su bolsa y despachalo desde <b>Envíos del día en Stocker</b>: ahí se descuenta el stock y el pedido pasa solo a "En camino" (y se le avisa al cliente).
+          {datos?.portales.correo_argentino && <> Los de <b>Correo Argentino</b>: pagá e imprimí el rótulo en <a href={datos.portales.correo_argentino} target="_blank" rel="noopener noreferrer" className="font-bold text-marca hover:underline">MiCorreo</a> y cargá su número acá (se puede con el lector de códigos).</>}
+        </p>
+      )}
       {datos && !datos.transportes.length && <Mensaje tipo="info">No hay transportes configurados (faltan las credenciales en el servidor): los envíos salen como envío estándar y se marcan a mano desde el pedido.</Mensaje>}
       <div className="space-y-3">
         <aviso.Aviso />
@@ -149,7 +160,8 @@ function Envios() {
                   )}
                   <td className="px-4 py-3">
                     <Link href={`/pedidos/${f.numero}`} className="font-bold text-marca hover:underline">{f.numero}</Link>
-                    <br /><span className="text-xs text-tinta-tenue">{f.cliente} · {f.prendas} {f.prendas === 1 ? "prenda" : "prendas"}</span>
+                    <br /><span className="text-xs text-tinta-tenue">{f.cliente} · {f.prendas} {f.prendas === 1 ? "prenda" : "prendas"}{f.bolsa && ` · bolsa ${f.bolsa}`}</span>
+                    {f.bolsaNoEntra && <><br /><Insignia clase="bg-amber-50 text-amber-900">No entra en ninguna bolsa: revisalo</Insignia></>}
                   </td>
                   <td className="px-4 py-3" data-etiqueta="Destino">{f.sucursal ?? `${f.localidad ?? ""} (${f.cp ?? "—"})`}</td>
                   <td className="px-4 py-3" data-etiqueta="Transporte">
@@ -158,7 +170,10 @@ function Envios() {
                     {f.avisosWhatsapp && <span className="ml-1 text-xs text-tinta-tenue" title="Pidió avisos por WhatsApp">· WA</span>}
                   </td>
                   <td className="px-4 py-3" data-etiqueta="Seguimiento">
-                    {f.seguimiento ? (
+                    {f.faltaNumero && (
+                      <CargarNumero numero={f.numero} portal={datos.portales[f.transporte] ?? null} puede={operador} alGuardar={async (texto, atencion) => { if (atencion) aviso.error(new Error(texto)); else aviso.ok(texto); await recargar(); }} alFallar={aviso.error} />
+                    )}
+                    {f.faltaNumero ? null : f.seguimiento ? (
                       <>
                         {f.urlSeguimiento ? <a href={f.urlSeguimiento} target="_blank" rel="noopener noreferrer" className="break-all text-marca hover:underline">{f.seguimiento}</a> : <span className="break-all">{f.seguimiento}</span>}
                         <br />
@@ -181,6 +196,37 @@ function Envios() {
         </div>
       )}
     </>
+  );
+}
+
+/** Correo Argentino (MiCorreo): el número del rótulo, a mano o con el lector de códigos (escribe y manda Enter). */
+function CargarNumero({ numero, portal, puede: habilitado, alGuardar, alFallar }: {
+  numero: string; portal: string | null; puede: boolean; alGuardar: (texto: string, atencion: boolean) => Promise<void>; alFallar: (e: unknown) => void;
+}) {
+  const [valor, setValor] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  async function guardar() {
+    const tn = valor.trim().toUpperCase();
+    if (!tn) return;
+    setGuardando(true);
+    try {
+      const r = await api<{ aviso: string | null }>(`envios/${numero}/seguimiento`, { cuerpo: { seguimiento: tn } });
+      setValor("");
+      await alGuardar(r.aviso ?? `${numero}: número ${tn} guardado. Desde ahora el envío se sigue solo.`, !!r.aviso);
+    } catch (e) { alFallar(e); } finally { setGuardando(false); }
+  }
+  return (
+    <div className="space-y-1.5">
+      <Insignia clase="bg-amber-50 text-amber-900">Falta el número del rótulo</Insignia>
+      {portal && <a href={portal} target="_blank" rel="noopener noreferrer" className="block text-xs font-bold text-marca hover:underline">Pagar e imprimir en MiCorreo ↗</a>}
+      {habilitado && (
+        <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
+          <input className={`${claseEntrada} w-48 py-1.5 font-mono text-sm uppercase`} placeholder="Número del rótulo" autoComplete="off" spellCheck={false}
+            aria-label={`Número de seguimiento de ${numero}`} value={valor} onChange={(e) => setValor(e.target.value.replace(/\s+/g, ""))} maxLength={40} />
+          <Boton type="submit" variante="borde" disabled={guardando || valor.trim().length < 8}>{guardando ? "…" : "Guardar"}</Boton>
+        </form>
+      )}
+    </div>
   );
 }
 

@@ -13,6 +13,7 @@ export { codigoProvincia } from "./provincias.js";
 export { telefonoWhatsapp, type Whatsapp } from "./whatsapp.js";
 export type { MercadoEnvios } from "./mercado-envios.js";
 export { pdfSimple } from "./pdf.js";
+export { correoArgentino, PORTAL_MICORREO, horarioSucursal, pisoYDepto, medidasCorreo } from "./correo-argentino.js";
 export { firmaSeguimiento, firmaSeguimientoValida, enlaceSeguimiento, firmaOpinar, firmaOpinarValida, enlaceOpinar } from "./firma.js";
 
 /*
@@ -47,7 +48,11 @@ export function crearTransportes(envOriginal: Env = process.env): Transportes {
 
   const a: Partial<Record<Transporte, Adaptador>> = {};
   if (hay(env.CORREO_AR_USUARIO, env.CORREO_AR_CLAVE, env.CORREO_AR_CLIENTE)) {
-    a.correo_argentino = correoArgentino({ url: env.CORREO_AR_URL ?? "https://api.correoargentino.com.ar/micorreo/v1", usuario: env.CORREO_AR_USUARIO!, clave: env.CORREO_AR_CLAVE!, cliente: env.CORREO_AR_CLIENTE! });
+    // MiCorreo. Pruebas: https://apitest.correoargentino.com.ar/micorreo/v1 (credenciales aparte, las da Correo).
+    a.correo_argentino = correoArgentino({
+      url: env.CORREO_AR_URL ?? "https://api.correoargentino.com.ar/micorreo/v1", usuario: env.CORREO_AR_USUARIO!, clave: env.CORREO_AR_CLAVE!, cliente: env.CORREO_AR_CLIENTE!,
+      portal: env.CORREO_AR_PORTAL || (sim && envOriginal.NODE_ENV !== "production" ? `${sim}/correo/portal` : null),
+    });
   }
   if (hay(env.ANDREANI_USUARIO, env.ANDREANI_CLAVE, env.ANDREANI_CLIENTE, env.ANDREANI_CONTRATO_DOMICILIO)) {
     a.andreani = andreani({

@@ -6,6 +6,7 @@ import type { CategoriaNodo } from "@isu/shared";
 import { Foto } from "./Foto";
 import { IconoCerrar, IconoMenu } from "./iconos";
 import { SITIO } from "@/lib/sitio";
+import { useSalida } from "@/lib/animacion";
 
 /*
  * Menú del celular: un cajón lateral por niveles. Arriba: Nuevos, Packs,
@@ -36,6 +37,8 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
   const panelActual = useRef<Panel>(null);
   panelActual.current = panel;
   const cerrar = () => setAbierto(false);
+  // Etapa 14: entra y sale deslizándose desde la izquierda.
+  const { montado, saliendo } = useSalida(abierto);
 
   useEffect(() => {
     const abrirEn = (e: Event) => { setPanel(String((e as CustomEvent).detail ?? "") || null); setAbierto(true); };
@@ -70,10 +73,10 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
       </button>
       {/* Portal al body: así el cajón nunca queda atrapado dentro del header
           (un transform o filtro en un ancestro cambia a qué se pega el "fixed"). */}
-      {abierto && createPortal(
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menú">
-          <div className="absolute inset-0 bg-black/40" onClick={cerrar} />
-          <nav id={id} className="absolute inset-y-0 left-0 flex w-[88%] max-w-sm flex-col overflow-y-auto bg-white px-5 pb-8 pt-4">
+      {montado && createPortal(
+        <div className={`fixed inset-0 z-50 lg:hidden ${saliendo ? "pointer-events-none" : ""}`} role="dialog" aria-modal="true" aria-label="Menú" inert={saliendo}>
+          <div className={`absolute inset-0 bg-black/40 ${saliendo ? "animate-desvanece" : "animate-fundido"}`} onClick={cerrar} />
+          <nav id={id} className={`absolute inset-y-0 left-0 flex w-[88%] max-w-sm flex-col overflow-y-auto overscroll-contain bg-white px-5 pb-8 pt-4 shadow-2xl ${saliendo ? "animate-sale-izq" : "animate-entra-izq"}`}>
             <div className="mb-2 flex items-center justify-between">
               {panel !== null
                 ? <button type="button" onClick={() => setPanel(null)} className="-ml-1 flex items-center gap-1 py-2 text-[15px] font-bold" autoFocus><span aria-hidden="true" className="text-xl">‹</span> Menú</button>
@@ -81,6 +84,8 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
               <button type="button" aria-label="Cerrar menú" className="-mr-2 p-2.5" onClick={cerrar} autoFocus={panel === null}><IconoCerrar /></button>
             </div>
 
+            {/* Cada nivel entra deslizándose (key: se vuelve a montar al cambiar de panel). */}
+            <div key={panel ?? "menu"} className="flex flex-col animate-desliza">
             {panel === null && (
               <>
                 <Link href="/nuevos" className={`${enlace} text-marca`} onClick={cerrar}>Nuevos</Link>
@@ -91,6 +96,8 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
                   : <Link key={c.id} href={`/${c.slug}`} className={enlace} onClick={cerrar}>{c.nombre}</Link>)}
                 <Link href="/outfits" className="pt-4 text-[15px] font-bold" onClick={cerrar}>Armá tu outfit</Link>
                 <Link href="/locales" className="py-3 text-[15px]" onClick={cerrar}>Nuestros locales</Link>
+                <Link href="/nosotros" className="py-1.5 text-[15px]" onClick={cerrar}>Quiénes somos</Link>
+                <Link href="/contacto" className="py-1.5 text-[15px]" onClick={cerrar}>Contacto</Link>
                 <a href={SITIO.mayorista} rel="nofollow" className="mt-2 inline-flex w-fit items-center gap-2 rounded-full border border-tinta px-4 py-2 text-[15px] font-bold">Pedido mayorista <span aria-hidden="true">↗</span></a>
               </>
             )}
@@ -133,6 +140,7 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
                 </ul>
               </>
             )}
+            </div>
           </nav>
         </div>,
         document.body,

@@ -33,9 +33,18 @@ const FALLA: Record<Transporte, string> = {
   meli: "not_delivered/receiver_absent", cabify: "failed",
 };
 
+/** Lo cargado en MiCorreo (/shipping/import): sin número hasta que se «paga e imprime» el rótulo. */
+interface CargadoCorreo { extOrderId: string; pedido: string; servicio: string; destinatario: string; seguimiento: string | null; cuerpo: Json }
+
 export interface Simulador {
   url: string;
   envios: Map<string, Envio>;
+  /** Cuántas veces se llamó cada ruta (para probar que no se le pega de más a un transporte). */
+  llamadas: Map<string, number>;
+  /** MiCorreo: lo cargado, por extOrderId. */
+  correo: Map<string, CargadoCorreo>;
+  /** MiCorreo: pagar e imprimir el rótulo de un envío cargado (lo que se hace en su portal). Devuelve el número de seguimiento. */
+  rotuloCorreo(extOrderId: string): string | null;
   mensajes: Array<{ fecha: Date; para: string; plantilla: string; parametros: string[] }>;
   avanzar(seguimiento: string, forzar?: "no_entregado" | "en_sucursal"): Envio | null;
   cerrar(): Promise<void>;
@@ -49,6 +58,8 @@ const leer = async (req: http.IncomingMessage) => {
 
 export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise<Simulador> {
   const envios = new Map<string, Envio>();
+  const correo = new Map<string, CargadoCorreo>();
+  const llamadas = new Map<string, number>();
   const mensajes: Simulador["mensajes"] = [];
   const tokens = new Set<string>();
   const nuevoToken = () => { const t = randomBytes(16).toString("hex"); tokens.add(t); return t; };
@@ -75,6 +86,16 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
     e.eventos.push({ fecha: new Date(Date.now() + e.eventos.length), texto });
     return e;
   };
+  // MiCorreo: el número sale cuando se paga e imprime el rótulo (como "000500076393019A3G0C701").
+  const rotuloCorreo: Simulador["rotuloCorreo"] = (extOrderId) => {
+    const c = correo.get(extOrderId);
+    if (!c) return null;
+    if (!c.seguimiento) {
+      c.seguimiento = `0005000${String(++seq.n).padStart(8, "0")}${randomBytes(4).toString("hex").toUpperCase()}`;
+      crear("correo", c.pedido, c.servicio, c.seguimiento);
+    }
+    return c.seguimiento;
+  };
   // Tarifa de mentira pero razonable: AMBA más barato que el interior; más peso, más caro.
   const precio = (base: number, cp: string, gramos: number) => Math.round(base * (Number(cp) < 1900 ? 1 : 1.4) + Math.max(0, gramos - 1000) * 0.9);
   const sucursales = (prefijo: string, cp: string) => [1, 2, 3].map((i) => ({ id: `${prefijo}${cp}${i}`, nombre: `Sucursal ${prefijo.toUpperCase()} ${cp}-${i}`, calle: ["Av. Rivadavia", "Av. Corrientes", "Belgrano"][i - 1]!, numero: String(1000 + i * 150), cp }));
@@ -83,11 +104,13 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
   const servidor = http.createServer(async (req, res) => {
     const u = new URL(req.url ?? "/", "http://sim");
     const p = u.pathname;
+    llamadas.set(p, (llamadas.get(p) ?? 0) + 1);
     const json = (s: number, c: unknown) => { res.writeHead(s, { "content-type": "application/json" }); res.end(JSON.stringify(c)); };
     const pdf = (lineas: string[]) => { res.writeHead(200, { "content-type": "application/pdf" }); res.end(pdfSimple(lineas)); };
     const texto = (s: number, t: string, tipo = "text/xml; charset=utf-8") => { res.writeHead(s, { "content-type": tipo }); res.end(t); };
     try {
-      const cuerpo = req.method === "POST" || req.method === "PUT" ? await leer(req) : "";
+      const conCuerpo = req.method === "POST" || req.method === "PUT" || Number(req.headers["content-length"] ?? 0) > 0;
+      const cuerpo = conCuerpo ? await leer(req) : "";
       const body = (() => { try { return JSON.parse(cuerpo || "{}"); } catch { return Object.fromEntries(new URLSearchParams(cuerpo)); } })() as Json;
 
       // ── Página de la demo ──
@@ -106,34 +129,99 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
         return json(200, { estado: e.eventos.at(-1)!.texto });
       }
 
-      // ── Correo Argentino (MiCorreo) ──
+      // ── Correo Argentino (MiCorreo, como el manual 2026-05-18) ──
+      const errCorreo = (st: number, message: string) => json(st, { code: String(st), message });
       if (p === "/correo/token" && req.method === "POST") {
-        if (!/^Basic /.test(req.headers.authorization ?? "")) return json(401, { message: "Unauthorized" });
-        return json(200, { token: nuevoToken(), expire: new Date(Date.now() + 3600_000).toISOString() });
+        if (!/^Basic /.test(req.headers.authorization ?? "")) return errCorreo(401, "Unauthorized");
+        const v = new Date(Date.now() - 3 * 3600_000 + 3600_000); // en una hora, hora de Argentina
+        return json(200, { token: nuevoToken(), expires: v.toISOString().slice(0, 19).replace("T", " ") });
+      }
+      // El portal (lo que en la vida real es la web de MiCorreo): pagar e imprimir el rótulo.
+      if (p === "/correo/portal" && req.method === "GET") {
+        const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+        const filas = [...correo.values()].reverse().map((c) => `<tr><td>${esc(c.pedido)}</td><td>${esc(c.destinatario)}</td><td>${esc(c.servicio)}</td><td>${c.seguimiento ? `<code>${esc(c.seguimiento)}</code> · <a href="/correo/portal/rotulo/${encodeURIComponent(c.extOrderId)}">Rótulo (PDF)</a>` : `<form method="post" action="/correo/portal/rotulo/${encodeURIComponent(c.extOrderId)}"><button>Pagar e imprimir rótulo</button></form>`}</td></tr>`).join("");
+        return texto(200, `<!doctype html><meta charset="utf-8"><title>MiCorreo (simulado)</title><style>body{font:14px system-ui;margin:24px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 8px}</style><h1>MiCorreo · envíos importados (simulado)</h1><p>Lo que cargó la tienda. Al pagar, Correo asigna el número de seguimiento y da el rótulo para imprimir.</p><table><tr><th>Pedido</th><th>Destinatario</th><th>Servicio</th><th>Rótulo</th></tr>${filas}</table>`, "text/html; charset=utf-8");
+      }
+      const rot = /^\/correo\/portal\/rotulo\/([^/]+)$/.exec(p);
+      if (rot) {
+        const id = decodeURIComponent(rot[1]!);
+        const tn = req.method === "POST" ? rotuloCorreo(id) : correo.get(id)?.seguimiento ?? null;
+        if (!tn) return errCorreo(404, "Resource not found");
+        if (req.method === "POST") {
+          // Desde el navegador (el formulario del portal): vuelve a la lista, que ya muestra el número.
+          if ((req.headers.accept ?? "").includes("text/html")) { res.writeHead(303, { location: "/correo/portal" }); return res.end(); }
+          return json(200, { trackingNumber: tn });
+        }
+        const c = correo.get(id)!;
+        return pdf(["CORREO ARGENTINO", `Seguimiento ${tn}`, `Pedido ${c.pedido}`, `Para: ${c.destinatario}`]);
       }
       if (p.startsWith("/correo/")) {
-        if (!autorizado(req)) return json(401, { message: "invalid token" });
-        if (p === "/correo/rates") {
-          const cp = String(body.postalCodeDestination ?? "");
-          if (cp === "9999") return json(200, { rates: [] });
-          const g = Number(body.dimensions?.weight ?? 500);
-          return json(200, { rates: [
-            { deliveredType: "D", productType: "CP", productName: "Correo Argentino Clásico", price: precio(4800, cp, g), deliveryTimeMin: "3", deliveryTimeMax: "6" },
-            { deliveredType: "S", productType: "CP", productName: "Correo Argentino Clásico a sucursal", price: precio(3900, cp, g), deliveryTimeMin: "3", deliveryTimeMax: "6" },
-          ].filter((r) => r.deliveredType === body.deliveredType) });
+        if (!autorizado(req)) return errCorreo(401, "Invalid token");
+        const clienteOk = (id: unknown) => /^\d{4,10}$/.test(String(id ?? ""));
+        if (p === "/correo/users/validate" && req.method === "POST") {
+          return body.email && body.password ? json(200, { customerId: "0090000025", createdAt: "2021-03-10" }) : errCorreo(404, "Usuario no valido o inexistente");
         }
-        if (p === "/correo/agencies") {
-          return json(200, sucursales("ca", "1406").map((s) => ({ code: s.id, name: s.nombre, status: "ACTIVE", location: { address: { streetName: s.calle, streetNumber: s.numero, locality: "CABA", postalCode: s.cp } } })));
+        if (p === "/correo/rates" && req.method === "POST") {
+          if (!clienteOk(body.customerId)) return errCorreo(402, `Cliente FAP no identificado ${String(body.customerId ?? "")}`);
+          const m = body.dimensions ?? {};
+          const lados = [m.height, m.width, m.length].map(Number);
+          if (!body.postalCodeOrigin || !body.postalCodeDestination || !Number.isInteger(Number(m.weight)) || lados.some((x) => !Number.isInteger(x))) return errCorreo(400, "getQuotation - Hay campos obligatorios vacios");
+          if (Number(m.weight) < 1 || Number(m.weight) > 50000) return errCorreo(422, "Datos Invalidos: Peso supera el maximo tolerado");
+          if (lados.some((x) => x > 200) || lados.reduce((t, x) => t + x, 0) > 300) return errCorreo(422, "Datos Invalidos: La suma de los lados no puede superar 300");
+          const cp = String(body.postalCodeDestination);
+          if (cp === "9999") return json(200, { customerId: body.customerId, validTo: new Date(Date.now() + 86400_000).toISOString(), rates: [] });
+          const g = Number(m.weight);
+          const todas = [
+            { deliveredType: "D", productType: "CP", productName: "Correo Argentino Clasico", price: precio(4800, cp, g) + 0.06, deliveryTimeMin: "2", deliveryTimeMax: "5" },
+            { deliveredType: "D", productType: "EP", productName: "Correo Argentino Expreso", price: precio(9800, cp, g) + 0.12, deliveryTimeMin: "1", deliveryTimeMax: "3" },
+            { deliveredType: "S", productType: "CP", productName: "Correo Argentino Clasico", price: precio(3900, cp, g) + 0.06, deliveryTimeMin: "2", deliveryTimeMax: "5" },
+            { deliveredType: "S", productType: "EP", productName: "Correo Argentino Expreso", price: precio(8900, cp, g) + 0.12, deliveryTimeMin: "1", deliveryTimeMax: "3" },
+          ];
+          return json(200, { customerId: body.customerId, validTo: new Date(Date.now() + 86400_000).toISOString(), rates: body.deliveredType ? todas.filter((r) => r.deliveredType === body.deliveredType) : todas });
+        }
+        if (p === "/correo/agencies" && req.method === "GET") {
+          if (!clienteOk(u.searchParams.get("customerId"))) return errCorreo(402, "Customer ID no valido");
+          const prov = u.searchParams.get("provinceCode") ?? "";
+          if (!/^[A-Z]$/.test(prov)) return errCorreo(400, "provinceCode requerido");
+          const horas = { sunday: null, monday: { start: "0930", end: "1800" }, tuesday: { start: "0930", end: "1800" }, wednesday: { start: "0930", end: "1800" }, thursday: { start: "0930", end: "1800" }, friday: { start: "0930", end: "1800" }, saturday: { start: "0900", end: "1300" }, holidays: null };
+          const cps = prov === "C" ? ["C1406ABC", "C1405AAA", "C1424BBB"] : ["B1842ZAB", "B1828XAA", "B1832CCC"];
+          const lista = cps.map((cpa, i) => ({
+            code: `${prov}${String(100 + i).padStart(4, "0")}`, name: `Sucursal ${["Centro", "Norte", "Sur"][i]}`, manager: "Encargado", email: "sucursal@correoargentino.com.ar", phone: "(011) 4000-0000",
+            services: { packageReception: true, pickupAvailability: true },
+            location: { address: { streetName: ["Av. Rivadavia", "Av. Corrientes", "Belgrano"][i], streetNumber: String(1000 + i * 150), floor: null, apartment: null, locality: prov === "C" ? "Flores" : "Monte Grande", city: prov === "C" ? "CABA" : "Esteban Echeverria", province: prov === "C" ? "Ciudad Autonoma Buenos Aires" : "Buenos Aires", provinceCode: prov, postalCode: cpa }, latitude: "-34.6", longitude: "-58.4" },
+            hours: horas, status: "ACTIVE",
+          }));
+          // Una cerrada y una que sólo recibe paquetes (no entrega): la tienda no tiene que ofrecerlas.
+          lista.push({ ...lista[0]!, code: `${prov}0900`, name: "Sucursal cerrada", status: "INACTIVE" });
+          lista.push({ ...lista[0]!, code: `${prov}0901`, name: "Sólo imposición", services: { packageReception: true, pickupAvailability: false } });
+          return json(200, u.searchParams.get("services") === "pickup_availability" ? lista.filter((a) => a.services.pickupAvailability) : lista);
         }
         if (p === "/correo/shipping/import" && req.method === "POST") {
-          const e = crear("correo", String(body.extOrderId ?? ""), body.shipping?.deliveryType === "S" ? "sucursal" : "domicilio");
-          return json(200, { createdAt: new Date().toISOString(), trackingNumber: e.seguimiento });
+          if (!clienteOk(body.customerId)) return errCorreo(402, "no se encontro datos de remitente - id :" + String(body.customerId ?? ""));
+          const sh = body.shipping ?? {};
+          if (!body.extOrderId || !body.recipient?.name || !body.recipient?.email) return errCorreo(400, "Hay campos obligatorios vacios");
+          if (sh.deliveryType !== "D" && sh.deliveryType !== "S") return errCorreo(402, "Tipo de entrega invalido");
+          if (sh.productType !== "CP" && sh.productType !== "EP") return errCorreo(402, "Tipo de encomienda [TENC] no valida");
+          if (sh.deliveryType === "S" && !sh.agency) return errCorreo(402, "Verifique la sucursal de destino");
+          if (sh.deliveryType === "D" && (!sh.address?.streetName || !sh.address?.streetNumber || !sh.address?.city || !sh.address?.postalCode)) return errCorreo(400, "Hay campos obligatorios vacios");
+          if (sh.deliveryType === "D" && !/^[A-Z]$/.test(String(sh.address?.provinceCode ?? ""))) return errCorreo(402, "La provincia es invalida.");
+          if (!(Number(sh.weight) > 0)) return errCorreo(402, "El peso debe ser mayor a 0");
+          if (Number(sh.weight) > 50000) return errCorreo(402, "El peso excede el maximo permitido para el producto");
+          for (const [k, n] of [["alto", sh.height], ["ancho", sh.width], ["largo", sh.length]] as const) if (!(Number(n) > 0 && Number(n) <= 255)) return errCorreo(402, `El ${k} debe estar entre 0 y 255.`);
+          if (String(sh.address?.floor ?? "").length > 3 || String(sh.address?.apartment ?? "").length > 3) return errCorreo(400, "floor/apartment: hasta 3 caracteres");
+          if (!(Number(sh.declaredValue) >= 0)) return errCorreo(400, "declaredValue invalido");
+          const id = String(body.extOrderId);
+          if (correo.has(id)) return errCorreo(402, "La orden ya fue importada con anterioridad.");
+          correo.set(id, { extOrderId: id, pedido: String(body.orderNumber ?? id), servicio: sh.deliveryType === "S" ? "sucursal" : "domicilio", destinatario: String(body.recipient.name), seguimiento: null, cuerpo: body });
+          return json(200, { createdAt: new Date().toISOString() });
         }
-        if (p === "/correo/shipping/tracking") {
-          const e = envios.get(u.searchParams.get("shippingId") ?? "");
-          if (!e) return json(404, { message: "not found" });
-          const f = (d: Date) => `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-          return json(200, [{ trackingNumber: e.seguimiento, events: e.eventos.map((ev) => ({ event: ev.texto, date: f(ev.fecha), branch: "CABA", status: ev.texto })) }]);
+        if (p === "/correo/shipping/tracking" && req.method === "GET") {
+          const id = String(body.shippingId ?? u.searchParams.get("shippingId") ?? "");
+          if (!id) return errCorreo(400, "shippingId requerido");
+          const e = envios.get(id);
+          if (!e) return json(200, { date: new Date().toISOString(), error: "No existe el cliente o pedido", code: "0" });
+          const f = (d: Date) => { const a = new Date(d.getTime() - 3 * 3600_000); return `${String(a.getUTCDate()).padStart(2, "0")}-${String(a.getUTCMonth() + 1).padStart(2, "0")}-${a.getUTCFullYear()} ${String(a.getUTCHours()).padStart(2, "0")}:${String(a.getUTCMinutes()).padStart(2, "0")}`; };
+          return json(200, [{ id: String(seq.n), productId: "CP", trackingNumber: e.seguimiento, events: [...e.eventos].reverse().map((ev) => ({ event: ev.texto, date: f(ev.fecha), branch: "CORREO ARGENTINO", status: "", sign: "" })) }]);
         }
       }
 
@@ -271,7 +359,7 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
   const dir = servidor.address() as { port: number };
   return {
     url: `http://${host}:${dir.port}`,
-    envios, mensajes, avanzar,
+    envios, correo, rotuloCorreo, llamadas, mensajes, avanzar,
     cerrar: () => new Promise<void>((r) => servidor.close(() => r())),
   };
 }

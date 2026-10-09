@@ -1,11 +1,12 @@
 "use client";
-import { NOMBRE_TRANSPORTE, TRANSPORTES, type AjusteTransportes, type EnviosEnElDia, type OrigenEnvios, type PaqueteEnvios } from "@isu/shared";
-import { Campo, Casilla, claseEntrada, Tarjeta } from "./ui";
+import { armarBolsa, leerPaqueteEnvios, NOMBRE_TRANSPORTE, TRANSPORTES, type AjusteTransportes, type EnviosEnElDia, type OrigenEnvios, type PaqueteEnvios } from "@isu/shared";
+import { Boton, Campo, Casilla, claseEntrada, Tarjeta } from "./ui";
 
 /*
  * Ajustes de envíos (etapa 4): qué transporte y servicio se ofrece y con qué
- * recargo, desde dónde salen los paquetes, cómo se calcula el paquete, los
- * envíos en el día y los avisos por WhatsApp. Las credenciales de cada
+ * recargo, desde dónde salen los paquetes, cómo se arma el paquete (etapa 15:
+ * todo el pedido en una bolsa, la más chica en la que entra), los envíos en
+ * el día y los avisos por WhatsApp. Las credenciales de cada
  * transporte NO van acá: son variables del servidor.
  */
 export interface ValoresEnvios {
@@ -16,7 +17,8 @@ const DIAS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 export function AjustesEnvios({ v, poner }: { v: ValoresEnvios; poner: (k: keyof ValoresEnvios, x: unknown) => void }) {
   const t = v.transportes;
   const o = v.origenEnvios;
-  const p = v.paqueteEnvios;
+  // El formato viejo (cajas por cantidad de prendas) se muestra ya pasado a bolsas.
+  const p = v.paqueteEnvios ? leerPaqueteEnvios(v.paqueteEnvios) : null;
   const d = v.enviosEnElDia;
   const num = (s: string) => (s === "" ? 0 : Number(s));
   return (
@@ -56,25 +58,41 @@ export function AjustesEnvios({ v, poner }: { v: ValoresEnvios; poner: (k: keyof
         </Tarjeta>
       )}
       {p && (
-        <Tarjeta titulo="Paquete (para cotizar)">
-          <p className="mb-3 text-xs text-tinta-tenue">Peso de cada prenda (si el producto no tiene el suyo) + la caja. La caja se elige por cantidad de prendas.</p>
-          <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Peso por prenda (g)"><input type="number" min={10} max={5000} className={claseEntrada} value={p.pesoPrendaGramos} onChange={(e) => poner("paqueteEnvios", { ...p, pesoPrendaGramos: num(e.target.value) })} /></Campo>
-            <Campo etiqueta="Peso de la caja (g)"><input type="number" min={0} max={5000} className={claseEntrada} value={p.pesoCajaGramos} onChange={(e) => poner("paqueteEnvios", { ...p, pesoCajaGramos: num(e.target.value) })} /></Campo>
+        <Tarjeta titulo="Paquete: todo en una bolsa">
+          <p className="mb-3 text-xs text-tinta-tenue">
+            Todo el pedido viaja en una bolsa: las prendas se apilan y se usa la bolsa más chica en la que entran. Se cotiza igual con todos los transportes.
+            Cada producto lleva su peso y medidas (en su ficha); el que no los tenga usa la prenda por defecto.
+          </p>
+          <p className="mb-2 text-sm font-bold">Prenda por defecto (doblada)</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {([["pesoGramos", "Peso (g)"], ["altoCm", "Grosor (cm)"], ["anchoCm", "Ancho (cm)"], ["largoCm", "Largo (cm)"]] as const).map(([k, e]) => (
+              <Campo key={k} etiqueta={e}>
+                <input type="number" min={1} className={claseEntrada} value={p.prendaPorDefecto[k]} onChange={(x) => poner("paqueteEnvios", { ...p, prendaPorDefecto: { ...p.prendaPorDefecto, [k]: num(x.target.value) } })} />
+              </Campo>
+            ))}
           </div>
-          <div className="mt-3 space-y-2">
-            {p.cajas.map((c, i) => {
-              const cambiar = (x: Partial<typeof c>) => poner("paqueteEnvios", { ...p, cajas: p.cajas.map((y, j) => (j === i ? { ...y, ...x } : y)) });
+          <p className="mb-2 mt-4 text-sm font-bold">Bolsas que usás</p>
+          <div className="space-y-2">
+            {p.bolsas.map((b, i) => {
+              const cambiar = (x: Partial<typeof b>) => poner("paqueteEnvios", { ...p, bolsas: p.bolsas.map((y, j) => (j === i ? { ...y, ...x } : y)) });
               return (
-                <div key={i} className="grid grid-cols-2 items-end gap-2 rounded-xl border border-linea p-2 sm:grid-cols-4">
-                  <Campo etiqueta="Hasta prendas"><input type="number" min={1} className={claseEntrada} value={c.hastaPrendas} onChange={(e) => cambiar({ hastaPrendas: num(e.target.value) })} /></Campo>
-                  <Campo etiqueta="Alto cm"><input type="number" min={1} className={claseEntrada} value={c.altoCm} onChange={(e) => cambiar({ altoCm: num(e.target.value) })} /></Campo>
-                  <Campo etiqueta="Ancho cm"><input type="number" min={1} className={claseEntrada} value={c.anchoCm} onChange={(e) => cambiar({ anchoCm: num(e.target.value) })} /></Campo>
-                  <Campo etiqueta="Largo cm"><input type="number" min={1} className={claseEntrada} value={c.largoCm} onChange={(e) => cambiar({ largoCm: num(e.target.value) })} /></Campo>
+                <div key={i} className="grid grid-cols-2 items-end gap-2 rounded-xl border border-linea p-2 sm:grid-cols-[1.4fr_1fr_1fr_1fr_auto]">
+                  <Campo etiqueta="Nombre"><input className={claseEntrada} maxLength={30} value={b.nombre} onChange={(e) => cambiar({ nombre: e.target.value })} /></Campo>
+                  <Campo etiqueta="Ancho cm"><input type="number" min={10} className={claseEntrada} value={b.anchoCm} onChange={(e) => cambiar({ anchoCm: num(e.target.value) })} /></Campo>
+                  <Campo etiqueta="Largo cm"><input type="number" min={10} className={claseEntrada} value={b.largoCm} onChange={(e) => cambiar({ largoCm: num(e.target.value) })} /></Campo>
+                  <Campo etiqueta="Peso g"><input type="number" min={0} className={claseEntrada} value={b.pesoGramos} onChange={(e) => cambiar({ pesoGramos: num(e.target.value) })} /></Campo>
+                  <Boton type="button" variante="texto" disabled={p.bolsas.length <= 1} aria-label={`Quitar la bolsa ${b.nombre}`}
+                    onClick={() => poner("paqueteEnvios", { ...p, bolsas: p.bolsas.filter((_, j) => j !== i) })}>Quitar</Boton>
                 </div>
               );
             })}
           </div>
+          {p.bolsas.length < 8 && (
+            <Boton type="button" variante="borde" className="mt-2" onClick={() => poner("paqueteEnvios", { ...p, bolsas: [...p.bolsas, { nombre: "Nueva", anchoCm: 40, largoCm: 50, pesoGramos: 25 }] })}>Agregar bolsa</Boton>
+          )}
+          <p className="mt-3 text-xs text-tinta-tenue" aria-live="polite">
+            Con la prenda por defecto: {[1, 3, 6, 12].map((n) => `${n} ${n === 1 ? "prenda" : "prendas"} → ${armarBolsa([{ ...p.prendaPorDefecto, cantidad: n }], p.bolsas).bolsa}`).join(" · ")}
+          </p>
         </Tarjeta>
       )}
       {d && (

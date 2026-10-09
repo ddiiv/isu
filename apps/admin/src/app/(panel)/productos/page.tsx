@@ -9,7 +9,7 @@ import { nombresCategorias, type Categoria, type FilaProducto } from "@/lib/cata
 
 const FILTROS: Array<[string, string]> = [
   ["todos", "Todos"], ["visibles", "Publicados"], ["ocultos", "Ocultos"], ["destacados", "Destacados"], ["nuevos", "Nuevos"], ["packs", "Se venden en pack"], ["sin_descripcion", "Sin descripción"],
-  ["sin_fotos", "Sin fotos"], ["agotados", "Agotados"], ["de_baja", "Dados de baja en Stocker"], ["eliminados", "Eliminados"],
+  ["sin_medidas", "Sin peso o medidas"], ["sin_fotos", "Sin fotos"], ["agotados", "Agotados"], ["de_baja", "Dados de baja en Stocker"], ["eliminados", "Eliminados"],
 ];
 
 function Productos() {
@@ -25,6 +25,8 @@ function Productos() {
   const { datos: cats } = useDatos<{ categorias: Categoria[] }>("categorias");
   const { datos: guias } = useDatos<{ guias: Array<{ id: number; nombre: string; tipo: string }> }>("guias-talles");
   const [elegidos, setElegidos] = useState<Set<number>>(new Set());
+  // Etapa 15: peso y medidas a varios a la vez (vacío = no se toca).
+  const [medidas, setMedidas] = useState<{ abierto: boolean; pesoGramos: string; altoCm: string; anchoCm: string; largoCm: string }>({ abierto: false, pesoGramos: "", altoCm: "", anchoCm: "", largoCm: "" });
   const aviso = useAviso();
   const nombres = nombresCategorias(cats?.categorias ?? []);
 
@@ -57,6 +59,13 @@ function Productos() {
       aviso.ok(`${elegidos.size} en Liquidación con ${porcentaje}% OFF. Se cambia o se termina en Descuentos.`);
       setElegidos(new Set());
     } catch (e) { aviso.error(e); }
+  }
+  async function aplicarMedidas() {
+    const cambios: Record<string, number> = {};
+    for (const k of ["pesoGramos", "altoCm", "anchoCm", "largoCm"] as const) if (medidas[k].trim()) cambios[k] = Math.max(1, Math.round(Number(medidas[k])));
+    if (!Object.keys(cambios).length) { aviso.error(new Error("Escribí al menos un valor.")); return; }
+    await masivo(cambios, "Peso y medidas guardados");
+    setMedidas({ abierto: false, pesoGramos: "", altoCm: "", anchoCm: "", largoCm: "" });
   }
   /** Etapa 10: eliminar (sale de la tienda y de las listas; Stocker no lo vuelve a publicar) y restaurar. */
   async function eliminar() {
@@ -130,8 +139,20 @@ function Productos() {
             {(guias?.guias ?? []).map((g) => <option key={g.id} value={g.id}>{g.nombre}</option>)}
             <option value="ninguna">Sin guía</option>
           </select>
+          <Boton variante="borde" aria-expanded={medidas.abierto} onClick={() => setMedidas((m) => ({ ...m, abierto: !m.abierto }))}>Peso y medidas…</Boton>
           <Boton variante="peligro" onClick={() => void eliminar()}>Eliminar…</Boton>
           <Boton variante="texto" onClick={() => setElegidos(new Set())}>Deseleccionar</Boton>
+          {medidas.abierto && (
+            <form className="flex w-full flex-wrap items-end gap-2 border-t border-marca/30 pt-3" onSubmit={(e) => { e.preventDefault(); void aplicarMedidas(); }}>
+              <span className="w-full text-xs text-tinta-suave">La prenda doblada, como va en la bolsa. Lo que dejes vacío no se cambia.</span>
+              {([["pesoGramos", "Peso (g)", 30000], ["altoCm", "Grosor (cm)", 100], ["anchoCm", "Ancho (cm)", 150], ["largoCm", "Largo (cm)", 150]] as const).map(([k, t, max]) => (
+                <label key={k} className="text-xs font-bold">{t}
+                  <input type="number" min={1} max={max} inputMode="numeric" className={`${claseEntrada} mt-1 w-28`} value={medidas[k]} onChange={(e) => setMedidas((m) => ({ ...m, [k]: e.target.value }))} />
+                </label>
+              ))}
+              <Boton type="submit">Aplicar a {elegidos.size}</Boton>
+            </form>
+          )}
         </div>
       )}
 
@@ -152,7 +173,8 @@ function Productos() {
                     <td className="px-3 py-2">
                       <Link href={`/productos/${p.slug}`} className="flex items-center gap-3">
                         <span className="size-12 shrink-0 overflow-hidden rounded-lg bg-fondo-suave">{p.foto && <img src={fotoUrl(p.foto)} alt="" className="size-full object-cover" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />}</span>
-                        <span><span className="font-bold text-marca hover:underline">{p.nombre}</span><br /><span className="text-xs text-tinta-tenue">{p.sku}{!p.enStocker && " · baja en Stocker"}{p.resenas > 0 && ` · ★ ${p.estrellas?.toFixed(1)} (${p.resenas})`}</span></span>
+                        <span><span className="font-bold text-marca hover:underline">{p.nombre}</span><br /><span className="text-xs text-tinta-tenue">{p.sku}{!p.enStocker && " · baja en Stocker"}{p.resenas > 0 && ` · ★ ${p.estrellas?.toFixed(1)} (${p.resenas})`}</span>
+                          {!p.conMedidas && <><br /><Insignia clase="bg-amber-50 text-amber-900">Sin peso o medidas</Insignia></>}</span>
                       </Link>
                     </td>
                     <td className="px-3 py-2 text-xs" data-etiqueta="Categorías">{p.categorias.map((c) => nombres.get(c)).filter(Boolean).join(", ") || <span className="text-oferta">Sin categoría</span>}</td>
