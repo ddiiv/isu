@@ -4,7 +4,8 @@ import { fecha, useDatos } from "@/lib/api";
 import { Boton, Cargando, claseEntrada, Mensaje, Titulo } from "@/components/ui";
 
 interface Registro { id: number; actor: string; accion: string; entidad: string; entidadId: string | null; detalle: unknown; ip: string | null; creadoEn: string }
-const ENTIDADES = ["", "admin", "pedido", "producto", "categoria", "descuento", "guia_talles", "cliente", "ajuste", "catalogo", "color"];
+// «datos cliente»: quién abrió datos de clientes (pedidos, clientes, envíos) — etapa 15.
+const ENTIDADES = ["", "datos_cliente", "admin", "pedido", "envio", "producto", "categoria", "descuento", "guia_talles", "cliente", "ajuste", "catalogo", "color"];
 
 /* Quién hizo qué y cuándo. No se puede editar ni borrar (lo impide la base). */
 export default function Auditoria() {
@@ -15,7 +16,7 @@ export default function Auditoria() {
     <>
       <Titulo>Auditoría</Titulo>
       <select className={`${claseEntrada} mb-4 max-w-72`} value={entidad} onChange={(e) => { setEntidad(e.target.value); setPagina(1); }} aria-label="Filtrar">
-        {ENTIDADES.map((e) => <option key={e} value={e}>{e ? e.replace("_", " ") : "Todo"}</option>)}
+        {ENTIDADES.map((e) => <option key={e} value={e}>{e === "datos_cliente" ? "Quién vio datos de clientes" : e ? e.replace("_", " ") : "Todo"}</option>)}
       </select>
       <Mensaje>{error}</Mensaje>
       {!datos ? <Cargando /> : (

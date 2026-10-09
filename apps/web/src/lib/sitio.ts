@@ -13,5 +13,5 @@ export const SITIO = {
 export const RUTAS_RESERVADAS = new Set([
   "terminos", "devoluciones", "privacidad", "arrepentimiento", "locales", "buscar", "carrito",
   "checkout", "cuenta", "ingresar", "registro", "producto", "api", "admin", "ayuda", "envios",
-  "nuevos", "destacados", "outfits", "mayorista",
+  "nuevos", "destacados", "outfits", "mayorista", "venta-por-mayor", "contacto", "nosotros",
 ]);

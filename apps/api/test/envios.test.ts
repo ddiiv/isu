@@ -240,8 +240,20 @@ describe("pedido con transporte", () => {
     expect(p.sucursal_envio.id).toBe("an14061");
     expect(p.avisos_whatsapp).toBe(true);
     expect(p.envio).toBe(o.precio);
-    expect(p.paquete_envio.pesoGramos).toBe(2 * 600 + 150); // peso de la prenda + la caja
+    // Etapa 15: todo en una bolsa. El buzo pesa 600 g y no tiene medidas: usa las de la prenda por defecto (3 × 25 × 30).
+    expect(p.paquete_envio).toMatchObject({ pesoGramos: 2 * 600 + 25, altoCm: 6, anchoCm: 25, largoCm: 30, bolsa: "Mediana", entra: true });
     expect(stockerRecibidos.at(-1)!.envio).toEqual({ tipo: "andreani" });
+  });
+  it("con el peso y las medidas del producto, el paquete sale de ellos (y cambia la bolsa)", async () => {
+    await pool.query("UPDATE tienda.productos SET alto_cm = 2, ancho_cm = 20, largo_cm = 25, peso_gramos = 300 WHERE stocker_id = $1", [BASE + 1]);
+    try {
+      const r = await post("/v1/pedidos", pedido("med1", { opcion: "oca:domicilio" }));
+      expect(r.statusCode, r.body).toBe(201);
+      const { rows } = await pool.query("SELECT paquete_envio FROM tienda.pedidos WHERE numero = $1", [r.json().numero]);
+      expect(rows[0].paquete_envio).toMatchObject({ pesoGramos: 2 * 300 + 15, altoCm: 4, anchoCm: 20, largoCm: 25, bolsa: "Chica" });
+    } finally {
+      await pool.query("UPDATE tienda.productos SET alto_cm = NULL, ancho_cm = NULL, largo_cm = NULL, peso_gramos = 600 WHERE stocker_id = $1", [BASE + 1]);
+    }
   });
   it("el precio del envío lo pone la API aunque el navegador mande otro", async () => {
     const r = await post("/v1/pedidos", pedido("ok2", { opcion: "oca:domicilio", precio: 1 }));
@@ -339,5 +351,173 @@ describe("backoffice de envíos", () => {
     const n = (await post("/v1/pedidos", pedido("sinpagar", { opcion: "oca:domicilio" }))).json().numero;
     const r = await post("/v1/admin/envios/preparar", { numeros: [n] }, adm(adminOperador));
     expect(r.json().resultados[0].ok).toBe(false);
+  });
+});
+
+/*
+ * Etapa 15: Correo Argentino con la API de MiCorreo. «Preparar» lo carga en
+ * MiCorreo (sin número: el rótulo se paga e imprime allá) y el número del
+ * rótulo se carga después en el backoffice.
+ */
+describe("Correo Argentino (MiCorreo) en el backoffice", () => {
+  const pagado = async (n: string) => {
+    const numero = (await post("/v1/pedidos", pedido(n, { opcion: "correo_argentino:domicilio" }))).json().numero as string;
+    const { rows } = await pool.query("SELECT total FROM tienda.pedidos WHERE numero = $1", [numero]);
+    expect((await post(`/v1/admin/pedidos/${numero}/pago`, { medio: "transferencia", monto: rows[0].total, referencia: `QA-CA-${n}` }, adm(adminOperador))).statusCode).toBe(200);
+    return numero;
+  };
+  const envio = async (numero: string) => (await pool.query(
+    "SELECT e.* FROM tienda.envios e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1 AND e.activo", [numero])).rows[0];
+  let numero = "", otro = "";
+  beforeAll(async () => { numero = await pagado("ca1"); otro = await pagado("ca2"); });
+
+  it("preparar lo carga en MiCorreo con el paquete cotizado, sin número todavía (ni a Stocker)", async () => {
+    const r = await post("/v1/admin/envios/preparar", { numeros: [numero, otro] }, adm(adminOperador));
+    expect(r.statusCode, r.body).toBe(200);
+    for (const res of r.json().resultados) expect(res).toMatchObject({ ok: true, seguimiento: null, etiqueta: false, portal: `${sim.url}/correo/portal` });
+    const e = await envio(numero);
+    expect(e.seguimiento).toBeNull();
+    // La referencia en MiCorreo es el id del envío: única por intento.
+    expect(e.externo_id).toBe(String(e.id));
+    const cargado = sim.correo.get(e.externo_id)!;
+    const { rows } = await pool.query("SELECT paquete_envio FROM tienda.pedidos WHERE numero = $1", [numero]);
+    const pq = rows[0].paquete_envio;
+    expect(cargado.cuerpo).toMatchObject({ orderNumber: numero, recipient: { email: "qa-envio-ca1@test.com" },
+      shipping: { deliveryType: "D", productType: "CP", weight: pq.pesoGramos, height: pq.altoCm, width: pq.anchoCm, length: pq.largoCm } });
+    expect(enviados.some((x) => x.nombre === "envio" && x.datos.numero === numero)).toBe(false);
+    const ev = await pool.query("SELECT detalle FROM tienda.pedido_eventos e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1 ORDER BY e.id DESC LIMIT 1", [numero]);
+    expect(ev.rows[0].detalle).toMatch(/MiCorreo/);
+  });
+  it("en Etiquetados figura sin número, con su bolsa y el enlace a MiCorreo; no hay etiqueta para bajar", async () => {
+    const r = await get("/v1/admin/envios?vista=etiquetados", adm(adminOperador));
+    const f = r.json().envios.find((x: { numero: string }) => x.numero === numero);
+    expect(f).toMatchObject({ faltaNumero: true, seguimiento: null, bolsa: "Mediana", bolsaNoEntra: false });
+    expect(r.json().portales.correo_argentino).toBe(`${sim.url}/correo/portal`);
+    const pdf = await get(`/v1/admin/envios/etiquetas?numeros=${numero}`, adm(adminOperador));
+    expect(pdf.statusCode).toBe(404);
+    expect(pdf.json().mensaje).toMatch(/MiCorreo/);
+  });
+  it("cargar el número: sólo operador, con formato válido y sólo en envíos de Correo", async () => {
+    expect((await post(`/v1/admin/envios/${numero}/seguimiento`, { seguimiento: "000500012345678ABCD" })).statusCode).toBe(401);
+    expect((await post(`/v1/admin/envios/${numero}/seguimiento`, { seguimiento: "000500012345678ABCD" }, adm(adminLectura))).statusCode).toBe(403);
+    for (const malo of ["123", "0005 0001 2345", "<script>", "x".repeat(41)]) {
+      expect((await post(`/v1/admin/envios/${numero}/seguimiento`, { seguimiento: malo }, adm(adminOperador))).statusCode, malo).toBe(400);
+    }
+    expect((await post("/v1/admin/envios/ISU-99999/seguimiento", { seguimiento: "000500012345678ABCD" }, adm(adminOperador))).statusCode).toBe(404);
+  });
+  it("un número que MiCorreo no conoce se guarda igual, pero avisa que se revise", async () => {
+    const r = await post(`/v1/admin/envios/${numero}/seguimiento`, { seguimiento: "0005000noexiste1" }, adm(adminOperador));
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ seguimiento: "0005000NOEXISTE1", aviso: expect.stringMatching(/no encuentra/) });
+  });
+  it("con el número del rótulo: lo corrige, se lo pasa a Stocker, queda auditado y el envío ya se puede seguir", async () => {
+    const e = await envio(numero);
+    const tn = sim.rotuloCorreo(e.externo_id)!;
+    const r = await post(`/v1/admin/envios/${numero}/seguimiento`, { seguimiento: tn.toLowerCase() }, adm(adminOperador));
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, seguimiento: tn, aviso: null });
+    expect((await envio(numero)).seguimiento).toBe(tn);
+    expect(enviados.some((x) => x.nombre === "envio" && x.datos.numero === numero && x.datos.seguimiento === tn && x.datos.tipo === "correo_argentino")).toBe(true);
+    const a = await pool.query("SELECT detalle FROM tienda.auditoria WHERE accion = 'cargar_seguimiento' AND detalle->>'numero' = $1 ORDER BY id DESC LIMIT 1", [numero]);
+    expect(a.rows[0].detalle).toMatchObject({ seguimiento: tn, antes: "0005000NOEXISTE1" });
+    const pub = await get(`/v1/seguimiento/${numero}?t=${firmaSeguimiento(numero, INTERNO)}`);
+    expect(pub.json().envio).toMatchObject({ transporte: "correo_argentino", seguimiento: tn, url: expect.stringMatching(/^https:\/\/www\.correoargentino\.com\.ar\//) });
+    const lista = await get("/v1/admin/envios?vista=etiquetados", adm(adminOperador));
+    expect(lista.json().envios.find((x: { numero: string }) => x.numero === numero).faltaNumero).toBe(false);
+    // El mismo número en otro pedido: no.
+    const rep = await post(`/v1/admin/envios/${otro}/seguimiento`, { seguimiento: tn }, adm(adminOperador));
+    expect(rep.statusCode).toBe(409);
+    expect(rep.json().mensaje).toMatch(/ya es de otro pedido/);
+  });
+  it("sin número no se sigue; despachado sin número va a Problemas; ya despachado con número no se cambia", async () => {
+    await pool.query("UPDATE tienda.envios e SET despachado_en = now() FROM tienda.pedidos p WHERE p.id = e.pedido_id AND p.numero = ANY($1::text[]) AND e.activo", [[numero, otro]]);
+    const problemas = (await get("/v1/admin/envios?vista=problemas", adm(adminOperador))).json().envios.map((x: { numero: string }) => x.numero);
+    expect(problemas).toContain(otro);
+    expect(problemas).not.toContain(numero);
+    const enCamino = (await get("/v1/admin/envios?vista=en_camino", adm(adminOperador))).json().envios.map((x: { numero: string }) => x.numero);
+    expect(enCamino).toContain(numero);
+    expect(enCamino).not.toContain(otro);
+    const r = await post(`/v1/admin/envios/${numero}/seguimiento`, { seguimiento: "000500099999999ZZZZ" }, adm(adminOperador));
+    expect(r.statusCode).toBe(409);
+    // Al que salió sin número todavía se le puede cargar.
+    const tn2 = sim.rotuloCorreo((await envio(otro)).externo_id)!;
+    expect((await post(`/v1/admin/envios/${otro}/seguimiento`, { seguimiento: tn2 }, adm(adminOperador))).statusCode).toBe(200);
+  });
+  it("descartar y volver a preparar lo carga otra vez en MiCorreo con otra referencia", async () => {
+    const n = await pagado("ca3");
+    await post("/v1/admin/envios/preparar", { numeros: [n] }, adm(adminOperador));
+    const antes = (await envio(n)).externo_id;
+    const d = await post(`/v1/admin/envios/${n}/descartar`, { motivo: "cambió la dirección" }, adm(adminOperador));
+    expect(d.json().aviso).toMatch(/MiCorreo/);
+    const r = await post("/v1/admin/envios/preparar", { numeros: [n] }, adm(adminOperador));
+    expect(r.json().resultados[0].ok, r.body).toBe(true);
+    const despues = (await envio(n)).externo_id;
+    expect(despues).not.toBe(antes);
+    expect(sim.correo.has(despues)).toBe(true);
+  });
+});
+
+describe("datos de clientes: sólo el cliente o alguien del backoffice identificado", () => {
+  let numero = "";
+  beforeAll(async () => { numero = (await post("/v1/pedidos", pedido("datos1", { opcion: "oca:domicilio" }))).json().numero; });
+
+  it("en la tienda, el pedido no se ve sin la sesión de su dueño o el enlace de su pedido", async () => {
+    const r = await get(`/v1/pedidos/${numero}`);
+    expect(r.statusCode).not.toBe(200);
+    expect(r.body).not.toContain("qa-envio-datos1");
+    expect((await get(`/v1/pedidos/${numero}`, { "x-isu-acceso": "A".repeat(32) })).statusCode).not.toBe(200);
+  });
+  it("en el backoffice, sin sesión: 401; y queda registrado quién abrió los datos (una vez por hora)", async () => {
+    expect((await get(`/v1/admin/pedidos/${numero}`)).statusCode).toBe(401);
+    expect((await get("/v1/admin/clientes")).statusCode).toBe(401);
+    const cuenta = async () => (await pool.query(
+      "SELECT count(*)::int AS n FROM tienda.auditoria WHERE accion = 'ver_datos_cliente' AND entidad = 'datos_cliente' AND entidad_id = $1 AND actor = 'qa-envio-lectura@test.com'", [`pedido ${numero}`])).rows[0].n;
+    expect(await cuenta()).toBe(0);
+    expect((await get(`/v1/admin/pedidos/${numero}`, adm(adminLectura))).statusCode).toBe(200);
+    expect((await get(`/v1/admin/pedidos/${numero}`, adm(adminLectura))).statusCode).toBe(200);
+    expect(await cuenta()).toBe(1);
+    expect((await get("/v1/admin/clientes?q=qa-envio", adm(adminLectura))).statusCode).toBe(200);
+    const b = await pool.query("SELECT 1 FROM tienda.auditoria WHERE accion = 'ver_datos_cliente' AND entidad_id = 'clientes buscar:qa-envio' AND actor = 'qa-envio-lectura@test.com'");
+    expect(b.rowCount).toBe(1);
+  });
+});
+
+describe("peso y medidas de los productos (backoffice)", () => {
+  const id = async () => (await pool.query("SELECT id FROM tienda.productos WHERE stocker_id = $1", [BASE + 1])).rows[0].id as number;
+  it("se cargan en el producto (y de a muchos), y el filtro «sin peso o medidas» los encuentra", async () => {
+    const pid = await id();
+    const lista = async () => (await get("/v1/admin/productos?filtro=sin_medidas&pagina=1", adm(adminOperador))).json().productos.map((p: { id: number }) => p.id);
+    expect(await lista()).toContain(pid);
+    expect((await app.inject({ method: "PATCH", url: `/v1/admin/productos/${pid}`, payload: { altoCm: 0 }, headers: { ...IP, ...adm(adminOperador) } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PATCH", url: `/v1/admin/productos/${pid}`, payload: { altoCm: 3 }, headers: { ...IP, ...adm(adminLectura) } })).statusCode).toBe(403);
+    const r = await post("/v1/admin/productos/masivo", { ids: [pid], cambios: { pesoGramos: 650, altoCm: 5, anchoCm: 30, largoCm: 35 } }, adm(adminOperador));
+    expect(r.statusCode, r.body).toBe(200);
+    const d = (await get(`/v1/admin/productos/${pid}`, adm(adminOperador))).json().producto;
+    expect(d).toMatchObject({ pesoGramos: 650, altoCm: 5, anchoCm: 30, largoCm: 35 });
+    expect(await lista()).not.toContain(pid);
+    const resumen = (await get("/v1/admin/resumen", adm(adminOperador))).json();
+    expect(typeof resumen.catalogo.sin_medidas).toBe("number");
+    await pool.query("UPDATE tienda.productos SET alto_cm = NULL, ancho_cm = NULL, largo_cm = NULL, peso_gramos = 600 WHERE id = $1", [pid]);
+  });
+  it("Ajustes: las bolsas se validan (al menos una, medidas reales) y son del dueño", async () => {
+    const a = await pool.query("INSERT INTO tienda.admins (email, nombre, hash, rol, totp_activo, debe_cambiar_clave) VALUES ('qa-envio-dueno@test.com', 'QA', 'x', 'dueno', true, false) RETURNING id");
+    const dueno = await crearSesionAdmin(pool, a.rows[0].id, true, "10.8.8.8", null);
+    const antes = (await pool.query("SELECT valor FROM tienda.ajustes WHERE clave = 'paqueteEnvios'")).rows[0].valor;
+    const bien = { prendaPorDefecto: { pesoGramos: 350, altoCm: 3, anchoCm: 25, largoCm: 30 }, bolsas: [{ nombre: "Única", anchoCm: 40, largoCm: 50, pesoGramos: 20 }] };
+    const put = (v: unknown, t = dueno) => app.inject({ method: "PUT", url: "/v1/admin/ajustes", payload: { paqueteEnvios: v } as object, headers: { ...IP, ...adm(t) } });
+    try {
+      expect((await put(bien, adminOperador)).statusCode).toBe(403);
+      expect((await put({ ...bien, bolsas: [] })).statusCode).toBe(400);
+      expect((await put({ ...bien, bolsas: [{ nombre: "X", anchoCm: 2, largoCm: 50, pesoGramos: 20 }] })).statusCode).toBe(400);
+      // El formato viejo ya no se guarda (se lee, pero se edita como bolsas).
+      expect((await put({ pesoPrendaGramos: 300, pesoCajaGramos: 100, cajas: [{ hastaPrendas: 9, altoCm: 9, anchoCm: 9, largoCm: 9 }] })).statusCode).toBe(400);
+      const r = await put(bien);
+      expect(r.statusCode, r.body).toBe(200);
+      const n = (await post("/v1/pedidos", pedido("bolsa1", { opcion: "oca:domicilio" }))).json().numero;
+      const { rows } = await pool.query("SELECT paquete_envio FROM tienda.pedidos WHERE numero = $1", [n]);
+      expect(rows[0].paquete_envio).toMatchObject({ bolsa: "Única", pesoGramos: 2 * 600 + 20 });
+    } finally {
+      await pool.query("UPDATE tienda.ajustes SET valor = $1 WHERE clave = 'paqueteEnvios'", [JSON.stringify(antes)]);
+    }
   });
 });

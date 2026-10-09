@@ -13,7 +13,8 @@ interface Detalle {
     descripcion: string | null; descripcionStocker: string | null; seoTitulo: string | null; seoDescripcion: string | null;
     categoriaStocker: string | null; generoStocker: string | null; categoriasFijas: boolean;
     destacado: boolean; destacadoOrden: number; nuevo: boolean; categorias: number[];
-    guiaTallesId: number | null; parteOutfit: string | null; parteOutfitSugerida: string | null; pesoGramos: number | null;
+    guiaTallesId: number | null; parteOutfit: string | null; parteOutfitSugerida: string | null;
+    pesoGramos: number | null; altoCm: number | null; anchoCm: number | null; largoCm: number | null;
     pack: boolean; packOrden: number; composicion: string | null; resenas: { cantidad: number; promedio: number | null };
     eliminadoEn: string | null; eliminadoPor: string | null;
   };
@@ -47,11 +48,20 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
   const cambiar = <K extends keyof Form>(k: K, v: Form[K]) => setF({ ...f, [k]: v });
   const original = d.producto;
   const sucio = JSON.stringify(f) !== JSON.stringify(original);
+  const faltanMedidas = [f.pesoGramos, f.altoCm, f.anchoCm, f.largoCm].some((v) => v === null);
+  const medida = (k: "pesoGramos" | "altoCm" | "anchoCm" | "largoCm", etiqueta: string, max: number, ayuda?: string) => (
+    <Campo etiqueta={etiqueta} ayuda={ayuda} error={f[k] === null ? "Falta" : null}>
+      <input type="number" min={1} max={max} inputMode="numeric" required className={claseEntrada} disabled={!operador}
+        value={f[k] ?? ""} onChange={(e) => cambiar(k, e.target.value ? Math.max(1, Math.round(Number(e.target.value))) : null)} />
+    </Campo>
+  );
 
   async function guardar() {
     if (!f) return;
     const cambios: Record<string, unknown> = {};
-    const campos = ["nombre", "descripcion", "seoTitulo", "seoDescripcion", "visible", "destacado", "destacadoOrden", "nuevo", "guiaTallesId", "parteOutfit", "pesoGramos", "pack", "packOrden", "composicion"] as const;
+    // Etapa 15: todos los productos llevan peso y medidas (con eso se cotiza el envío con cada transporte).
+    if (faltanMedidas) { aviso.error(new Error("Completá el peso y las tres medidas de la prenda doblada: con eso se cotiza el envío.")); return; }
+    const campos = ["nombre", "descripcion", "seoTitulo", "seoDescripcion", "visible", "destacado", "destacadoOrden", "nuevo", "guiaTallesId", "parteOutfit", "pesoGramos", "altoCm", "anchoCm", "largoCm", "pack", "packOrden", "composicion"] as const;
     for (const k of campos) if (JSON.stringify(f[k]) !== JSON.stringify(original[k])) cambios[k] = f[k];
     if (JSON.stringify([...f.categorias].sort()) !== JSON.stringify([...original.categorias].sort())) cambios.categorias = f.categorias;
     if (!Object.keys(cambios).length) return;
@@ -194,11 +204,21 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
             </select>
           </Tarjeta>
 
-          <Tarjeta titulo="Peso para el envío">
-            <Campo etiqueta="Gramos por prenda" ayuda="Vacío = el peso por defecto de Ajustes. Sirve para cotizar prendas pesadas (camperas, jeans).">
-              <input type="number" min={10} max={30000} inputMode="numeric" className={`${claseEntrada} w-36`} disabled={!operador}
-                value={f.pesoGramos ?? ""} onChange={(e) => cambiar("pesoGramos", e.target.value ? Math.round(Number(e.target.value)) : null)} />
-            </Campo>
+          <Tarjeta titulo="Peso y medidas para el envío">
+            <p className="mb-3 text-xs text-tinta-tenue">
+              Una prenda doblada, como va en la bolsa. Con esto se cotiza el envío con todos los transportes: todo el pedido viaja en una sola bolsa.
+            </p>
+            {faltanMedidas && (
+              <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900 ring-1 ring-amber-200">
+                Faltan datos. Hasta que los cargues, se cotiza con la prenda por defecto de Ajustes → Envíos.
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              {medida("pesoGramos", "Peso (g)", 30000)}
+              {medida("altoCm", "Grosor (cm)", 100, "Doblada, de alto")}
+              {medida("anchoCm", "Ancho (cm)", 150)}
+              {medida("largoCm", "Largo (cm)", 150)}
+            </div>
           </Tarjeta>
 
           <Colores d={d} operador={operador} recargar={recargar} aviso={aviso} />

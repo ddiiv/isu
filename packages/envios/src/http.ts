@@ -1,3 +1,5 @@
+import http from "node:http";
+import https from "node:https";
 import { XMLParser } from "fast-xml-parser";
 
 /*
@@ -41,6 +43,43 @@ export async function pedir<T = unknown>(transporte: string, url: string, o: Opc
   if (tipo === "binario") return Buffer.from(await r.arrayBuffer()) as T;
   if (tipo === "texto") return (await r.text()) as T;
   try { return (await r.json()) as T; } catch { throw new ErrorTransporte(transporte, "respuesta que no es JSON", r.status, false); }
+}
+
+/**
+ * GET con cuerpo JSON: MiCorreo pide así el seguimiento (/shipping/tracking)
+ * y fetch no deja mandar cuerpo en un GET. Mismas reglas que pedir(): tiempo
+ * máximo, sin redirecciones, tope de tamaño y el mismo error.
+ */
+export function pedirGetConCuerpo<T = unknown>(transporte: string, url: string, cuerpo: unknown, headers: Record<string, string> = {}, timeoutMs = 15_000): Promise<T> {
+  const u = new URL(url);
+  const lib = u.protocol === "https:" ? https : u.protocol === "http:" ? http : null;
+  if (!lib) return Promise.reject(new ErrorTransporte(transporte, "dirección inválida", null, false));
+  const datos = Buffer.from(JSON.stringify(cuerpo));
+  return new Promise<T>((ok, mal) => {
+    const req = lib.request(u, {
+      method: "GET", timeout: timeoutMs,
+      headers: { ...headers, accept: "application/json", "content-type": "application/json", "content-length": String(datos.length) },
+    }, (res) => {
+      const partes: Buffer[] = [];
+      let largo = 0;
+      res.on("data", (c: Buffer) => {
+        largo += c.length;
+        if (largo > 2_000_000) { req.destroy(new Error("respuesta demasiado grande")); return; }
+        partes.push(c);
+      });
+      res.on("end", () => {
+        const st = res.statusCode ?? 0;
+        const txt = Buffer.concat(partes).toString("utf8");
+        if (st >= 300 && st < 400) return mal(new ErrorTransporte(transporte, `HTTP ${st} (redirección)`, st, false));
+        if (st < 200 || st >= 300) return mal(new ErrorTransporte(transporte, `HTTP ${st} ${txt.slice(0, 300)}`, st, st >= 500 || st === 429));
+        try { ok(JSON.parse(txt) as T); } catch { mal(new ErrorTransporte(transporte, "respuesta que no es JSON", st, false)); }
+      });
+      res.on("error", (e) => mal(new ErrorTransporte(transporte, `sin respuesta (${e.message})`)));
+    });
+    req.on("timeout", () => req.destroy(new Error("tiempo agotado")));
+    req.on("error", (e) => mal(new ErrorTransporte(transporte, `sin respuesta (${e.message})`)));
+    req.end(datos);
+  });
 }
 
 /** Un token que vence: se pide una vez y se reusa hasta un minuto antes de que expire. */

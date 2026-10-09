@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useCarrito } from "./Carrito";
 import { BarraEnvioGratis, CampoCupon, LineasCarrito, OpcionesPago, Totales } from "./LineasCarrito";
 import { IconoBolsa, IconoCerrar } from "../iconos";
+import { useSalida } from "@/lib/animacion";
 
 /*
  * Carrito lateral: se abre al agregar una prenda. Muestra cuánto falta para
@@ -15,6 +16,8 @@ import { IconoBolsa, IconoCerrar } from "../iconos";
 export function CajonCarrito({ descuento, montoMinimo, cuotas, medios }: { descuento: number; montoMinimo: number; cuotas: number; medios: string[] }) {
   const { abierto, cerrar, lineas, cotizacion, cotizar, unidades } = useCarrito();
   const panel = useRef<HTMLDivElement>(null);
+  // Etapa 14: entra y sale deslizándose desde la derecha.
+  const { montado, saliendo } = useSalida(abierto);
 
   useEffect(() => {
     if (!abierto) return;
@@ -27,15 +30,15 @@ export function CajonCarrito({ descuento, montoMinimo, cuotas, medios }: { descu
     // Dependencias a propósito: se cotiza al abrir y cuando cambian las cantidades
   }, [abierto, unidades]);
 
-  if (!abierto || typeof document === "undefined") return null;
+  if (!montado || typeof document === "undefined") return null;
   const bloqueado = !lineas.length || (cotizacion?.problemas.length ?? 0) > 0;
   const faltaMinimo = cotizacion?.problemas.find((p) => p.tipo === "minimo");
 
   return createPortal(
-    <div className="fixed inset-0 z-50">
-      <button type="button" aria-label="Cerrar carrito" className="absolute inset-0 bg-black/40" onClick={cerrar} />
+    <div className={`fixed inset-0 z-50 ${saliendo ? "pointer-events-none" : ""}`} inert={saliendo}>
+      <button type="button" aria-label="Cerrar carrito" className={`absolute inset-0 bg-black/40 ${saliendo ? "animate-desvanece" : "animate-fundido"}`} onClick={cerrar} />
       <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="titulo-carrito"
-        className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-white shadow-2xl outline-none">
+        className={`absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-white shadow-2xl outline-none ${saliendo ? "animate-sale-der" : "animate-entra-der"}`}>
         <div className="flex items-center justify-between border-b border-linea px-5 py-4">
           <h2 id="titulo-carrito" className="text-2xl">Tu carrito {unidades > 0 && <span className="text-tinta-tenue">({unidades})</span>}</h2>
           <button type="button" onClick={cerrar} aria-label="Cerrar" className="rounded-full p-2 hover:bg-fondo-suave"><IconoCerrar /></button>

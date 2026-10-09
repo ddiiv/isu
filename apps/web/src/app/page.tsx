@@ -11,9 +11,18 @@ import { IconoBanco, IconoCamion, IconoFlecha, IconoLocal, IconoTarjeta } from "
 import { SITIO } from "@/lib/sitio";
 import { JsonLd } from "@/components/JsonLd";
 import { contextoSeo } from "@/lib/seo";
-import { maxPorcentajePack, envioYDevolucion } from "@isu/shared";
+import { maxPorcentajePack, envioYDevolucion, descripcionInicio } from "@isu/shared";
+import type { Metadata } from "next";
+import { destinoMayorista } from "@/lib/mayorista";
 
 export const revalidate = 300;
+
+/* Lo que se lee debajo de «Isuwaya» en Google: qué es, para quién y las condiciones de hoy. */
+export async function generateMetadata(): Promise<Metadata> {
+  const [config, categorias] = await Promise.all([obtenerConfig(), obtenerCategorias()]);
+  const description = descripcionInicio(categorias.map((c) => c.nombre), contextoSeo(config));
+  return { description, openGraph: { description } };
+}
 
 const FONDOS = ["bg-marca", "bg-tinta", "bg-ahorro"];
 
@@ -151,7 +160,10 @@ export default async function Inicio() {
           url: `${SITIO.url}/`,
           logo: `${SITIO.url}/icon.png`,
           description: SITIO.descripcion,
+          slogan: SITIO.lema,
           sameAs: [SITIO.instagram],
+          // La tienda por mayor es de la misma marca (etapa 13).
+          department: { "@type": "OnlineStore", name: `${SITIO.nombre} Mayorista`, url: destinoMayorista() },
           contactPoint: [{ "@type": "ContactPoint", contactType: "customer service", telephone: `+${config.whatsapp}`, email: config.email, availableLanguage: "es", areaServed: "AR" }],
           hasMerchantReturnPolicy: envioYDevolucion(contextoSeo(config)).hasMerchantReturnPolicy,
         },
@@ -176,7 +188,10 @@ export default async function Inicio() {
           <div className="space-y-4 text-lg text-tinta-suave">
             <p>Diseñamos y fabricamos indumentaria para hombre, mujer y niños desde hace más de 10 años. Por eso nuestros talles son reales y cumplidos, y el precio llega sin intermediarios.</p>
             <p>¿Dudas con un talle? Escribinos por WhatsApp y te ayudamos a elegir antes de comprar.</p>
-            <Link href="/locales" className="boton-borde mt-2">Visitá nuestros locales</Link>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/locales" className="boton-borde mt-2">Visitá nuestros locales</Link>
+              <Link href="/nosotros" className="boton-borde mt-2">Quiénes somos</Link>
+            </div>
           </div>
         </div>
       </section>

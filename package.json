@@ -31,6 +31,7 @@
     "demo:backoffice": "pnpm --filter @isu/worker build && node --env-file-if-exists=.env scripts/demo/backoffice-demo.mjs",
     "demo:transportes": "pnpm --filter @isu/envios build && node --env-file-if-exists=.env scripts/demo/transportes-simulado.mjs",
     "seo": "node scripts/seo.mjs",
+    "correo:cliente": "pnpm --filter @isu/envios build && node --env-file-if-exists=.env scripts/correo-cliente.mjs",
     "diagnostico": "node scripts/diagnostico.mjs",
     "revisar:pantallas": "node scripts/ci/revisar-pantallas.mjs",
     "start": "node scripts/todo-en-uno.mjs"

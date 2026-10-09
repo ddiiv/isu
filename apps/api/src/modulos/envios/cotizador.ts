@@ -1,8 +1,8 @@
 import type pg from "pg";
 import type { Redis } from "ioredis";
 import {
-  AjusteTransportes, cpEnRangos, EnviosEnElDia, NOMBRE_TRANSPORTE, OrigenEnvios, PaqueteEnvios, TRANSPORTES,
-  type MedioPago, type OpcionEnvio, type ServicioEnvio, type SucursalEnvio, type TransporteTienda,
+  AjusteTransportes, armarBolsa, cpEnRangos, EnviosEnElDia, leerPaqueteEnvios, NOMBRE_TRANSPORTE, OrigenEnvios, PAQUETE_DE_FABRICA, TRANSPORTES,
+  type MedioPago, type PaqueteEnvios, type OpcionEnvio, type ServicioEnvio, type SucursalEnvio, type TransporteTienda,
 } from "@isu/shared";
 import type { Cotizacion as CotizacionTransporte, Paquete, Transportes } from "@isu/envios";
 import { ErrorHttp } from "../../lib/errores.js";
@@ -30,15 +30,17 @@ export interface ConfigEnvios {
 const POR_DEFECTO: ConfigEnvios = {
   transportes: Object.fromEntries(TRANSPORTES.map((t) => [t, { activo: true, domicilio: t !== "cabify", sucursal: !["mercado_envios", "cabify"].includes(t), recargo: 0 }])) as AjusteTransportes,
   origen: { nombre: "Isuwaya", calle: "Bacacay", numero: "3231", piso: "", cp: "1406", localidad: "Flores", provincia: "CABA", email: "isu.isuwaya@gmail.com", telefono: "1168515444", cuit: "" },
-  paquete: { pesoPrendaGramos: 350, pesoCajaGramos: 150, cajas: [{ hastaPrendas: 99, altoCm: 20, anchoCm: 30, largoCm: 40 }] },
+  paquete: PAQUETE_DE_FABRICA,
   enElDia: { cps: "", dias: [], horaCorte: "14:00" },
   envioGratisDesde: null,
   costoEnvio: 790_000,
 };
-const ESQUEMAS = { transportes: AjusteTransportes, origenEnvios: OrigenEnvios, paqueteEnvios: PaqueteEnvios, enviosEnElDia: EnviosEnElDia } as const;
+const ESQUEMAS = { transportes: AjusteTransportes, origenEnvios: OrigenEnvios, enviosEnElDia: EnviosEnElDia } as const;
 
 export interface Destino { cp: string; provincia: string; localidad: string }
 export interface Carrito { lineas: Array<{ sku: string; cantidad: number; subtotal: number }>; filas: Map<string, Fila>; neto: number }
+/** Peso y medidas de una prenda (null = la de Ajustes) y cuántas van. */
+export interface PrendaDelPaquete { peso_gramos: number | null; alto_cm: number | null; ancho_cm: number | null; largo_cm: number | null; cantidad: number }
 
 const ZONA = "America/Argentina/Buenos_Aires";
 const DIAS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>;
@@ -76,31 +78,42 @@ export function crearCotizadorEnvios(deps: {
     for (const r of rows) {
       if (r.clave === "envioGratisDesde") c.envioGratisDesde = typeof r.valor === "number" ? r.valor : null;
       else if (r.clave === "costoEnvio") { if (typeof r.valor === "number") c.costoEnvio = r.valor; }
-      else {
+      else if (r.clave === "paqueteEnvios") {
+        // El formato viejo (cajas por cantidad de prendas) también se lee.
+        const pq = leerPaqueteEnvios(r.valor);
+        if (pq) c.paquete = pq;
+        else deps.log.warn({ clave: r.clave }, "ajuste de envíos inválido: se usa el valor por defecto");
+      } else {
         const esquema = ESQUEMAS[r.clave as keyof typeof ESQUEMAS];
         const v = esquema.safeParse(r.valor);
         if (!v.success) { deps.log.warn({ clave: r.clave }, "ajuste de envíos inválido: se usa el valor por defecto"); continue; }
         if (r.clave === "transportes") c.transportes = v.data as AjusteTransportes;
         if (r.clave === "origenEnvios") c.origen = v.data as OrigenEnvios;
-        if (r.clave === "paqueteEnvios") c.paquete = v.data as PaqueteEnvios;
         if (r.clave === "enviosEnElDia") c.enElDia = v.data as EnviosEnElDia;
       }
     }
     return c;
   }
 
-  /** El paquete: peso de cada prenda (o el de Ajustes) + la caja según cuántas prendas son. */
+  /**
+   * El paquete (etapa 15): todo el pedido en UNA bolsa, con el peso y las
+   * medidas de cada prenda (las que no las tienen, la prenda por defecto de
+   * Ajustes). Es el mismo para todos los transportes.
+   */
+  function paqueteDe(prendas: PrendaDelPaquete[], valorDeclarado: number, cfg: ConfigEnvios): Paquete {
+    const d = cfg.paquete.prendaPorDefecto;
+    const b = armarBolsa(prendas.map((x) => ({
+      pesoGramos: x.peso_gramos ?? d.pesoGramos, altoCm: x.alto_cm ?? d.altoCm, anchoCm: x.ancho_cm ?? d.anchoCm, largoCm: x.largo_cm ?? d.largoCm, cantidad: x.cantidad,
+    })), cfg.paquete.bolsas);
+    return { pesoGramos: b.pesoGramos, altoCm: b.altoCm, anchoCm: b.anchoCm, largoCm: b.largoCm, valorDeclarado, bolsa: b.bolsa, entra: b.entra };
+  }
   function paquete(carrito: Carrito, cfg: ConfigEnvios): Paquete {
-    let prendas = 0, gramos = cfg.paquete.pesoCajaGramos, valor = 0;
-    for (const l of carrito.lineas) {
+    const prendas = carrito.lineas.map((l) => {
       const f = carrito.filas.get(l.sku);
-      prendas += l.cantidad;
-      gramos += (f?.peso_gramos ?? cfg.paquete.pesoPrendaGramos) * l.cantidad;
-      valor += l.subtotal;
-    }
-    const cajas = [...cfg.paquete.cajas].sort((a, b) => a.hastaPrendas - b.hastaPrendas);
-    const caja = cajas.find((c) => prendas <= c.hastaPrendas) ?? cajas.at(-1)!;
-    return { pesoGramos: gramos, altoCm: caja.altoCm, anchoCm: caja.anchoCm, largoCm: caja.largoCm, valorDeclarado: Math.max(valor, carrito.neto) };
+      return { peso_gramos: f?.peso_gramos ?? null, alto_cm: f?.alto_cm ?? null, ancho_cm: f?.ancho_cm ?? null, largo_cm: f?.largo_cm ?? null, cantidad: l.cantidad };
+    });
+    const valor = carrito.lineas.reduce((t, l) => t + l.subtotal, 0);
+    return paqueteDe(prendas, Math.max(valor, carrito.neto), cfg);
   }
 
   const enElDiaPosible = (cp: string, cfg: ConfigEnvios) => {
@@ -183,6 +196,6 @@ export function crearCotizadorEnvios(deps: {
     return conCache(`isu:sucenv:${transporte}:${cp}:${provincia ?? ""}`, 12 * 3600, () => conTiempo(a.sucursales!(cp, provincia)));
   }
 
-  return { hayTransportes, config, paquete, opciones, elegir, sucursales, enElDiaPosible };
+  return { hayTransportes, config, paquete, paqueteDe, opciones, elegir, sucursales, enElDiaPosible };
 }
 export type CotizadorEnvios = ReturnType<typeof crearCotizadorEnvios>;

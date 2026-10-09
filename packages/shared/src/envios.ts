@@ -92,14 +92,104 @@ export const OrigenEnvios = z.object({
 }).strict();
 export type OrigenEnvios = z.infer<typeof OrigenEnvios>;
 
+/* Peso (g) y medidas (cm) de una prenda doblada, como va en la bolsa: alto = el grosor. */
+export const MedidasPrenda = z.object({
+  pesoGramos: z.number().int().min(10).max(30_000),
+  altoCm: z.number().int().min(1).max(100),
+  anchoCm: z.number().int().min(1).max(150),
+  largoCm: z.number().int().min(1).max(150),
+}).strict();
+export type MedidasPrenda = z.infer<typeof MedidasPrenda>;
+
+export const BolsaEnvio = z.object({
+  nombre: z.string().trim().min(1).max(30),
+  anchoCm: z.number().int().min(10).max(150),
+  largoCm: z.number().int().min(10).max(150),
+  pesoGramos: z.number().int().min(0).max(2000),
+}).strict();
+export type BolsaEnvio = z.infer<typeof BolsaEnvio>;
+
+/*
+ * Cómo se arma el paquete para cotizar (etapa 15): todo el pedido en UNA
+ * bolsa, la más chica en la que entran las prendas apiladas. Las prendas sin
+ * peso o medidas cargadas usan la prenda por defecto.
+ */
 export const PaqueteEnvios = z.object({
-  pesoPrendaGramos: z.number().int().min(10).max(5000),
-  pesoCajaGramos: z.number().int().min(0).max(5000),
-  cajas: z.array(z.object({
-    hastaPrendas: z.number().int().min(1).max(999), altoCm: z.number().min(1).max(200), anchoCm: z.number().min(1).max(200), largoCm: z.number().min(1).max(200),
-  }).strict()).min(1).max(10),
+  prendaPorDefecto: MedidasPrenda,
+  bolsas: z.array(BolsaEnvio).min(1).max(8),
 }).strict();
 export type PaqueteEnvios = z.infer<typeof PaqueteEnvios>;
+
+export const BOLSAS_DE_FABRICA: BolsaEnvio[] = [
+  { nombre: "Chica", anchoCm: 30, largoCm: 40, pesoGramos: 15 },
+  { nombre: "Mediana", anchoCm: 40, largoCm: 50, pesoGramos: 25 },
+  { nombre: "Grande", anchoCm: 50, largoCm: 60, pesoGramos: 40 },
+  { nombre: "Extra grande", anchoCm: 60, largoCm: 80, pesoGramos: 60 },
+];
+export const PAQUETE_DE_FABRICA: PaqueteEnvios = {
+  prendaPorDefecto: { pesoGramos: 350, altoCm: 3, anchoCm: 25, largoCm: 30 },
+  bolsas: BOLSAS_DE_FABRICA,
+};
+
+/** El ajuste guardado; el formato de antes (cajas por cantidad de prendas) se pasa a bolsas. */
+export function leerPaqueteEnvios(valor: unknown): PaqueteEnvios | null {
+  const v = PaqueteEnvios.safeParse(valor);
+  if (v.success) return v.data;
+  const viejo = z.object({ pesoPrendaGramos: z.number().int().min(10).max(30_000) }).passthrough().safeParse(valor);
+  if (!viejo.success) return null;
+  return { prendaPorDefecto: { ...PAQUETE_DE_FABRICA.prendaPorDefecto, pesoGramos: viejo.data.pesoPrendaGramos }, bolsas: BOLSAS_DE_FABRICA };
+}
+
+export interface PrendaParaBolsa { pesoGramos: number; altoCm: number; anchoCm: number; largoCm: number; cantidad: number }
+export interface BolsaArmada {
+  pesoGramos: number;
+  /** El grosor de lo que va en la bolsa. */
+  altoCm: number;
+  anchoCm: number;
+  largoCm: number;
+  prendas: number;
+  /** Qué bolsa usar al armar el paquete. */
+  bolsa: string;
+  /** false = no entra en ninguna: se cotiza con la más grande y el backoffice lo marca. */
+  entra: boolean;
+}
+
+/*
+ * Todo en una bolsa. Las prendas van apiladas; si la pila queda muy alta se
+ * reparte en 2 o 3 pilas una al lado de la otra (como se arma de verdad).
+ * La bolsa (un tubo cerrado en las puntas) rodea lo que lleva: para que
+ * entre, cada lado de la bolsa tiene que ser al menos el lado de la pila más
+ * su grosor. Se elige la bolsa más chica en la que entra.
+ */
+export function armarBolsa(prendas: PrendaParaBolsa[], bolsas: BolsaEnvio[]): BolsaArmada {
+  let grosor = 0, corto = 0, largo = 0, gramos = 0, n = 0;
+  for (const p of prendas) {
+    if (!(p.cantidad > 0)) continue;
+    grosor += p.altoCm * p.cantidad;
+    corto = Math.max(corto, Math.min(p.anchoCm, p.largoCm));
+    largo = Math.max(largo, Math.max(p.anchoCm, p.largoCm));
+    gramos += p.pesoGramos * p.cantidad;
+    n += p.cantidad;
+  }
+  const ordenadas = [...(bolsas.length ? bolsas : BOLSAS_DE_FABRICA)]
+    .map((b) => ({ ...b, a: Math.min(b.anchoCm, b.largoCm), l: Math.max(b.anchoCm, b.largoCm) }))
+    .sort((x, y) => x.a * x.l - y.a * y.l || x.pesoGramos - y.pesoGramos);
+  // Las formas de acomodar la pila: 1, 2 o 3 pilas (el grosor se reparte, el lado corto crece).
+  const formas = [1, 2, 3].map((k) => {
+    const alto = Math.max(1, Math.ceil(grosor / k));
+    const lados = [corto * k, largo].sort((x, y) => x - y) as [number, number];
+    return { alto, a: Math.max(1, Math.ceil(lados[0])), l: Math.max(1, Math.ceil(lados[1])) };
+  });
+  const cabe = (b: { a: number; l: number }, f: { alto: number; a: number; l: number }) => b.a >= f.a + f.alto && b.l >= f.l + f.alto;
+  for (const b of ordenadas) {
+    const f = formas.find((x) => cabe(b, x));
+    if (f) return { pesoGramos: gramos + b.pesoGramos, altoCm: f.alto, anchoCm: f.a, largoCm: f.l, prendas: n, bolsa: b.nombre, entra: true };
+  }
+  // No entra en ninguna: la más grande, con la forma más compacta.
+  const b = ordenadas.at(-1)!;
+  const f = [...formas].sort((x, y) => x.alto + x.a + x.l - (y.alto + y.a + y.l))[0]!;
+  return { pesoGramos: gramos + b.pesoGramos, altoCm: f.alto, anchoCm: f.a, largoCm: f.l, prendas: n, bolsa: b.nombre, entra: false };
+}
 
 export const EnviosEnElDia = z.object({
   // "1000-1499,1600-1899,1702"

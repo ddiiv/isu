@@ -33,4 +33,31 @@
 
   --radius-foto: 14px;
   --radius-control: 999px;
+
+  /*
+   * Movimiento (etapa 14): corto, suave y liviano. Sólo transform y opacidad
+   * (los mueve la placa de video, no recalculan la página). Quien pidió menos
+   * animaciones en su teléfono no ve ninguna (globals.css).
+   */
+  --ease-suave: cubic-bezier(0.22, 1, 0.36, 1);  /* llega frenando: lo que entra */
+  --ease-sale: cubic-bezier(0.4, 0, 1, 1);       /* se va acelerando: lo que sale */
+  --animate-fundido: fundido 280ms var(--ease-suave) both;
+  --animate-desvanece: desvanece 200ms var(--ease-sale) both;
+  --animate-sube: sube 320ms var(--ease-suave) both;
+  --animate-entra-izq: entra-izq 320ms var(--ease-suave) both;
+  --animate-sale-izq: sale-izq 220ms var(--ease-sale) both;
+  --animate-entra-der: entra-der 320ms var(--ease-suave) both;
+  --animate-sale-der: sale-der 220ms var(--ease-sale) both;
+  --animate-entra-abajo: entra-abajo 320ms var(--ease-suave) both;
+  --animate-desliza: desliza 260ms var(--ease-suave) both;
+
+  @keyframes fundido { from { opacity: 0; } }
+  @keyframes desvanece { to { opacity: 0; } }
+  @keyframes sube { from { opacity: 0; transform: translateY(12px); } }
+  @keyframes entra-izq { from { transform: translateX(-100%); } }
+  @keyframes sale-izq { to { transform: translateX(-100%); } }
+  @keyframes entra-der { from { transform: translateX(100%); } }
+  @keyframes sale-der { to { transform: translateX(100%); } }
+  @keyframes entra-abajo { from { transform: translateY(100%); } }
+  @keyframes desliza { from { opacity: 0; transform: translateX(16px); } }
 }

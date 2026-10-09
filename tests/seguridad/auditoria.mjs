@@ -875,6 +875,63 @@ async function respirar() {
   }
 }
 
+// ── 7m. Etapa 13: páginas para Google (Quiénes somos, Contacto, Venta por mayor) ──
+{
+  await respirar();
+  const G = "marca en Google";
+  for (const ruta of ["/nosotros", "/contacto", "/venta-por-mayor"]) {
+    const r = await pedir(`${WEB}${ruta}`);
+    const h = await r.text();
+    const hrefs = [...h.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+    chk(G, `${ruta}: carga y no tiene links javascript: ni data:`, r.status === 200 && !hrefs.some((u) => /^\s*(javascript|data|vbscript):/i.test(u)), String(r.status));
+    const otra = [...h.matchAll(/<a [^>]*target="_blank"[^>]*>/g)].map((m) => m[0]);
+    chk(G, `${ruta}: lo que abre otra pestaña va con noopener (${otra.length})`, otra.every((x) => /rel="[^"]*noopener/.test(x)));
+  }
+  // El botón de Venta por mayor pasa por /mayorista, que no se deja llevar a otro lado.
+  const v = await (await pedir(`${WEB}/venta-por-mayor?next=https://evil.example`)).text();
+  chk(G, "Venta por mayor: el botón va a /mayorista (nunca a una dirección de la consulta)", /href="\/mayorista"/.test(v) && !v.includes("evil.example"));
+}
+
+// ── 7n. Etapa 15: datos de clientes y envíos de Correo Argentino (MiCorreo) ──
+{
+  await respirar();
+  const G = "datos de clientes";
+  const falso = { "x-isu-admin": "a".repeat(43) };
+  // Son muchos pedidos seguidos: si se agota el límite general por minuto, se espera y se repite ese pedido.
+  const pedirSinFreno = async (url, opciones) => {
+    for (let i = 0; i < 3; i++) {
+      const r = await pedir(url, opciones);
+      if (r.status !== 429) return r;
+      await respirar();
+    }
+    return pedir(url, opciones);
+  };
+  // Sin sesión del backoffice (o con un token inventado), nada de datos de clientes ni de envíos.
+  for (const [metodo, ruta, cuerpo] of [
+    ["GET", "/v1/admin/pedidos/ISU-1001"], ["GET", "/v1/admin/pedidos"], ["GET", "/v1/admin/clientes"], ["GET", "/v1/admin/envios"],
+    ["GET", "/v1/admin/envios/ISU-1001"], ["GET", "/v1/admin/envios/etiquetas?numeros=ISU-1001"],
+    ["POST", "/v1/admin/envios/ISU-1001/seguimiento", { seguimiento: "000500012345678ABCD" }], ["POST", "/v1/admin/envios/preparar", { numeros: ["ISU-1001"] }],
+    ["PATCH", "/v1/admin/productos/1", { altoCm: 3 }],
+  ]) {
+    for (const [como, h] of [["sin sesión", {}], ["con token inventado", falso]]) {
+      const r = await pedirSinFreno(API + ruta, { method: metodo, headers: { ...h, ...(cuerpo ? { "content-type": "application/json" } : {}) }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+      const t = await r.text();
+      chk(G, `${metodo} ${ruta.split("?")[0]} ${como} → 401 y sin datos`, r.status === 401 && !/@|"telefono"|"dni"|"direccion"/.test(t), String(r.status));
+    }
+  }
+  // Un pedido de la tienda no se ve sin la sesión de su dueño o el enlace de su pedido.
+  for (const [como, h] of [["sin nada", {}], ["con un acceso inventado", { "x-isu-acceso": "A".repeat(32) }]]) {
+    const r = await pedirSinFreno(`${API}/v1/pedidos/ISU-1001`, { headers: h });
+    chk(G, `GET /v1/pedidos/ISU-1001 ${como} no muestra el pedido`, r.status !== 200 && !/@/.test(await r.text()), String(r.status));
+  }
+  // El seguimiento público con una firma inventada no muestra nada.
+  const sg = await pedirSinFreno(`${API}/v1/seguimiento/ISU-1001?t=${"A".repeat(24)}`);
+  chk(G, "seguimiento con firma inventada → 404", sg.status === 404, String(sg.status));
+  // El número del rótulo no acepta cualquier cosa (aunque tenga sesión, primero se valida).
+  const raro = await pedirSinFreno(`${API}/v1/admin/envios/ISU-1001/seguimiento`, { method: "POST", headers: { ...falso, "content-type": "application/json" }, body: JSON.stringify({ seguimiento: "<script>alert(1)</script>" }) });
+  chk(G, "número de rótulo con HTML: rechazado", raro.status === 400 || raro.status === 401, String(raro.status));
+}
+
 // ── 8. Límite de pedidos (no se esquiva falsificando la IP) ───────────
 let bloqueado = false;
 for (let i = 0; i < 400 && !bloqueado; i++) {

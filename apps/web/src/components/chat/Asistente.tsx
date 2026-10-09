@@ -110,7 +110,7 @@ export function Asistente({ saludo, whatsapp }: { saludo: string; whatsapp: stri
 
       {abierto && (
         <section id="asistente" role="dialog" aria-modal="false" aria-labelledby={titulo}
-          className="fixed inset-0 z-50 flex flex-col bg-white sm:inset-auto sm:bottom-24 sm:right-5 sm:h-[min(600px,calc(100dvh-8rem))] sm:w-[380px] sm:rounded-[var(--radius-foto)] sm:border sm:border-linea sm:shadow-2xl">
+          className="fixed inset-0 z-50 flex animate-entra-abajo flex-col bg-white sm:inset-auto sm:bottom-24 sm:right-5 sm:h-[min(600px,calc(100dvh-8rem))] sm:w-[380px] sm:origin-bottom-right sm:animate-sube sm:rounded-[var(--radius-foto)] sm:border sm:border-linea sm:shadow-2xl">
           <header className="flex items-center gap-2 border-b border-linea px-4 py-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-marca-claro text-marca"><IconoChat className="size-5" /></span>
             <div className="min-w-0 flex-1">

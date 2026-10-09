@@ -7,7 +7,7 @@ import { Migas } from "@/components/Migas";
 import { SinProductos } from "@/components/SinProductos";
 import { TextoCategoria } from "@/components/TextoCategoria";
 import { contextoSeo } from "@/lib/seo";
-import { descripcionCategoria } from "@isu/shared";
+import { descripcionCategoria, descripcionCategoriaPrincipal } from "@isu/shared";
 
 export const revalidate = 300;
 
@@ -29,7 +29,10 @@ export async function generateMetadata({ params }: { params: Promise<{ categoria
   const titulo = `Ropa de ${cat.nombre.toLowerCase()}`;
   return {
     title: cat.seoTitulo || titulo,
-    description: cat.seoDescripcion || descripcionCategoria(titulo, listado?.productos ?? [], contextoSeo(config)),
+    // Con subcategorías, como las tiendas grandes en Google: «Explorá toda la ropa de mujer Isuwaya: remeras y tops, …».
+    description: cat.seoDescripcion || (cat.hijas.length
+      ? descripcionCategoriaPrincipal(cat.nombre, cat.hijas.map((h) => h.nombre), contextoSeo(config))
+      : descripcionCategoria(titulo, listado?.productos ?? [], contextoSeo(config))),
     alternates: { canonical: `/${cat.slug}` },
   };
 }

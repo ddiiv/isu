@@ -57,9 +57,9 @@ export function AvisoYaEnCarrito({ aviso, cerrar, verCarrito }: { aviso: AvisoSt
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-6">
-      <button type="button" tabIndex={-1} aria-label="Cerrar aviso" className="absolute inset-0 cursor-default bg-black/50" onClick={cerrar} />
+      <button type="button" tabIndex={-1} aria-label="Cerrar aviso" className="absolute inset-0 cursor-default bg-black/50 animate-fundido" onClick={cerrar} />
       <div ref={caja} role="alertdialog" aria-modal="true" aria-labelledby="aviso-stock-titulo" aria-describedby="aviso-stock-texto"
-        className="relative w-full max-w-md rounded-t-3xl sm:max-w-lg bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:p-7">
+        className="relative w-full max-w-md animate-entra-abajo rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:max-w-lg sm:animate-sube sm:rounded-2xl sm:p-7">
         {/* La "manija" de la hoja, sólo en el celular. */}
         <span aria-hidden="true" className="mx-auto -mt-1 mb-4 block h-1.5 w-12 rounded-full bg-linea sm:hidden" />
         <div className="flex items-start gap-4">

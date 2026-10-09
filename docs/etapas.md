@@ -17,6 +17,86 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 10 | El pack va aparte en el carrito (como Deliver), carrito con el precio por transferencia y por tarjeta/Mercado Pago, checkout de una página, «Comprar ahora» y WhatsApp sólo sin stock, eliminar productos, backoffice rediseñado, guías de talles con Excel (y las 40 de la fábrica), sólo productos padre desde Stocker | **Cerrada** (abajo) · guía en [`carrito-checkout-backoffice.md`](carrito-checkout-backoffice.md) |
 | 11 | Direcciones en el checkout: sugerencias de calle con Google Places (la clave sólo en el servidor, topes por día dentro del uso gratis) y revisión de calle y altura con Georef (gratis); aviso en el carrito cuando una variante ya está dentro de un pack y no quedan para sumarla suelta | **Cerrada** (abajo) · guía en [`direcciones-checkout.md`](direcciones-checkout.md) |
 | 12 | Revisión pantalla por pantalla (tienda y backoffice, compu y celular); direcciones sin ids (fotos, banners, productos y guías del backoffice, comprobantes); banners interactivos (título, texto, etiqueta, hasta 2 botones, la tarjeta de un producto elegido o automático, colores, datos de Ajustes) con editor y vista previa, y 7 banners sugeridos armados con lo que dice la tienda | **Cerrada** (abajo) · guía en [`banners-y-direcciones.md`](banners-y-direcciones.md) |
+| 13 | Cómo se ve Isuwaya al buscarla en Google (como Deliver): título y frase del inicio, «Explorá toda la ropa de mujer Isuwaya: …» en las categorías, páginas Quiénes somos, Contacto y Venta por mayor (con el botón a la tienda mayorista), en el pie, el menú del celular y el sitemap; datos de la marca y chequeo en `pnpm seo` | **Cerrada** (abajo) · guía en [`seo.md`](seo.md#cómo-se-ve-isuwaya-al-buscarla-en-google-etapa-13) |
+| 14 | Movimiento liviano y prolijo en la tienda: banners que entran suaves y pasan solos con su barrita (con pausa, y quietos si la persona pidió menos animaciones), fotos de producto con zoom suave al pasar el mouse y fundido al cambiar de color, menú y carrito que entran y salen deslizándose, desplegables y pestañas suaves, tarjetas que aparecen al bajar; fuentes en WOFF2 (69 % menos) | **Cerrada** (abajo) |
+| 15 | Correo Argentino con la API MiCorreo (la de e-commerce): cotización antes de pagar, sucursales donde se retira, envío cargado en MiCorreo desde el backoffice y el número del rótulo (a mano o con lector) para seguirlo; peso y medidas obligatorios en cada producto; todo el pedido en una bolsa para cotizar con todos los transportes; datos de clientes sólo para el cliente o el backoffice identificado, con registro de quién los miró | **Cerrada** (abajo) · guía en [`correo-argentino.md`](correo-argentino.md) |
+
+## Etapa 15 · resultados del cierre (09/10/2026)
+
+**Qué entró** (guía en [`correo-argentino.md`](correo-argentino.md))
+- **Correo Argentino con la API MiCorreo** (la de e-commerce; PaqAr es para ERP), revisado contra su manual del 18/05/2026:
+  - **cotización antes de pagar**, a domicilio y a sucursal en una sola consulta; se cobra el Clásico; lo que pasa de 50 kg o de las medidas de Correo no se ofrece;
+  - **sucursales** abiertas donde se retira, con su horario, las más cercanas primero;
+  - **«Preparar»** carga el envío en MiCorreo, con una referencia única por intento;
+  - **el rótulo no viene por la API** (MiCorreo no tiene ese pedido y al cargar sólo devuelve la fecha): se paga e imprime en MiCorreo, y su número se carga en Envíos, a mano o con lector; la tienda le pregunta a MiCorreo si lo conoce;
+  - con el número, se sigue solo y Stocker lo muestra en Envíos del día; despachado sin número va a Problemas;
+  - `pnpm correo:cliente` saca el n.º de cliente de MiCorreo.
+- **Arreglos a lo que había:** el número no llega al cargar (antes se esperaba y daba error), faltaba `productType`, piso y departamento en 3 caracteres, el seguimiento es un GET con cuerpo, `expires` del token, sucursales con CP de 8 caracteres, eventos en orden y «CADUCA» como cancelado.
+- **Peso y medidas de cada producto** (la prenda doblada): obligatorios al guardar en el backoffice, de a muchos desde la lista, filtro «Sin peso o medidas» y la cuenta en el panel.
+- **Todo el pedido en una bolsa**, para cotizar con todos los transportes: se apila (en 1, 2 o 3 pilas) y se elige la bolsa más chica en la que entra. Las bolsas, en Ajustes; Envíos y la ficha del pedido dicen cuál usar.
+- **Datos de clientes:** sólo el cliente o alguien del backoffice identificado (si no, se rechaza); quién los abre en el backoffice queda en Auditoría → «Quién vio datos de clientes».
+- Migración `0020`.
+
+**QA**
+- Pruebas unitarias: **566/566**, 27 más: la bolsa (8), MiCorreo contra el simulador (las de Correo pasaron a un grupo propio, 6 más en neto), la API (12: el paquete con medidas, preparar y cargar el número, permisos, número repetido, despachado sin número, volver a preparar, datos de clientes, peso y medidas, bolsas en Ajustes) y el worker (1).
+- Pruebas en navegador: **174/174**, 4 más: la cotización de Correo antes de pagar (compu y celular), peso y medidas obligatorios y de a muchos, y el circuito completo de MiCorreo (preparar, rótulo en MiCorreo, número con Enter, despacho, seguimiento del cliente y la auditoría).
+- Revisión de pantallas: **sin hallazgos**. Diagnóstico «Todo bien». `pnpm seo`: «Todo bien para Google».
+- Hallazgos corregidos en el camino (de las pruebas, no de la tienda): la prueba de peso y medidas tomaba más de un elemento por fila, y la sección nueva de la auditoría se quedaba sin cupo del límite por minuto (ahora espera y reintenta).
+
+**Hacker**
+- Auditoría: **434/434**, 22 más (§ 7n): sin sesión o con token inventado, pedidos, clientes, envíos, etiquetas, preparar, el número del rótulo y el peso y las medidas → 401 sin datos; un pedido de la tienda sin su dueño no se ve; seguimiento con firma inventada → 404; número de rótulo con HTML rechazado.
+
+## Etapa 14 · resultados del cierre (09/10/2026)
+
+**Qué entró** (sólo CSS y React; sin librerías de animación)
+- **Reglas:** se mueve sólo `transform` y `opacity` (no traba el celular); entradas de 200 a 520 ms con la misma curva suave; las salidas, más cortas. Quien pidió «menos animaciones» en su teléfono o compu no ve ninguna: el carrusel no pasa solo y los cambios son instantáneos.
+- **Banners del inicio:**
+  - al llegar a uno, el texto entra escalonado (etiqueta, título, texto, botones), la tarjeta del producto después y la foto se acomoda con un zoom suave;
+  - el puntito del que se ve se va llenando hasta el próximo: es el único reloj del carrusel;
+  - pasa solo cada 6 segundos y se frena con el mouse o el foco encima, con el botón de pausa, cuando el carrusel no está a la vista o la pestaña está oculta (no gasta batería);
+  - flechas más discretas que se encienden al pasar.
+- **Fotos de producto:** zoom suave al pasar el mouse, y la segunda foto entra con un fundido; al cambiar de color en la ficha, la galería vuelve a la primera y la foto nueva aparece fundida; en el celular, los puntitos de la galería siguen al dedo.
+- **Menú del celular y carrito:** entran y salen deslizándose con el fondo que se oscurece; al cerrarse desaparecen del todo (no quedan tapando la página). Cada nivel del menú entra de costado.
+- **Más:** desplegables (`<details>`) que se abren suave, la guía de talles que entra subiendo, pestañas de categorías con fundido, las tarjetas que aparecen al bajar la página, la sombra del encabezado al bajar, botones que se hunden un poco al tocarlos y subrayados que aparecen en los menús.
+- **Fuentes:** Outfit e Instrument Sans en WOFF2 recortadas a los caracteres del español (la licencia OFL lo permite): **58 KB en vez de 187 KB**. `Outfit-Bold.ttf` queda sólo para las imágenes de las redes (Open Graph).
+
+**QA**
+- Pruebas unitarias: **539/539**.
+- Pruebas en navegador: **170/170**, 8 más (compu y celular): el carrusel con su barrita y la pausa (pausado no cambia de banner); con «menos animaciones», sin pasar solo ni pausa; el menú y el carrito se cierran del todo y la página se puede usar enseguida; las fuentes llegan en WOFF2.
+- Revisión de pantallas: **sin hallazgos**. Diagnóstico «Todo bien». `pnpm seo`: «Todo bien para Google».
+- Hallazgo corregido: con la foto del banner agrandada para su entrada, el banner «desbordaba» su caja (aunque no se viera). La foto va en un marco que la recorta.
+
+**Hacker**
+- Auditoría: **412/412**. Sin dependencias nuevas.
+
+## Etapa 13 · resultados del cierre (08/10/2026)
+
+**Qué entró** (en [`seo.md`](seo.md), «Cómo se ve Isuwaya al buscarla en Google»)
+- **Inicio:**
+  - título «Isuwaya · Ropa urbana y casual para todos tus días»;
+  - la frase de debajo se arma con las categorías y las condiciones de Ajustes, siempre entera (≤ 158 caracteres): «Isuwaya — Tienda online de ropa que fabricamos con talles reales, para hombre, mujer y niños — Envíos a todo el país y 20% OFF con transferencia.»
+- **Categorías de arriba:** «Explorá toda la ropa de mujer Isuwaya: remeras y tops, pantalones y calzas…», con las subcategorías de verdad. La del backoffice, si hay, tiene prioridad.
+- **Páginas nuevas,** con lo que la tienda ya decía, sin inventar:
+  - **Quiénes somos** (`/nosotros`);
+  - **Contacto** (`/contacto`): WhatsApp, email, locales y horario de atención;
+  - **Venta por mayor** (`/venta-por-mayor`): «Hacer mi pedido mayorista» lleva a la tienda mayorista.
+- **Enlaces:** las tres en el pie, el menú del celular y el sitemap. El botón «Pedido mayorista» de arriba sigue yendo directo.
+- **Datos de la marca:** lema y tienda mayorista; `ContactPage` y `AboutPage`.
+- **`pnpm seo`:** nueva sección «La marca en Google», con lo que se vería y cada acceso con su título y descripción.
+
+**QA**
+- Pruebas unitarias: **539/539** (las frases del inicio y de las categorías).
+- Pruebas en navegador: **162/162**, 10 más (compu y celular):
+  - título y frase del inicio;
+  - cada acceso con su título, descripción, canónica y h1, sin noindex ni títulos repetidos;
+  - Venta por mayor lleva a la tienda mayorista;
+  - Contacto con WhatsApp, email y locales;
+  - el pie y el menú llegan a las páginas, que están en el sitemap.
+- Revisión de pantallas: **sin hallazgos**. `pnpm seo`: «Todo bien para Google».
+- Hallazgo corregido: la descripción de Contacto se cortaba a la mitad. Ahora elige la versión que entra entera.
+
+**Hacker**
+- Auditoría: **412/412**, 7 chequeos más (§ 7m): las páginas nuevas sin links `javascript:`/`data:`, con `noopener` en lo que abre otra pestaña, y el botón de Venta por mayor siempre a `/mayorista`, sin seguir direcciones de la consulta.
 
 ## Etapa 12 · resultados del cierre (08/10/2026)
 

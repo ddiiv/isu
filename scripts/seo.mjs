@@ -137,6 +137,52 @@ informar(problemas.alt, "todas las fotos tienen texto alternativo", "páginas co
 informar(problemas.ld, "datos estructurados completos", "problemas en los datos estructurados", "Probalo en https://search.google.com/test/rich-results");
 if (fichas) decir(`    (${fichas} fichas: ${fichasConVariantes} con variantes por talle/color, ${fichasConPrecio} con precio y stock en todas)`);
 
+// ── La marca en Google (etapa 13): lo que se ve al buscar «Isuwaya» ──
+decir("\nLa marca en Google (al buscar el nombre de la tienda)");
+{
+  const inicio = await pedir(`${tienda}/`);
+  const html = inicio.texto;
+  const titulo = entidades(html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "");
+  const desc = meta(html, "description") ?? "";
+  const marca = titulo.split(/\s[·|–—-]\s/)[0];
+  if (titulo && desc.startsWith(marca)) bien(`inicio: «${titulo}»\n      ${desc}`);
+  else ojo(`inicio: «${titulo}»`, `La descripción no arranca con la marca: ${desc || "no tiene"}`);
+  const datos = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap((m) => { try { return [JSON.parse(m[1])].flat(); } catch { return []; } });
+  const org = datos.find((d) => ["OnlineStore", "Organization", "ClothingStore"].includes(d["@type"]));
+  if (org?.logo && org?.sameAs?.length) bien(`datos de la marca: logo, ${org.sameAs.length} red(es)${org.department?.url ? ", tienda mayorista" : ""}${org.contactPoint ? ", contacto" : ""}`);
+  else mal("faltan los datos de la marca en el inicio (logo y redes)", "Google los usa para el panel de la marca.");
+  // Los accesos: las categorías de arriba y las páginas fijas, enlazadas desde el inicio (el pie) y en el sitemap.
+  const fijas = ["/nosotros", "/contacto", "/venta-por-mayor", "/locales"];
+  const NO = new Set(["/nuevos", "/destacados", "/packs", "/outfits", "/liquidacion", "/devoluciones", "/terminos", "/privacidad", "/arrepentimiento", ...fijas]);
+  const categorias = urls.map((u) => new URL(u).pathname).filter((r) => /^\/[a-z0-9-]+$/.test(r) && !NO.has(r));
+  const accesos = [...new Set([...categorias.slice(0, 4), ...fijas])];
+  const enlazadas = new Set([...html.matchAll(/href="(\/[^"#?]*)"/g)].map((m) => m[1]));
+  const enSitemap = new Set(urls.map((u) => new URL(u).pathname));
+  const faltan = [];
+  for (const r of accesos) {
+    const { r: res, texto } = await pedir(`${tienda}${r}`);
+    const t = entidades(texto.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "");
+    const d = meta(texto, "description");
+    const problemas = [
+      res?.status !== 200 ? `responde ${res?.status ?? "nada"}` : null,
+      /<meta[^>]+name="robots"[^>]+noindex/i.test(texto) ? "noindex" : null,
+      !d ? "sin descripción" : null,
+      !enlazadas.has(r) ? "no está enlazada desde el inicio" : null,
+      !enSitemap.has(r) ? "no está en el sitemap" : null,
+    ].filter(Boolean);
+    if (problemas.length) faltan.push(`${r}: ${problemas.join(", ")}`);
+    else decir(`    ${r} · «${t}» — ${d}`);
+  }
+  if (faltan.length) mal(`accesos con problemas: ${faltan.length}`, faltan.join("\n"));
+  else bien(`${accesos.length} páginas listas para aparecer como accesos debajo del resultado (las elige Google)`);
+  // Venta por mayor: el botón lleva a la tienda mayorista.
+  const vpm = await pedir(`${tienda}/venta-por-mayor`);
+  const may = await pedir(`${tienda}/mayorista`);
+  const destino = may.r?.headers.get("location") ?? "";
+  if (/href="\/mayorista"/.test(vpm.texto) && may.r?.status === 302 && /^https?:\/\//.test(destino)) bien(`Venta por mayor: el botón lleva a la tienda mayorista (${destino})`);
+  else mal("Venta por mayor: el botón no lleva a la tienda mayorista", `/mayorista respondió ${may.r?.status ?? may.error} ${destino}`);
+}
+
 // ── Feed de Google Shopping ──
 decir("\nGoogle Shopping");
 const feed = await pedir(`${tienda}/feed/google.xml`);
