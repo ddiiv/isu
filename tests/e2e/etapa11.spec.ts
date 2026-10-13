@@ -131,6 +131,8 @@ test.describe("aviso del carrito: la variante ya está en un pack", () => {
 
     // Responsive: en el celular sube desde abajo; en la compu y la notebook, al centro y entero en pantalla.
     const comoSeVe = async () => {
+      // Se mide quieto: en el celular la hoja entra deslizándose desde abajo (etapa 14).
+      await aviso.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((x) => x.finished.catch(() => null))));
       const caja = (await aviso.boundingBox())!;
       const vp = page.viewportSize()!;
       expect(caja.y).toBeGreaterThanOrEqual(0);

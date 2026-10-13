@@ -20,3 +20,13 @@ export const OPCIONES_TRABAJO = {
   removeOnComplete: { age: 24 * 3600, count: 1000 },
   removeOnFail: { age: 7 * 24 * 3600 },
 };
+
+/*
+ * Dónde quedó la lectura del feed de novedades de Stocker (qué se despachó,
+ * qué se canceló). Va en tienda.ajustes: lo mueve sólo el worker, la API lo
+ * lee sin moverlo. No es un ajuste editable del backoffice.
+ */
+export const CLAVE_CURSOR_NOVEDADES = "cursorNovedadesStocker";
+
+/** Stocker libera sola la mercadería que no se cobró en 7 días (contrato v1 § 3.5): el plazo de pago de la tienda no pasa de ahí. */
+export const HORAS_MAXIMAS_PAGO = 7 * 24;

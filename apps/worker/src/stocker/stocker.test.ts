@@ -243,9 +243,12 @@ describe("cliente de Stocker", () => {
   let url = "";
   let respuesta: { status: number; cuerpo: unknown; location?: string } = { status: 200, cuerpo: {} };
   const vistos: Array<{ url?: string; auth?: string }> = [];
+  const cuerpos: Array<{ metodo?: string; url?: string; cuerpo: Record<string, unknown> | null }> = [];
   beforeAll(async () => {
-    server = http.createServer((req, res) => {
+    server = http.createServer(async (req, res) => {
       vistos.push({ url: req.url, auth: req.headers.authorization });
+      let b = ""; for await (const c of req) b += c;
+      cuerpos.push({ metodo: req.method, url: req.url, cuerpo: b ? JSON.parse(b) : null });
       res.writeHead(respuesta.status, { "content-type": "application/json", ...(respuesta.location ? { location: respuesta.location } : {}) });
       res.end(JSON.stringify(respuesta.cuerpo));
     });
@@ -333,6 +336,76 @@ describe("cliente de Stocker", () => {
     expect(s.desconocidos).toEqual(["B,2"]);
     expect(vistos.at(-1)?.url).toBe("/api/integraciones/tienda/stock?skus=A-1%2CB%2C2");
     await expect(cli().stock(Array.from({ length: 201 }, (_, i) => `S${i}`))).rejects.toThrow(RangeError);
+  });
+
+  // ── Pedidos: contrato v1 de Stocker v3.39 (tanda 2) ──
+  const nuevo = {
+    numero: "ISU-1003", ocurrioEn: "2026-10-09T12:00:00.000Z", items: [{ sku: "A-1", cantidad: 2, precioUnitario: 18000 }],
+    comprador: { nombre: "Ana Prueba", email: "a@b.c", documento: "30111222" }, total: 36000, pagoPendiente: true,
+    pagoDetalle: "Transferencia · vence 11/10 12:00", pagoVenceEn: "2026-10-11T15:00:00.000Z", envio: { tipo: "andreani" },
+  };
+  it("pedido: va en el sobre con el número en pedidoExterno (lo que faltaba: Stocker contestaba 400)", async () => {
+    respuesta = { status: 201, cuerpo: { pedidoExterno: "ISU-1003", estado: "aceptado", motivo: null, repetido: false } };
+    const r = await cli().crearPedido(nuevo);
+    expect(r).toMatchObject({ status: 201, estado: "aceptado", repetido: false, faltantes: [] });
+    const enviado = cuerpos.at(-1)!;
+    expect([enviado.metodo, enviado.url]).toEqual(["POST", "/api/integraciones/tienda/pedidos"]);
+    expect(enviado.cuerpo).toEqual({
+      contrato: 1, tipo: "venta", id: "isu:ISU-1003", ocurrioEn: "2026-10-09T12:00:00.000Z",
+      datos: {
+        pedidoExterno: "ISU-1003", items: nuevo.items, comprador: nuevo.comprador, total: 36000, pagoPendiente: true,
+        pagoDetalle: nuevo.pagoDetalle, pagoVenceEn: "2026-10-11T15:00:00.000Z", envio: { tipo: "andreani" },
+      },
+    });
+  });
+  it("pedido: 409 sin stock es una respuesta (no un error) y dice qué faltó", async () => {
+    respuesta = { status: 409, cuerpo: { pedidoExterno: "ISU-1003", estado: "rechazado", motivo: "Sin stock para despachar. A-1: pide 2 y faltan 1; B-2: pide 1 y faltan 1.", repetido: false } };
+    const r = await cli().crearPedido(nuevo);
+    expect([r.status, r.estado]).toEqual([409, "rechazado"]);
+    expect(r.faltantes).toEqual([{ sku: "A-1", pide: 2, hay: 1 }, { sku: "B-2", pide: 1, hay: 0 }]);
+    respuesta = { status: 409, cuerpo: { pedidoExterno: "ISU-1003", estado: "rechazado", motivo: "Sin stock para despachar. A-1: se apartó para otro pedido mientras se procesaba éste.", repetido: true } };
+    expect((await cli().crearPedido(nuevo)).faltantes).toEqual([{ sku: "A-1", pide: null, hay: null }]);
+  });
+  it("pedido: 202 (guardado sin resolver) vuelve con su estado; un 400 es un error con el mensaje de Stocker", async () => {
+    respuesta = { status: 202, cuerpo: { pedidoExterno: "ISU-1003", estado: "pendiente", motivo: null, repetido: true } };
+    expect(await cli().crearPedido(nuevo)).toMatchObject({ status: 202, estado: "pendiente" });
+    respuesta = { status: 400, cuerpo: { message: "El pedido necesita el id que le dio la plataforma." } };
+    await expect(cli().crearPedido(nuevo)).rejects.toThrow(/400: El pedido necesita el id/);
+  });
+  it("cancelar: sobre de cancelación; contesta qué hizo; 404 = Stocker no lo tiene", async () => {
+    respuesta = { status: 200, cuerpo: { accion: "cancelado", pedidoId: 9, liberadas: 2, yaSalio: false } };
+    expect(await cli().cancelarPedido("ISU-1003", "No se pagó a tiempo")).toEqual({ accion: "cancelado", liberadas: 2, yaSalio: false });
+    expect(cuerpos.at(-1)).toMatchObject({ url: "/api/integraciones/tienda/pedidos/ISU-1003/cancelar", cuerpo: { contrato: 1, tipo: "cancelacion", id: "isu:ISU-1003", datos: { motivo: "No se pagó a tiempo" } } });
+    respuesta = { status: 404, cuerpo: { message: "Ese pedido no está en la cola." } };
+    expect(await cli().cancelarPedido("ISU-1003", "x")).toBeNull();
+  });
+  it("cobro: el id es del cobro y el pedido va en ventaId; aplicado false no es un error", async () => {
+    respuesta = { status: 201, cuerpo: { movimientoExterno: "ISU-1003-C7", pedidoExterno: "ISU-1003", aplicado: true, motivo: null, pagoEstado: "pagado", cobrado: "36000.00", repetido: false } };
+    const r = await cli().registrarCobro({ numero: "ISU-1003", cobro: "7", importe: 36000, medio: "mercadopago", operacion: "123456789", ocurrioEn: "2026-10-09T13:00:00.000Z" });
+    expect(r).toMatchObject({ aplicado: true, pagoEstado: "pagado", cobrado: 36000 });
+    expect(cuerpos.at(-1)).toEqual({ metodo: "POST", url: "/api/integraciones/tienda/cobros", cuerpo: {
+      contrato: 1, tipo: "cobro", id: "isu:ISU-1003-C7", ocurrioEn: "2026-10-09T13:00:00.000Z",
+      datos: { ventaId: "isu:ISU-1003", importe: 36000, medio: "mercadopago", operacion: "123456789" },
+    } });
+    respuesta = { status: 201, cuerpo: { movimientoExterno: "ISU-1003-C8", pedidoExterno: "ISU-1003", aplicado: false, motivo: "Cobró sobre un pedido cancelado: hay que devolver el dinero.", pagoEstado: "pendiente", cobrado: 0, repetido: false } };
+    expect(await cli().registrarCobro({ numero: "ISU-1003", cobro: "8", importe: 100, medio: "transferencia", ocurrioEn: new Date() })).toMatchObject({ aplicado: false, motivo: /devolver el dinero/ });
+  });
+  it("envío: sólo lo que viene; lee la respuesta nueva", async () => {
+    respuesta = { status: 200, cuerpo: { pedidoExterno: "ISU-1003", seguimiento: "CA123456789AR", envioTipo: "correo_argentino", despacharAntesDe: null } };
+    expect(await cli().cargarEnvio("ISU-1003", { tipo: "correo_argentino", seguimiento: "CA123456789AR" })).toEqual({ pedidoExterno: "ISU-1003", seguimiento: "CA123456789AR", envioTipo: "correo_argentino", despacharAntesDe: null });
+    expect(cuerpos.at(-1)?.cuerpo).toEqual({ tipo: "correo_argentino", seguimiento: "CA123456789AR" });
+  });
+  it("novedades: sin cursor no manda desde; con cursor lo manda tal cual", async () => {
+    respuesta = { status: 200, cuerpo: { cursor: "2026-10-09T12:00:00.000Z|0", cambios: [] } };
+    expect(await cli().resoluciones(null)).toEqual({ cursor: "2026-10-09T12:00:00.000Z|0", cambios: [], hayMas: false });
+    expect(vistos.at(-1)?.url).toBe("/api/integraciones/tienda/pedidos/resoluciones?limite=100");
+    respuesta = { status: 200, cuerpo: { cursor: "2026-10-09T12:05:00.000Z|41", hayMas: true, cambios: [{
+      pedidoExterno: "ISU-1003", cambio: "despachado", estado: "aceptado", estadoEnvio: "despachado", pagoEstado: "pagado", seguimiento: "CA1", envioTipo: "correo_argentino",
+      despachadoEn: "2026-10-09T12:04:00.000Z", canceladoEn: null, motivo: null, en: "2026-10-09T12:04:00.000Z",
+    }] } };
+    const r = await cli().resoluciones("2026-10-09T12:00:00.000Z|0", 200);
+    expect([r.hayMas, r.cambios[0]!.cambio, r.cambios[0]!.despachadoEn]).toEqual([true, "despachado", "2026-10-09T12:04:00.000Z"]);
+    expect(vistos.at(-1)?.url).toBe("/api/integraciones/tienda/pedidos/resoluciones?limite=200&desde=2026-10-09T12%3A00%3A00.000Z%7C0");
   });
 });
 

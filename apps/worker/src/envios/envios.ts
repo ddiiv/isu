@@ -5,11 +5,11 @@ import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
 /*
  * Envíos del lado del worker (etapa 4):
  *
- *   despachado      Stocker avisa (NOTIFY) que el depósito despachó el pedido:
- *                   el pedido pasa a "enviado" y se avisa al cliente.
+ *   despachado      el feed de novedades de Stocker dice que el depósito
+ *                   despachó el pedido (stocker/novedades.ts): pasa a
+ *                   "enviado" y se avisa al cliente.
  *   seguir          se le pregunta al transporte cómo viene cada envío; los
  *                   eventos nuevos se guardan y los cambios importantes se avisan.
- *   revisarDespachos  por si se perdió un NOTIFY: se le pregunta a Stocker.
  *   mercadoEnvios   después del pago, trae el envío que creó Mercado Pago.
  *   pedirResenas    (etapa 8) unos días después de entregado o retirado, el
  *                   mail "¿Qué te pareció?" con el enlace para opinar.
@@ -33,7 +33,6 @@ export interface DepsEnvios {
   encolarStocker: (nombre: "envio", datos: Record<string, unknown>, id: string) => Promise<unknown>;
   sitio: string | undefined;
   secreto: string | undefined;
-  estadoEnStocker?: (numero: string) => Promise<{ despachadoEn: string | null; estado: string } | null>;
   log?: Pick<Console, "warn">;
 }
 
@@ -97,7 +96,8 @@ export function crearEnvios(d: DepsEnvios) {
 
   /**
    * Stocker despachó el pedido (o avisó que falta mercadería). Idempotente:
-   * el mismo aviso dos veces (NOTIFY + repaso) no cambia nada la segunda.
+   * el feed repite el cambio con cada novedad del pedido y la segunda vez no
+   * cambia nada.
    */
   async function despachado(numero: string, que: "despachado" | "faltante") {
     const cli = await d.pool.connect();
@@ -110,7 +110,10 @@ export function crearEnvios(d: DepsEnvios) {
       if (!p) { await cli.query("ROLLBACK"); return { cambio: false, motivo: "no_existe" }; }
       pedidoId = p.id;
       if (que === "faltante") {
-        await evento(cli, p.id, p.estado, "Stocker: falta mercadería para despachar este pedido. Revisalo en Envíos del día.");
+        const FALTA = "Stocker: falta mercadería para despachar este pedido. Revisalo en Envíos del día.";
+        const ultimo = await cli.query<{ detalle: string | null }>("SELECT detalle FROM tienda.pedido_eventos WHERE pedido_id = $1 ORDER BY id DESC LIMIT 1", [p.id]);
+        if (ultimo.rows[0]?.detalle === FALTA) { await cli.query("ROLLBACK"); return { cambio: false, motivo: "ya_avisado" }; }
+        await evento(cli, p.id, p.estado, FALTA);
         await cli.query("UPDATE tienda.envios SET ultimo_error = 'Falta mercadería en el depósito', actualizado_en = now() WHERE pedido_id = $1 AND activo", [p.id]);
         await cli.query("COMMIT");
         return { cambio: true, faltante: true };
@@ -228,24 +231,6 @@ export function crearEnvios(d: DepsEnvios) {
     return { revisados: rows.length, ok, fallas };
   }
 
-  /**
-   * Repaso por si se perdió un aviso de Stocker (NOTIFY no guarda nada si el
-   * worker estaba caído): pedidos pagados hace más de 10 minutos que no salieron.
-   */
-  async function revisarDespachos(limite = 60) {
-    if (!d.estadoEnStocker) return { revisados: 0 };
-    const { rows } = await d.pool.query<{ numero: string }>(
-      `SELECT numero FROM tienda.pedidos
-        WHERE estado IN ('pagado', 'listo_para_retirar') AND pagado_en < now() - interval '10 minutes' AND pagado_en > now() - interval '30 days'
-        ORDER BY pagado_en LIMIT $1`, [limite]);
-    let despachados = 0;
-    for (const r of rows) {
-      const s = await d.estadoEnStocker(r.numero).catch(() => null);
-      if (s?.despachadoEn) { const x = await despachado(r.numero, "despachado"); if (x.cambio) despachados++; }
-    }
-    return { revisados: rows.length, despachados };
-  }
-
   /** Mercado Envíos: el envío lo creó Mercado Pago con el pago. Si todavía no está, se reintenta. */
   async function mercadoEnvios(numero: string, pagoId: string) {
     const me = d.transportes.mercadoEnvios;
@@ -302,6 +287,6 @@ export function crearEnvios(d: DepsEnvios) {
     return { pedidos: rows.length };
   }
 
-  return { avisar, despachado, seguir, seguirPendientes, revisarDespachos, mercadoEnvios, pedirResenas };
+  return { avisar, despachado, seguir, seguirPendientes, mercadoEnvios, pedirResenas };
 }
 export type Envios = ReturnType<typeof crearEnvios>;

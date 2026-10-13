@@ -47,10 +47,9 @@ async function levantar(h: http.RequestListener) {
 const leerCuerpo = async (req: http.IncomingMessage) => { let b = ""; for await (const c of req) b += c; return b ? JSON.parse(b) : {}; };
 const json = (res: http.ServerResponse, status: number, cuerpo: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(cuerpo)); };
 
-// Stocker simulado: acepta todo y anota con qué envío llegó cada pedido.
+// Stocker simulado (v3.39): acepta todo y anota con qué envío llegó cada pedido (los datos del sobre).
 const stockerRecibidos: Array<Record<string, unknown>> = [];
 const preferencias: Array<Record<string, unknown>> = [];
-const resumen = (n: string) => ({ id: 1, pedido: n, estado: "aceptado", pagoPendiente: true, estadoEnvio: null, despachadoEn: null, canceladoEn: null, motivo: null });
 
 let adminOperador = "", adminLectura = "";
 const IP = { "x-isu-interno": INTERNO, "x-isu-ip": "10.8.8.8" };
@@ -81,10 +80,12 @@ beforeAll(async () => {
   const urlStocker = await levantar(async (req, res) => {
     const u = new URL(req.url!, "http://x");
     const b = req.method === "GET" ? {} : await leerCuerpo(req);
-    if (u.pathname.endsWith("/clientes")) return json(res, 200, { id: 1, nuevo: true });
-    if (u.pathname === "/api/integraciones/tienda/pedidos" && req.method === "POST") { stockerRecibidos.push(b); return json(res, 200, { ...resumen(b.pedido), repetido: false }); }
-    const m = /\/pedidos\/(ISU-\d+)/.exec(u.pathname);
-    return m ? json(res, 200, resumen(m[1]!)) : json(res, 404, {});
+    if (u.pathname === "/api/integraciones/tienda/pedidos" && req.method === "POST") {
+      stockerRecibidos.push(b.datos);
+      return json(res, 201, { pedidoExterno: b.datos.pedidoExterno, estado: "aceptado", motivo: null, repetido: false });
+    }
+    if (/\/pedidos\/ISU-\d+\/cancelar$/.test(u.pathname)) return json(res, 200, { accion: "cancelado", pedidoId: 1, liberadas: 1, yaSalio: false });
+    return json(res, 404, { message: "No existe." });
   });
   const urlMp = await levantar(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${TOKEN_MP}`) return json(res, 401, {});

@@ -75,7 +75,6 @@ export async function rutasCuentas(app: FastifyInstance, deps: DepsCuentas) {
     if (!c) throw new ErrorHttp(409, "email_registrado", "Ya hay una cuenta con ese email. Ingresá o pedí una contraseña nueva.");
     const token = await crearSesion(deps.pool, c.id, deps.env.SESION_DIAS, ip(req), agente(req));
     await deps.colas.email("bienvenida", c.email, { nombre: c.nombre });
-    await deps.colas.stocker("cliente", { email: c.email, nombre: c.nombre, apellido: c.apellido }, `cliente-${c.id}-alta`);
     reply.code(201).headers(noCache);
     return { cliente: publico(c), token };
   });
@@ -137,7 +136,6 @@ export async function rutasCuentas(app: FastifyInstance, deps: DepsCuentas) {
       [s.clienteId, b.nombre, b.apellido, b.telefono ?? null, b.dni ?? null, b.aceptaNovedades ?? null],
     );
     const c = rows[0]!;
-    await deps.colas.stocker("cliente", { email: c.email, nombre: c.nombre, apellido: c.apellido, telefono: c.telefono, dni: c.dni });
     reply.headers(noCache);
     return { cliente: publico(c) };
   });

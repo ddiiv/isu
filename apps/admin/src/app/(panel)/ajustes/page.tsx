@@ -26,10 +26,13 @@ type Valores = Record<string, unknown> & {
 } & ValoresEnvios;
 type EstadoDirecciones = { google: boolean; georef: boolean; hoy: { sugerencias: number | null; lugares: number | null } };
 type EstadoTransferencias = { talo: { prendido: boolean; configurado: boolean }; mercadoPago: { prendido: boolean; configurado: boolean } };
+// Hasta 7 días (168 h): después Stocker libera sola la mercadería que no se cobró.
 const HORAS: Array<[keyof Valores, string, number, number]> = [
-  ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 240],
-  ["horasTransferencia", "Transferencia", 2, 240], ["horasPagoLocal", "Pagar al retirar en el local", 24, 720],
+  ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 168],
+  ["horasTransferencia", "Transferencia", 2, 168], ["horasPagoLocal", "Pagar al retirar en el local", 24, 168],
 ];
+/** Un plazo guardado antes del tope de Stocker se muestra (y se guarda) con el tope. */
+const conTopes = (x: Valores): Valores => ({ ...x, ...Object.fromEntries(HORAS.filter(([k]) => typeof x[k] === "number").map(([k, , , max]) => [k, Math.min(max, x[k] as number)])) });
 
 export default function Ajustes() {
   const { datos, error, recargar } = useDatos<{ ajustes: Array<{ clave: string; valor: unknown; actualizadoPor: string | null; actualizadoEn: string }> }>("ajustes");
@@ -41,7 +44,7 @@ export default function Ajustes() {
   const aviso = useAviso();
   const original = datos ? Object.fromEntries(datos.ajustes.map((a) => [a.clave, a.valor])) as Valores : null;
   // Packs: el formato viejo ([x2…x5]) se muestra ya pasado al nuevo (al guardar queda así).
-  useEffect(() => { if (original) setV(structuredClone({ ...original, ...(original.packs ? { packs: leerPacks(original.packs) } : {}) })); }, [datos]);
+  useEffect(() => { if (original) setV(conTopes(structuredClone({ ...original, ...(original.packs ? { packs: leerPacks(original.packs) } : {}) }))); }, [datos]);
   if (error) return <Mensaje>{error}</Mensaje>;
   if (!v || !original) return <Cargando />;
   const poner = <K extends keyof Valores>(k: K, x: Valores[K]) => setV({ ...v, [k]: x });
@@ -136,7 +139,7 @@ export default function Ajustes() {
           );
         })()}
         <Tarjeta titulo="Tiempo para pagar (horas)">
-          <p className="mb-3 text-xs text-tinta-tenue">Mientras tanto la mercadería queda apartada en Stocker. Si no paga, se libera sola.</p>
+          <p className="mb-3 text-xs text-tinta-tenue">Mientras tanto la mercadería queda apartada en Stocker. Si no paga, se libera sola. Hasta 7 días (168 h): es lo máximo que Stocker la aparta sin cobrar.</p>
           <div className="grid grid-cols-2 gap-3">
             {HORAS.map(([k, e, min, max]) => <Campo key={k} etiqueta={e}><input type="number" min={min} max={max} className={claseEntrada} value={v[k] as number} onChange={(x) => poner(k, Number(x.target.value) || min)} /></Campo>)}
           </div>

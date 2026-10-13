@@ -14,7 +14,7 @@ interface Detalle {
     notas: string | null; notas_internas: string | null; creado_en: string; vence_en: string | null; pagado_en: string | null;
   };
   items: Array<{ sku: string; nombre: string; color: string | null; talle: string | null; precio: number; precioLista: number | null; cantidad: number }>;
-  pagos: Array<{ proveedor: string; externo: string; estado: string; monto: number; registradoPor: string | null; creadoEn: string }>;
+  pagos: Array<{ proveedor: string; externo: string; estado: string; monto: number; registradoPor: string | null; creadoEn: string; stockerEn: string | null; stockerAplicado: boolean | null; stockerMotivo: string | null }>;
   eventos: Array<{ estado: string; detalle: string | null; actor: string; creadoEn: string }>;
   comprobantes: Array<{ n: number; tipo: string; bytes: number; creadoEn: string }>;
 }
@@ -83,7 +83,7 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
           {(d.pagos.length > 0 || d.comprobantes.length > 0) && (
             <Tarjeta titulo="Pagos y comprobantes">
               <ul className="space-y-1.5 text-sm">
-                {d.pagos.map((x) => <li key={x.proveedor + x.externo}>{MEDIOS[x.proveedor] ?? x.proveedor} · {x.externo} · <span className="font-bold">{pesos(x.monto)}</span> · {x.estado} <span className="text-xs text-tinta-tenue">{fecha(x.creadoEn)} {x.registradoPor ? `· ${x.registradoPor}` : ""}</span></li>)}
+                {d.pagos.map((x) => <li key={x.proveedor + x.externo}>{MEDIOS[x.proveedor] ?? x.proveedor} · {x.externo} · <span className="font-bold">{pesos(x.monto)}</span> · {x.estado} <span className="text-xs text-tinta-tenue">{fecha(x.creadoEn)} {x.registradoPor ? `· ${x.registradoPor}` : ""}</span>{x.estado === "aprobado" && <CobroEnStocker p={x} />}</li>)}
               </ul>
               {d.comprobantes.length > 0 && (
                 <ul className="mt-3 space-y-1 text-sm">
@@ -148,4 +148,11 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
       </div>
     </>
   );
+}
+
+/* Si Stocker ya tiene el cobro (sin él, el depósito no despacha). */
+function CobroEnStocker({ p }: { p: { stockerEn: string | null; stockerAplicado: boolean | null; stockerMotivo: string | null } }) {
+  if (!p.stockerEn) return <span className="block text-xs text-tinta-tenue">Stocker: mandando el cobro…</span>;
+  if (p.stockerAplicado === false) return <span className="block text-xs font-bold text-oferta">Stocker lo anotó sin aplicarlo: {p.stockerMotivo ?? "revisalo en Stocker"}</span>;
+  return <span className="block text-xs text-tinta-tenue">Stocker: cobro anotado {fecha(p.stockerEn)}</span>;
 }

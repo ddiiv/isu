@@ -20,6 +20,8 @@ if [ ! -f .env ]; then
     echo "ADMIN_CLAVE_CIFRADO=$(openssl rand -base64 32)"
     echo "HOST=127.0.0.1"
     echo "SMTP_URL="
+    # Que las pruebas no esperen un minuto por cada despacho del Stocker simulado.
+    echo "NOVEDADES_CADA_SEGUNDOS=5"
   } >> .env
 fi
 set -a; . ./.env; set +a

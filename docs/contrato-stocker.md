@@ -1,8 +1,28 @@
 # Contrato con Stocker
 
-> ⚠️ **Desde la etapa 1 hasta la 5, este documento describía el parche entregado (`stocker-backend-tienda-acumulado.patch`), que no se aplicó.** Lo que Stocker tiene hoy está en [`contrato-movimientos-stocker-v1.md`](contrato-movimientos-stocker-v1.md). Lo que falta para que se entiendan está en [`respuesta-contrato-stocker.md`](respuesta-contrato-stocker.md).
+> ⚠️ **Desde la etapa 1 hasta la 5, este documento describía el parche entregado (`stocker-backend-tienda-acumulado.patch`), que no se aplicó.** Lo que Stocker tiene hoy está en [`contrato-movimientos-stocker-v1.md`](contrato-movimientos-stocker-v1.md).
 >
-> **El catálogo, el stock y el aviso ya están en el contrato v1** (tanda 1, abajo). Los pedidos todavía usan las rutas del parche (tanda 2, cuando Stocker entregue § 3.2–3.4 de la respuesta).
+> **Todo habla el contrato v1 de Stocker v3.39:** catálogo, stock y aviso (tanda 1) y pedidos, cobros y novedades (tanda 2). Las dos secciones de abajo son lo vigente; lo que sigue después es la historia del parche.
+
+## Pedidos, cobros y novedades: lo que la tienda manda hoy (contrato v1, Stocker v3.39)
+
+Con el código de Stocker v3.39 (`integracionesController`, `colaVentasOnlineService`, `tiendaService.resoluciones`, `utils/sobreMovimiento`). Lo usa `packages/stocker` (`crearPedido`, `cancelarPedido`, `cargarEnvio`, `registrarCobro`, `resoluciones`).
+
+**El sobre.** Todo lo que se escribe va en `{ contrato: 1, tipo, id: "isu:<n>", ocurrioEn, datos }`. El `id` es la idempotencia: el mismo pedido reenviado lleva siempre el mismo y Stocker lo aparta una sola vez.
+
+| Qué | Ruta | Qué manda la tienda | Qué contesta Stocker y qué hace la tienda |
+|---|---|---|---|
+| **Apartar** | `POST /pedidos` | `tipo: "venta"`, `id: "isu:ISU-1042"`, `datos: { pedidoExterno, items: [{ sku, cantidad, precioUnitario }], comprador: { nombre, email, documento }, total, pagoPendiente: true, pagoDetalle, pagoVenceEn, envio: { tipo, despacharAntesDe? } }` | **201** aceptado → sigue el checkout. **200** ya lo tenía. **409** rechazado (no apartó nada): el cliente ve qué faltó, leído del `motivo` («A: pide 2 y faltan 1»). **202** lo guardó sin resolver: se reenvía una vez con el mismo `id`; si sigue así, «no pudimos confirmar el stock» (503) y el vencimiento lo cancela. **`parcial`** (un SKU que Stocker no conoce): no se vende incompleto, se cancela en el acto y se pide el catálogo. Un 400 o Stocker caído: 503 y el pedido queda `error_reserva`. |
+| **Cobrar** | `POST /cobros` | `tipo: "cobro"`, `id: "isu:ISU-1042-C<pago>"`, `datos: { ventaId: "isu:ISU-1042", importe (pesos), medio, operacion }` | Uno por pago aprobado. **Sin cobro el depósito no despacha.** `aplicado: false` (pedido cancelado, operación repetida) queda escrito en el pedido y en la ficha del backoffice. Cada pago guarda cuándo lo confirmó Stocker (`pagos.stocker_en`, migración `0021`) y el worker reenvía solo lo que no tiene confirmación. |
+| **Liberar** | `POST /pedidos/:n/cancelar` | `tipo: "cancelacion"`, `datos: { motivo }` | `{ accion, liberadas, yaSalio }`. 404 = Stocker no lo tiene (nada que liberar). `yaSalio: true` queda anotado en el pedido: si vuelve, entra por devolución. |
+| **Etiqueta** | `POST /pedidos/:n/envio` | `{ tipo, seguimiento }` | `{ pedidoExterno, seguimiento, envioTipo, despacharAntesDe }`. Se puede corregir hasta que sale. |
+| **Novedades** | `GET /pedidos/resoluciones?desde=&limite=` | el cursor de la vuelta anterior | `{ cursor, cambios, hayMas }`. El worker pregunta cada minuto (`NOVEDADES_CADA_SEGUNDOS`): **despachado** → el pedido sale y se avisa al cliente; **faltante** → queda anotado para que lo vea una persona; **cancelado** → si esperaba el pago, vence ya (y le llega el mail); si ya estaba cobrado, queda marcado para devolver el dinero o volver a apartar. El despacho gana: cancelado y despachado a la vez es despachado. |
+
+- **El cursor** se guarda en `tienda.ajustes` (`cursorNovedadesStocker`) y avanza recién después de aplicar cada tanda: si el worker se cae a la mitad, la próxima vuelta la repite (todo lo que hace es idempotente). La primera vez Stocker no manda historia, sólo el cursor de ahora.
+- **«¿Sigue en el depósito?»** (para cancelar un pedido ya cobrado desde el backoffice o con el botón de arrepentimiento): se lee el feed desde ese cursor sin moverlo. Si el feed dice que salió, o Stocker no contesta, o todavía no hay cursor, no se cancela desde la tienda.
+- **El plazo de pago** viaja en `pagoVenceEn`. Stocker libera solo lo que no se cobró y **nunca aparta más de 7 días**: los plazos de Ajustes llegan hasta 168 h. Una transferencia «informada» (con comprobante subido) no frena el reloj de Stocker: conviene revisarla antes de que venza.
+- **Lo que ya no existe en Stocker** y la tienda dejó de pedir: `GET /pedidos/:n`, `POST /pedidos/:n/pagado`, `PUT /clientes` (el comprador viaja en el pedido: no hay una ruta de datos personales sólo para eso) y el aviso `NOTIFY stocker_tienda_envios` (lo reemplaza el feed, que no se pierde si el worker está caído).
+- **En desarrollo** el Stocker simulado (`pnpm demo:stocker`, `scripts/demo/stocker-simulado.mjs`) contesta igual: sobre, 201/200/409/202, `parcial`, cobros con `aplicado`, el feed con cursor y el vencimiento propio de 7 días.
 
 ## Catálogo, stock y aviso: lo que la tienda lee hoy (contrato v1)
 

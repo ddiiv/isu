@@ -78,18 +78,18 @@ beforeAll(async () => {
     if (req.headers.authorization !== `Bearer ${"s".repeat(30)}`) return json(res, 401, {});
     const u = new URL(req.url!, "http://x");
     const b = req.method === "GET" ? {} : await leerCuerpo(req);
-    if (u.pathname.endsWith("/clientes")) return json(res, 200, { id: 1, nuevo: true });
-    const resumen = (n: string) => ({ id: 1, pedido: n, estado: stocker.pedidos.get(n)!.estado, pagoPendiente: stocker.pedidos.get(n)!.pagoPendiente, estadoEnvio: null, despachadoEn: null, canceladoEn: null, motivo: null });
+    // Stocker v3.39: el pedido en el sobre del contrato v1; cancelar contesta qué hizo.
     if (u.pathname === "/api/integraciones/tienda/pedidos" && req.method === "POST") {
-      for (const i of b.items) stocker.stock.set(i.sku, (stocker.stock.get(i.sku) ?? 0) - i.cantidad);
-      stocker.pedidos.set(b.pedido, { estado: "aceptado", pagoPendiente: b.pagoPendiente, items: b.items });
-      return json(res, 200, { ...resumen(b.pedido), repetido: false });
+      const d = b.datos;
+      for (const i of d.items) stocker.stock.set(i.sku, (stocker.stock.get(i.sku) ?? 0) - i.cantidad);
+      stocker.pedidos.set(d.pedidoExterno, { estado: "aceptado", pagoPendiente: d.pagoPendiente, items: d.items });
+      return json(res, 201, { pedidoExterno: d.pedidoExterno, estado: "aceptado", motivo: null, repetido: false });
     }
-    const m = u.pathname.match(/^\/api\/integraciones\/tienda\/pedidos\/([^/]+)\/(pagado|cancelar)$/);
+    const m = u.pathname.match(/^\/api\/integraciones\/tienda\/pedidos\/([^/]+)\/cancelar$/);
     const p = m ? stocker.pedidos.get(m[1]!) : undefined;
-    if (!m || !p) return json(res, 404, {});
-    if (m[2] === "cancelar") p.estado = "cancelado"; else p.pagoPendiente = false;
-    return json(res, 200, resumen(m[1]!));
+    if (!m || !p) return json(res, 404, { message: "Ese pedido no está en la cola." });
+    p.estado = "cancelado";
+    return json(res, 200, { accion: "cancelado", pedidoId: 1, liberadas: 1, yaSalio: false });
   });
   urlMp = await levantar(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${"m".repeat(30)}`) return json(res, 401, {});
@@ -263,7 +263,7 @@ describe("Talo: un CVU por pedido", () => {
     expect(pagos.rows).toEqual([{ proveedor: "transferencia", externo: `talo:${id}`, estado: "aprobado", monto: 1_600_000 }]);
     const t = await pool.query("SELECT estado, monto, pagador, pagador_cuit FROM tienda.transferencias_recibidas WHERE via = 'talo' AND externo LIKE $1", [`qa-trx-${id}-%`]);
     expect(t.rows).toEqual([{ estado: "aplicada", monto: 1_600_000, pagador: "Carolina Perez", pagador_cuit: "20301112224" }]);
-    expect(enviados.some((e) => e.nombre === "pagado" && e.datos.numero === numero)).toBe(true);
+    expect(enviados.some((e) => e.nombre === "cobro" && e.datos.numero === numero)).toBe(true);
   });
 
   it("de menos: no se confirma y queda para revisar; cuando completa, se confirma", async () => {

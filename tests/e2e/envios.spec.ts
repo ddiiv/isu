@@ -136,9 +136,12 @@ test.describe("backoffice de envíos", () => {
     const pdf = await descarga;
     expect(pdf.suggestedFilename()).toMatch(/^etiquetas-.*\.pdf$/);
 
-    // El depósito despacha en Stocker → NOTIFY → worker → "En camino".
-    const d = await request.post(`${STOCKER}/__despachar?pedido=${numero}`, { maxRedirects: 0 });
-    expect([200, 303]).toContain(d.status());
+    // El depósito despacha en Stocker → feed de novedades → worker → "En camino".
+    // (Stocker despacha sólo lo cobrado: el cobro llega por la cola del worker en unos segundos.)
+    await expect(async () => {
+      const d = await request.post(`${STOCKER}/__despachar?pedido=${numero}`, { maxRedirects: 0 });
+      expect([200, 303]).toContain(d.status());
+    }).toPass({ timeout: 30_000 });
     await expect(async () => {
       await page.goto(`${ADMIN}/envios?vista=en_camino`);
       await expect(page.getByRole("row", { name: numero })).toBeVisible({ timeout: 2000 });

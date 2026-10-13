@@ -23,6 +23,8 @@ const env = z.object({
   STOCKER_API_URL: z.string().url().optional(),
   STOCKER_TOKEN: z.string().min(20).optional(),
   CATALOGO_CADA_MINUTOS: z.coerce.number().int().min(1).max(1440).default(10),
+  // Cada cuánto se lee el feed de novedades de Stocker (despachos, cancelaciones).
+  NOVEDADES_CADA_SEGUNDOS: z.coerce.number().int().min(5).max(3600).default(60),
   // Para regenerar las páginas de la tienda al cambiar el stock (red privada de Railway).
   WEB_INTERNAL_URL: z.string().url().optional(),
   REVALIDAR_TOKEN: z.string().min(32).optional(),
@@ -90,7 +92,6 @@ const envios = crearEnvios({
   encolarStocker: (nombre, datos, id) => colaStocker.add(nombre, datos, { jobId: id, attempts: 12 }),
   sitio: env.SITIO_URL,
   secreto: env.INTERNO_TOKEN,
-  estadoEnStocker: deps ? (n) => deps!.stocker.estadoPedido(n) : undefined,
 });
 if (!env.SITIO_URL || !env.INTERNO_TOKEN) console.warn("Sin SITIO_URL / INTERNO_TOKEN: los avisos de envío van sin enlace de seguimiento.");
 
@@ -129,9 +130,10 @@ if (api) {
   console.warn("Sin API_URL / INTERNO_TOKEN: los pedidos sin pagar no vencen solos.");
 }
 
-// Seguimiento de los envíos y repaso de despachos (una sola programación aunque haya varias réplicas).
+// Seguimiento de los envíos (una sola programación aunque haya varias réplicas).
 await colaEnvios.upsertJobScheduler("seguimiento", { every: 10 * 60_000 }, { name: "seguimiento" });
-if (deps) await colaEnvios.upsertJobScheduler("revisar-despachos", { every: 15 * 60_000 }, { name: "revisar-despachos" });
+// El repaso de despachos le preguntaba a Stocker pedido por pedido; ahora lo hace el feed de novedades.
+await colaEnvios.removeJobScheduler("revisar-despachos").catch(() => false);
 // Etapa 8: pedir la opinión de las compras entregadas.
 await colaEnvios.upsertJobScheduler("pedir-resenas", { every: 60 * 60_000 }, { name: "pedir-resenas" });
 
@@ -139,6 +141,8 @@ let escucha: ReturnType<typeof escucharStocker> | null = null;
 if (deps) {
   // Una sola programación aunque haya varias réplicas (el id la hace única). La primera corre ya.
   await colaStocker.upsertJobScheduler("catalogo-periodico", { every: env.CATALOGO_CADA_MINUTOS * 60_000 }, { name: "catalogo" });
+  // Qué despachó o canceló Stocker, y los cobros que no confirmó (contrato v1 § 5 b).
+  await colaStocker.upsertJobScheduler("novedades", { every: env.NOVEDADES_CADA_SEGUNDOS * 1000 }, { name: "novedades" });
 
   const pedirCatalogo = () => colaStocker.add("catalogo", {}, { jobId: `catalogo-reconexion-${Math.floor(Date.now() / 60_000)}` }).then(() => {});
   escucha = escucharStocker({
@@ -155,11 +159,7 @@ if (deps) {
     },
     alReconectar: async () => {
       await pedirCatalogo();
-      await colaEnvios.add("revisar-despachos", {}, { jobId: `despachos-reconexion-${Math.floor(Date.now() / 60_000)}` });
-    },
-    // El despacho del depósito: el pedido sale y se avisa al cliente.
-    alEnvio: async (numero, evento) => {
-      await colaEnvios.add("despachado", { numero, evento }, { jobId: `despachado-${numero}-${evento}` });
+      await colaStocker.add("novedades", {}, { jobId: `novedades-reconexion-${Math.floor(Date.now() / 60_000)}` });
     },
   });
 }

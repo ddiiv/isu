@@ -4,6 +4,8 @@ import type { Redis } from "ioredis";
 import type { ClienteStocker } from "./stocker/cliente.js";
 import { MAX_SKUS_POR_PEDIDO } from "./stocker/cliente.js";
 import { aplicarCatalogo, aplicarStock, registrar } from "./stocker/sincronizar.js";
+import { crearCobros } from "./stocker/cobros.js";
+import { crearNovedades } from "./stocker/novedades.js";
 import type { Invalidador } from "./stocker/invalidar.js";
 import type { Envios } from "./envios/envios.js";
 import type { Whatsapp } from "@isu/envios";
@@ -15,15 +17,17 @@ import type { Whatsapp } from "@isu/envios";
  *                   aparece un SKU que la tienda no conoce.
  * stocker/stock     stock de unas variantes (aviso stock_cambio de Stocker) o SKU (pedido).
  * stocker/latido    prueba de punta a punta (Redis → cola → worker).
- * stocker/pagado    avisarle a Stocker que un pedido se cobró (sin esto no se despacha).
- * stocker/cliente   alta o actualización del cliente en Stocker.
+ * stocker/cobro     los cobros de un pedido a Stocker (sin esto no se despacha).
+ * stocker/novedades cada minuto: el feed de Stocker (despachado, falta mercadería,
+ *                   cancelado) y el barrido de cobros que Stocker no confirmó.
  * stocker/invalidar el backoffice cambió la vidriera: regenerar páginas (ISR).
  * stocker/envio    el número de seguimiento al pedido de Stocker (Envíos del día).
  * notificaciones/email · notificaciones/whatsapp   avisos al cliente.
- * envios/despachado      Stocker despachó (o le falta mercadería): el pedido sale.
+ * envios/despachado      Stocker despachó (o le falta mercadería): el pedido sale
+ *                        (trabajos viejos; ahora lo aplica stocker/novedades).
  * envios/seguimiento     cada 10 minutos, los envíos a los que les toca.
  * envios/seguir          uno ya (botón "Actualizar" del backoffice).
- * envios/revisar-despachos  repaso por si se perdió un aviso de Stocker.
+ * envios/revisar-despachos  (viejo) lo mismo que stocker/novedades.
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
  * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
@@ -56,6 +60,23 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
   const necesita = () => {
     if (!deps) throw Object.assign(new Error("Falta configurar Stocker (STOCKER_API_URL / STOCKER_TOKEN)"), { sinReintento: true });
     return deps;
+  };
+  const cobros = deps ? crearCobros({ pool: deps.pool, stocker: deps.stocker }) : null;
+  const novedades = deps && extras.envios ? crearNovedades({ pool: deps.pool, stocker: deps.stocker, despachado: extras.envios.despachado }) : null;
+  /** El feed de Stocker y, de paso, los cobros que quedaron sin confirmar. */
+  const leerNovedades = async () => {
+    necesita();
+    if (!novedades) throw sinReintento("Envíos sin configurar");
+    const n = await novedades.leer();
+    const c = await cobros!.pendientes();
+    return { ...n, cobros: c };
+  };
+  /** stocker/cobro y los stocker/pagado que hayan quedado de antes. */
+  const cobro = async (t: Job) => {
+    necesita();
+    const numero = String(t.data?.numero ?? "");
+    if (!NUMERO.test(numero)) throw sinReintento("Número de pedido inválido");
+    return cobros!.delPedido(numero);
   };
 
   return {
@@ -102,19 +123,9 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         return { cambios: r.cambios, desconocidos: r.desconocidos.length, desconocidosEnStocker: s.desconocidos.length, variantesNuevas };
       },
 
-      pagado: async (t) => {
-        const d = necesita();
-        const numero = String(t.data?.numero ?? "");
-        if (!/^ISU-\d{4,10}$/.test(numero)) throw Object.assign(new Error("Número de pedido inválido"), { sinReintento: true });
-        try {
-          const r = await d.stocker.marcarPagado(numero, String(t.data?.detalle ?? "Pagado").slice(0, 120));
-          return { estado: r.estado, pagoPendiente: r.pagoPendiente };
-        } catch (e) {
-          // Cancelado del otro lado (venció justo): no tiene arreglo reintentando; lo ve una persona.
-          if ((e as { status?: number }).status === 409 || (e as { status?: number }).status === 404) throw Object.assign(e as Error, { sinReintento: true });
-          throw e;
-        }
-      },
+      cobro,
+      pagado: cobro,
+      novedades: leerNovedades,
 
       invalidar: async (t) => {
         const d = necesita();
@@ -131,22 +142,16 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         if (!NUMERO.test(numero) || !/^[a-z_]{3,20}$/.test(tipo)) throw sinReintento("Datos de envío inválidos");
         try {
           const r = await d.stocker.cargarEnvio(numero, { tipo, seguimiento });
-          return { envioTipo: r.envioTipo, envioId: r.envioId };
+          return { envioTipo: r.envioTipo, seguimiento: r.seguimiento };
         } catch (e) {
-          // Ya despachado con otro número, o el pedido no está: lo ve una persona.
-          if ([404, 409].includes((e as { status?: number }).status ?? 0)) throw Object.assign(e as Error, { sinReintento: true });
+          // El pedido no está en Stocker, o no vino nada que guardar: reintentar no lo arregla.
+          if ([400, 404, 409].includes((e as { status?: number }).status ?? 0)) throw Object.assign(e as Error, { sinReintento: true });
           throw e;
         }
       },
 
-      cliente: async (t) => {
-        const d = necesita();
-        const c = t.data ?? {};
-        const limpio = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-        return d.stocker.guardarCliente({
-          email: String(c.email ?? ""), nombre: limpio(c.nombre), apellido: limpio(c.apellido), telefono: limpio(c.telefono), dni: limpio(c.dni),
-        });
-      },
+      // Stocker ya no recibe clientes (el comprador viaja en el pedido): los que hayan quedado en la cola se descartan.
+      cliente: async () => ({ omitido: "Stocker no recibe clientes de la tienda" }),
     },
     notificaciones: {
       email: async (t) => {
@@ -186,10 +191,7 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         if (!Number.isInteger(id) || id <= 0) throw sinReintento("Envío inválido");
         return extras.envios.seguir(id);
       },
-      "revisar-despachos": async () => {
-        if (!extras.envios) throw sinReintento("Envíos sin configurar");
-        return extras.envios.revisarDespachos();
-      },
+      "revisar-despachos": leerNovedades,
       // Etapa 8: "¿Qué te pareció tu compra?" (una vez por pedido).
       "pedir-resenas": async () => {
         if (!extras.envios) throw sinReintento("Envíos sin configurar");

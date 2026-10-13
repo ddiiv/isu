@@ -165,8 +165,11 @@ test.describe("backoffice", () => {
     await expect(page.getByRole("row", { name: numero }).getByRole("link", { name: tn })).toBeVisible();
 
     // Stocker lo despacha → en camino, con su número en el seguimiento del cliente.
-    const d = await request.post(`${STOCKER}/__despachar?pedido=${numero}`, { maxRedirects: 0 });
-    expect([200, 303]).toContain(d.status());
+    // (Stocker despacha sólo lo cobrado: el cobro llega por la cola del worker en unos segundos.)
+    await expect(async () => {
+      const d = await request.post(`${STOCKER}/__despachar?pedido=${numero}`, { maxRedirects: 0 });
+      expect([200, 303]).toContain(d.status());
+    }).toPass({ timeout: 30_000 });
     await expect(async () => {
       await page.goto(`${ADMIN}/envios?vista=en_camino`);
       await expect(page.getByRole("row", { name: numero })).toBeVisible({ timeout: 2000 });
