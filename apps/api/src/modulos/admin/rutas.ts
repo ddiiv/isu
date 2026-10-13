@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { hash } from "@node-rs/argon2";
 import { claveNueva, procesarFoto, FotoInvalida, type Almacen } from "@isu/almacen";
-import { ConfigPublica, ESTADOS_PENDIENTES, Local, parteDe, slug as esquemaSlug } from "@isu/shared";
+import { ConfigPublica, ESTADOS_PENDIENTES, HORAS_MAXIMAS_PAGO, Local, parteDe, slug as esquemaSlug } from "@isu/shared";
 import type { Entorno } from "../../entorno.js";
 import type { CacheCorta } from "../../lib/cache.js";
 import type { Colas } from "../../lib/colas.js";
@@ -111,7 +111,9 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     if (!p) throw new ErrorHttp(404, "no_encontrado", "No existe ese pedido.");
     const [items, pagos, eventos, comprobantes] = await Promise.all([
       pool.query("SELECT sku, nombre, color, talle, precio, precio_lista AS \"precioLista\", cantidad FROM tienda.pedido_items WHERE pedido_id = $1 ORDER BY id", [p.id]),
-      pool.query("SELECT proveedor, externo, estado, monto, registrado_por AS \"registradoPor\", creado_en AS \"creadoEn\" FROM tienda.pagos WHERE pedido_id = $1 ORDER BY id", [p.id]),
+      pool.query(`SELECT proveedor, externo, estado, monto, registrado_por AS "registradoPor", creado_en AS "creadoEn",
+                         stocker_en AS "stockerEn", stocker_aplicado AS "stockerAplicado", stocker_motivo AS "stockerMotivo"
+                    FROM tienda.pagos WHERE pedido_id = $1 ORDER BY id`, [p.id]),
       pool.query("SELECT estado, detalle, actor, creado_en AS \"creadoEn\" FROM tienda.pedido_eventos WHERE pedido_id = $1 ORDER BY id", [p.id]),
       // `n`: el número del comprobante dentro del pedido (1, 2…): va en la dirección de descarga en vez del id.
       pool.query("SELECT row_number() OVER (ORDER BY id)::int AS n, tipo, bytes, creado_en AS \"creadoEn\" FROM tienda.comprobantes WHERE pedido_id = $1 ORDER BY id", [p.id]),
@@ -706,17 +708,6 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     return { clientes: rows.map(({ totalFilas: _t, ...r }) => ({ ...r, gastado: Number(r.gastado) })), total: rows[0]?.totalFilas ?? 0, porPagina: POR_PAGINA };
   });
-  // Mandar a Stocker (con reintentos, por el worker). Uno o todos.
-  api.post("/v1/admin/clientes/sincronizar", { schema: { body: z.object({ ids: z.array(Id).max(5000).optional() }).strict() } }, async (req) => {
-    const a = await exigir(pool, req, req.body.ids ? "operador" : "dueno");
-    const { rows } = await pool.query<{ id: number; email: string; nombre: string; apellido: string | null; telefono: string | null; dni: string | null }>(
-      req.body.ids ? "SELECT id, email, nombre, apellido, telefono, dni FROM tienda.clientes WHERE id = ANY($1::int[])" : "SELECT id, email, nombre, apellido, telefono, dni FROM tienda.clientes",
-      req.body.ids ? [req.body.ids] : []);
-    for (const c of rows) await deps.colas.stocker("cliente", { email: c.email, nombre: c.nombre, apellido: c.apellido, telefono: c.telefono, dni: c.dni });
-    await auditar(pool, a, "sincronizar_clientes", "cliente", null, { cantidad: rows.length }, ip(req));
-    return { encolados: rows.length };
-  });
-
   // ── Ajustes (sólo el dueño) ──────────────────────────────────────
   const Transferencia = z.object({
     titular: z.string().trim().max(100), cuit: z.string().trim().regex(/^$|^\d{2}-?\d{8}-?\d$/, "CUIT inválido"),
@@ -729,9 +720,10 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),
-    horasPagoFacil: z.number().int().min(24).max(240),
-    horasTransferencia: z.number().int().min(2).max(240),
-    horasPagoLocal: z.number().int().min(24).max(720),
+    // Stocker libera sola la mercadería que no se cobró en 7 días: más no sirve.
+    horasPagoFacil: z.number().int().min(24).max(HORAS_MAXIMAS_PAGO),
+    horasTransferencia: z.number().int().min(2).max(HORAS_MAXIMAS_PAGO),
+    horasPagoLocal: z.number().int().min(24).max(HORAS_MAXIMAS_PAGO),
     datosTransferencia: Transferencia,
     publicarNuevos: z.boolean(),
     // Etapa 4

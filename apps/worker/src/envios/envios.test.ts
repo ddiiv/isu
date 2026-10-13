@@ -5,7 +5,7 @@ import { levantarSimulador, type Simulador } from "@isu/envios/simulador";
 import { crearEnvios, type Envios } from "./envios.js";
 
 /*
- * Etapa 4 en el worker: el despacho que avisa Stocker, el seguimiento de
+ * Etapa 4 en el worker: el despacho que trae el feed de Stocker, el seguimiento de
  * los transportes (simulador de @isu/envios) y los avisos al cliente sin
  * duplicados.
  */
@@ -18,7 +18,6 @@ const cola: Array<{ cola: string; nombre: string; datos: Record<string, unknown>
 const ids = new Set<string>();
 // Como BullMQ: el mismo jobId no se encola dos veces.
 const encolar = (c: string) => async (nombre: string, datos: Record<string, unknown>, id: string) => { if (!ids.has(id)) { ids.add(id); cola.push({ cola: c, nombre, datos, id }); } };
-const enStocker = new Map<string, string | null>();
 
 async function pedido(n: string, extra: Record<string, unknown> = {}) {
   const c = {
@@ -67,7 +66,6 @@ beforeAll(async () => {
     encolarStocker: encolar("stocker"),
     sitio: "https://www.isuwaya.test",
     secreto: SECRETO,
-    estadoEnStocker: async (n) => (enStocker.has(n) ? { estado: "aceptado", despachadoEn: enStocker.get(n) ?? null } : null),
     log: { warn: () => {} },
   });
 });
@@ -139,18 +137,14 @@ describe("despacho desde Stocker", () => {
     expect(await estado(p.id)).toBe("pagado");
     const ev = await pool.query("SELECT detalle FROM tienda.pedido_eventos WHERE pedido_id = $1", [p.id]);
     expect(ev.rows.at(-1).detalle).toMatch(/falta mercadería/);
+    // El feed de Stocker repite el cambio con cada novedad del pedido: no se anota dos veces seguidas.
+    expect((await envios.despachado(p.numero, "faltante")).cambio).toBe(false);
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.pedido_eventos WHERE pedido_id = $1", [p.id])).rows[0].n).toBe(ev.rows.length);
   });
   it("un pedido cancelado no se marca enviado", async () => {
     const p = await conEnvio("d9", { estado: "cancelado" });
     expect((await envios.despachado(p.numero, "despachado")).cambio).toBe(false);
     expect(await estado(p.id)).toBe("cancelado");
-  });
-  it("repaso: si se perdió el aviso, lo encuentra preguntándole a Stocker", async () => {
-    const p = await conEnvio("d10");
-    enStocker.set(p.numero, new Date().toISOString());
-    const r = await envios.revisarDespachos(500);
-    expect(r.despachados).toBeGreaterThanOrEqual(1);
-    expect(await estado(p.id)).toBe("enviado");
   });
 });
 

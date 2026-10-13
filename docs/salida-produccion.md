@@ -20,7 +20,7 @@ publicada y **cerrada** (sin dominio público) hasta la última prueba.
 ## 1. Stocker (fuera del horario de venta)
 
 1. Backup manual de la base.
-2. Aplicar los parches de Stocker en este orden (con `git apply --check` antes de cada uno): backend acumulado (etapas 1, 2 y 4), frontend acumulado (etapas 2 y 4), backoffice. Desplegar backend y frontend.
+2. Stocker **v3.39 o posterior**: ya trae todo lo que usa la tienda (catálogo, stock, pedidos, cobros y el feed de novedades del contrato v1). No hay parches que aplicar.
 3. En Stocker: *Integraciones* → negocio ISUWAYA → origen **Tienda online minorista** → *Emitir* (el token se ve una sola vez) y marcar los locales que **abastecen online**.
 4. Humo en Stocker: la venta en el local, Mercado Libre y Jumpseller siguen funcionando como antes (un pedido de prueba en cada uno, y cancelarlo).
 

@@ -21,6 +21,31 @@ Cada etapa cierra con dos chequeos obligatorios: **QA** (pantallas, flujos, caso
 | 14 | Movimiento liviano y prolijo en la tienda: banners que entran suaves y pasan solos con su barrita (con pausa, y quietos si la persona pidió menos animaciones), fotos de producto con zoom suave al pasar el mouse y fundido al cambiar de color, menú y carrito que entran y salen deslizándose, desplegables y pestañas suaves, tarjetas que aparecen al bajar; fuentes en WOFF2 (69 % menos) | **Cerrada** (abajo) |
 | 15 | Correo Argentino con la API MiCorreo (la de e-commerce): cotización antes de pagar, sucursales donde se retira, envío cargado en MiCorreo desde el backoffice y el número del rótulo (a mano o con lector) para seguirlo; peso y medidas obligatorios en cada producto; todo el pedido en una bolsa para cotizar con todos los transportes; datos de clientes sólo para el cliente o el backoffice identificado, con registro de quién los miró | **Cerrada** (abajo) · guía en [`correo-argentino.md`](correo-argentino.md) |
 
+## Contrato v1 de Stocker · tanda 2: pedidos, cobros y novedades (09/10/2026)
+
+**Por qué:** en producción, con Stocker v3.39, todo checkout terminaba en «No pudimos confirmar el stock» (503). Stocker contestaba 400 «El pedido necesita el id que le dio la plataforma.»: la tienda mandaba el número en `pedido` y Stocker lo lee en `pedidoExterno`. Además la tienda usaba rutas que Stocker ya no tiene (`GET /pedidos/:n`, `/pagado`, `PUT /clientes`) y esperaba un aviso de despacho por NOTIFY que Stocker no manda. Detalle en [`contrato-stocker.md`](contrato-stocker.md).
+
+**Qué cambió**
+- **El pedido va en el sobre del contrato v1** (`{ contrato: 1, tipo: "venta", id: "isu:ISU-…", ocurrioEn, datos: { pedidoExterno, … } }`) con el plazo de pago (`pagoVenceEn`). Las respuestas: 201 sigue, 200 ya lo tenía, **409 sin stock** (qué faltó sale del motivo de Stocker), **202 sin resolver** (se reenvía una vez con el mismo id; si sigue, 503 y lo libera el vencimiento) y **parcial** (un SKU que Stocker no conoce: se libera en el acto y se pide el catálogo).
+- **Cobros** (`POST /cobros`): cada pago aprobado es un cobro con su id; sin cobro el depósito no despacha. Si Stocker lo anota sin aplicarlo (pedido cancelado, operación repetida) queda en el pedido. Cada pago guarda cuándo lo confirmó Stocker (migración `0021`) y el worker reenvía solo lo que quedó sin confirmar. La ficha del pedido en el backoffice muestra el estado de cada cobro en Stocker.
+- **Novedades** (`GET /pedidos/resoluciones`): el worker lee el feed cada minuto con el cursor guardado en la base: despachado → «En camino» y avisos al cliente; falta mercadería → anotado; cancelado en Stocker → si esperaba el pago vence ya, si estaba cobrado queda marcado para devolver o volver a apartar. Reemplaza al NOTIFY de despachos y al repaso cada 15 minutos.
+- **Cancelar un pedido cobrado** (backoffice y arrepentimiento) mira el feed para saber si la caja ya salió; si no se puede saber, no se cancela desde la tienda. Si Stocker contesta que ya había salido, queda anotado.
+- **Clientes:** ya no se mandan a Stocker (el comprador viaja en el pedido). Se quitaron los botones «Mandar a Stocker» de Clientes.
+- **Plazos de pago:** hasta 7 días (168 h), lo máximo que Stocker aparta sin cobrar. Un plazo guardado más largo se usa con el tope.
+- **Stocker simulado** (desarrollo y pruebas en navegador) con las formas de v3.39: sobre, 201/200/409/202, parcial, cobros, feed con cursor y vencimiento propio.
+
+**QA**
+- Pruebas unitarias: **585/585**, 19 más:
+  - el cliente de Stocker (7): el sobre con `pedidoExterno` (lo que daba el 400), 409 con lo que faltó, 202, cancelar con 404, el cobro con `ventaId` y `aplicado`, la etiqueta y el feed con cursor;
+  - cobros y novedades en el worker (9): cada pago una vez y en pesos, sin aplicar queda escrito, 404 no se reintenta para siempre, Stocker caído no marca nada, el barrido; la primera vez sin historia, despachado y falta mercadería, cancelado (vence ya, o marcado si estaba cobrado, sin duplicar), y el cursor no avanza si algo falla a la mitad;
+  - la API (4): 202 reenviado, dos 202 seguidos (503), parcial (se libera y se pide el catálogo), cancelar un pedido cobrado según el feed;
+  - la prueba vieja del repaso de despachos se reemplazó por las del feed.
+- Pruebas en navegador: **174/174**, con el Stocker simulado en v3.39: los circuitos de envíos y de MiCorreo ahora pasan por el cobro y el feed de novedades hasta «En camino». La prueba del aviso del carrito en el celular medía la hoja mientras entraba deslizándose: ahora espera a que termine.
+- Revisión de pantallas: **sin hallazgos**. Diagnóstico «Todo bien». `pnpm seo`: «Todo bien para Google».
+
+**Hacker**
+- Auditoría: **434/434** (la ruta que se quitó, «mandar clientes a Stocker», se reemplazó en la lista de rutas protegidas por la de cancelar un pedido). El cursor de novedades no es un ajuste editable ni se ve desde el backoffice. A Stocker ya no viaja la lista de clientes: sólo el comprador de cada pedido.
+
 ## Etapa 15 · resultados del cierre (09/10/2026)
 
 **Qué entró** (guía en [`correo-argentino.md`](correo-argentino.md))

@@ -3,15 +3,15 @@ import type { Redis } from "ioredis";
 import { COLAS, OPCIONES_TRABAJO } from "@isu/shared";
 
 /*
- * Lo que la API deja para el worker: mails, avisos a Stocker que pueden
- * esperar (cliente nuevo) o que no se pueden perder (pedido cobrado).
+ * Lo que la API deja para el worker: mails y avisos a Stocker que no se
+ * pueden perder (el cobro de un pedido, el número de seguimiento).
  * Si Redis no está, el pedido HTTP no falla: se registra y sigue.
  */
 export type Plantilla = "bienvenida" | "restablecer" | "pedido_recibido" | "pago_confirmado" | "pedido_vencido" | "arrepentimiento" | "transferencia_informada";
 
 export interface Colas {
   email(plantilla: Plantilla, para: string, datos: Record<string, unknown>): Promise<void>;
-  stocker(nombre: "cliente" | "pagado" | "cancelar" | "stock" | "invalidar" | "catalogo" | "envio", datos: Record<string, unknown>, id?: string): Promise<void>;
+  stocker(nombre: "cobro" | "stock" | "invalidar" | "catalogo" | "envio", datos: Record<string, unknown>, id?: string): Promise<void>;
   /** Etapa 4: trabajos de envíos (Mercado Envíos después del pago, seguir un envío ya). */
   envios(nombre: "mercado-envios" | "seguir", datos: Record<string, unknown>, id?: string): Promise<void>;
   cerrar(): Promise<void>;

@@ -41,11 +41,17 @@ const colas: Colas = {
 };
 const mails = (plantilla: string) => enviados.filter((e) => e.tipo === "email" && e.nombre === plantilla);
 
-// ── Stocker simulado ──
+// ── Stocker simulado (v3.39: sobre del contrato v1, 201/200/202/409) ──
+interface PedidoSimulado { estado: string; pagoPendiente: boolean; items: Array<{ sku: string; cantidad: number; precioUnitario?: number }>; pagoDetalle?: string; pagoVenceEn?: string; total?: number; sobre: Record<string, unknown> }
 const stocker = {
-  pedidos: new Map<string, { estado: string; pagoPendiente: boolean; items: Array<{ sku: string; cantidad: number; precioUnitario?: number }>; pagoDetalle?: string; total?: number }>(),
+  pedidos: new Map<string, PedidoSimulado>(),
   stock: new Map<string, number>(),
   caido: false,
+  /** Cuántas veces contestar 202 (guardado sin resolver) antes de apartar. */
+  pendientes: 0,
+  /** SKU que Stocker no conoce (el pedido queda parcial). */
+  desconocidos: new Set<string>(),
+  cancelaciones: [] as string[],
 };
 // ── Mercado Pago simulado ──
 const mp = { preferencias: [] as Array<Record<string, unknown>>, pagos: new Map<string, Record<string, unknown>>(), caido: false };
@@ -59,7 +65,7 @@ async function levantar(h: http.RequestListener) {
 }
 const leerCuerpo = async (req: http.IncomingMessage) => { let b = ""; for await (const c of req) b += c; return b ? JSON.parse(b) : {}; };
 const json = (res: http.ServerResponse, status: number, cuerpo: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(cuerpo)); };
-const resumen = (n: string) => { const p = stocker.pedidos.get(n)!; return { id: 1, pedido: n, estado: p.estado, pagoPendiente: p.pagoPendiente, estadoEnvio: null, despachadoEn: null, canceladoEn: null, motivo: null }; };
+const sinPrefijo = (v: unknown) => { const t = String(v ?? "").trim(); const i = t.indexOf(":"); return i === -1 ? t : t.slice(i + 1); };
 
 async function fotoPrueba() { return sharp({ create: { width: 800, height: 600, channels: 3, background: "#fff" } }).jpeg().toBuffer(); }
 
@@ -91,34 +97,42 @@ beforeAll(async () => {
     if (req.headers.authorization !== `Bearer ${"s".repeat(30)}`) return json(res, 401, { message: "Credencial inválida." });
     if (stocker.caido) { req.socket.destroy(); return; }
     const u = new URL(req.url!, "http://x");
-    const b = req.method === "GET" ? {} : await leerCuerpo(req);
-    // eslint-disable-next-line security/detect-unsafe-regex -- ruta del simulador, texto controlado por la prueba
-    const m = u.pathname.match(/^\/api\/integraciones\/tienda\/pedidos(?:\/([^/]+))?(?:\/(pagado|cancelar))?$/);
-    if (u.pathname.endsWith("/clientes")) return json(res, 200, { id: 1, nuevo: true });
-    if (!m) return json(res, 404, { message: "No existe." });
-    const [, numero, accion] = m;
-    if (!numero && req.method === "POST") {
-      if (stocker.pedidos.has(b.pedido)) return json(res, 200, { ...resumen(b.pedido), repetido: true });
-      const faltan = b.items.filter((i: { sku: string; cantidad: number }) => (stocker.stock.get(i.sku) ?? 0) < i.cantidad);
+    const cuerpo = req.method === "GET" ? {} : await leerCuerpo(req);
+    // Como abrirSobre de Stocker: el sobre o el cuerpo plano; el número sale de datos.pedidoExterno o del id sin prefijo.
+    const b = cuerpo.datos && typeof cuerpo.datos === "object" ? { pedidoExterno: sinPrefijo(cuerpo.id), ...cuerpo.datos } : cuerpo;
+    if (u.pathname === "/api/integraciones/tienda/pedidos" && req.method === "POST") {
+      const n = String(b.pedidoExterno ?? "").trim();
+      if (!n) return json(res, 400, { message: "El pedido necesita el id que le dio la plataforma." });
+      const ya = stocker.pedidos.get(n);
+      if (ya && ya.estado !== "pendiente") return json(res, ya.estado === "rechazado" ? 409 : 200, { pedidoExterno: n, estado: ya.estado, motivo: null, repetido: true });
+      const nuevo: PedidoSimulado = { estado: "pendiente", pagoPendiente: b.pagoPendiente !== false, items: b.items, pagoDetalle: b.pagoDetalle, pagoVenceEn: b.pagoVenceEn, total: b.total, sobre: cuerpo };
+      stocker.pedidos.set(n, nuevo);
+      if (stocker.pendientes > 0) { stocker.pendientes--; return json(res, 202, { pedidoExterno: n, estado: "pendiente", motivo: null, repetido: !!ya }); }
+      const conocidos = b.items.filter((i: { sku: string }) => !stocker.desconocidos.has(i.sku));
+      const faltan = conocidos.filter((i: { sku: string; cantidad: number }) => (stocker.stock.get(i.sku) ?? 0) < i.cantidad);
       if (faltan.length) {
-        return json(res, 200, { id: 2, pedido: b.pedido, estado: "rechazado", pagoPendiente: true, estadoEnvio: null, despachadoEn: null, canceladoEn: null, motivo: "sin stock",
-          faltantes: faltan.map((i: { sku: string; cantidad: number }) => ({ sku: i.sku, pedido: i.cantidad, hay: stocker.stock.get(i.sku) ?? 0 })) });
+        nuevo.estado = "rechazado";
+        const motivo = `Sin stock para despachar. ${faltan.map((i: { sku: string; cantidad: number }) => `${i.sku}: pide ${i.cantidad} y faltan ${i.cantidad - (stocker.stock.get(i.sku) ?? 0)}`).join("; ")}.`;
+        return json(res, 409, { pedidoExterno: n, estado: "rechazado", motivo, repetido: !!ya });
       }
-      for (const i of b.items) stocker.stock.set(i.sku, stocker.stock.get(i.sku)! - i.cantidad);
-      stocker.pedidos.set(b.pedido, { estado: "aceptado", pagoPendiente: b.pagoPendiente, items: b.items, pagoDetalle: b.pagoDetalle, total: b.total });
-      return json(res, 200, { ...resumen(b.pedido), repetido: false });
+      for (const i of conocidos) stocker.stock.set(i.sku, stocker.stock.get(i.sku)! - i.cantidad);
+      nuevo.estado = conocidos.length < b.items.length ? "parcial" : "aceptado";
+      nuevo.items = conocidos;
+      return json(res, 201, { pedidoExterno: n, estado: nuevo.estado, motivo: nuevo.estado === "parcial" ? "No están en Stocker y no se descontaron: X." : null, repetido: !!ya });
     }
-    const p = stocker.pedidos.get(numero!);
-    if (!p) return json(res, 404, { message: "Ese pedido no existe." });
-    if (accion === "pagado") {
-      if (p.estado === "cancelado") return json(res, 409, { message: "cancelado", codigo: "PEDIDO_CANCELADO" });
-      p.pagoPendiente = false;
-    }
-    if (accion === "cancelar" && p.estado !== "cancelado") {
+    const m = /^\/api\/integraciones\/tienda\/pedidos\/([^/]+)\/cancelar$/.exec(u.pathname);
+    if (m && req.method === "POST") {
+      const p = stocker.pedidos.get(decodeURIComponent(m[1]!));
+      if (!p) return json(res, 404, { message: "Ese pedido no está en la cola." });
+      stocker.cancelaciones.push(decodeURIComponent(m[1]!));
+      if (p.estado === "cancelado") return json(res, 200, { accion: "ya_cancelado", pedidoId: 1 });
+      const liberadas = ["aceptado", "parcial"].includes(p.estado) ? p.items.reduce((t, i) => t + i.cantidad, 0) : 0;
+      if (liberadas) for (const i of p.items) stocker.stock.set(i.sku, stocker.stock.get(i.sku)! + i.cantidad);
       p.estado = "cancelado";
-      for (const i of p.items) stocker.stock.set(i.sku, stocker.stock.get(i.sku)! + i.cantidad);
+      return json(res, 200, { accion: "cancelado", pedidoId: 1, liberadas, yaSalio: false });
     }
-    return json(res, 200, resumen(numero!));
+    // Lo que ya no existe en Stocker v3.39 (/pedidos/:n, /pagado, /clientes) contesta 404, como el real.
+    return json(res, 404, { message: "No existe." });
   });
   urlMp = await levantar(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${"m".repeat(30)}`) return json(res, 401, {});
@@ -285,6 +299,15 @@ describe("pedidos", () => {
     const { numero, acceso, estado, redirigir } = r.json();
     expect([estado, redirigir]).toEqual(["esperando_transferencia", null]);
     expect(stocker.pedidos.get(numero)).toMatchObject({ estado: "aceptado", pagoPendiente: true });
+    // El sobre del contrato v1: el número va en el id (con el prefijo) y en datos.pedidoExterno.
+    const sobre = stocker.pedidos.get(numero)!.sobre as { contrato: number; tipo: string; id: string; ocurrioEn: string; datos: Record<string, unknown> };
+    expect([sobre.contrato, sobre.tipo, sobre.id, sobre.datos.pedidoExterno]).toEqual([1, "venta", `isu:${numero}`, numero]);
+    expect(Number.isNaN(Date.parse(sobre.ocurrioEn))).toBe(false);
+    expect(sobre.datos).toMatchObject({ pagoPendiente: true, total: 16000, comprador: { email: "qa-compra-t1@test.com" } });
+    // El plazo de pago viaja: Stocker libera solo lo que no se cobra (nunca más de 7 días).
+    const vence = Date.parse(String(sobre.datos.pagoVenceEn));
+    expect(vence).toBeGreaterThan(Date.now());
+    expect(vence).toBeLessThanOrEqual(Date.now() + 7 * 24 * 3600_000);
     const v = (await get(`/v1/pedidos/${numero}`, { "x-isu-acceso": acceso })).json();
     expect([v.subtotal, v.descuento, v.total]).toEqual([2_000_000, 400_000, 1_600_000]);
     expect(v.pago.transferencia.alias).toBe("ISUWAYA.QA");
@@ -330,6 +353,38 @@ describe("pedidos", () => {
     expect([r.statusCode, r.json().error]).toEqual([409, "sin_stock"]);
     expect(r.json().faltantes).toEqual([{ sku: "QA-C-L", hay: 0, nombre: "Remera compra (L)" }]);
     expect(enviados.some((e) => e.nombre === "stock")).toBe(true);
+  });
+
+  it("Stocker lo guardó sin resolver (202): se reenvía con el mismo id y, si aparta, sigue", async () => {
+    stocker.pendientes = 1;
+    const r = await post("/v1/pedidos", pedido("p202"));
+    expect([r.statusCode, r.json().estado]).toEqual([201, "esperando_transferencia"]);
+    expect(stocker.pedidos.get(r.json().numero)?.estado).toBe("aceptado");
+  });
+
+  it("dos 202 seguidos: no se le dice al cliente que está apartado (503) y el vencimiento lo libera", async () => {
+    stocker.pendientes = 2;
+    try {
+      const r = await post("/v1/pedidos", pedido("p202b"));
+      expect(r.statusCode).toBe(503);
+      const { rows } = await pool.query("SELECT estado FROM tienda.pedidos WHERE email = 'qa-compra-p202b@test.com'");
+      expect(rows[0].estado).toBe("error_reserva");
+    } finally { stocker.pendientes = 0; }
+  });
+
+  it("parcial (un SKU que Stocker no conoce): no se vende incompleto, se libera y se pide el catálogo", async () => {
+    stocker.desconocidos.add("QA-C-L");
+    enviados.length = 0;
+    try {
+      const r = await post("/v1/pedidos", pedido("parcial", { items: [{ sku: "QA-C-M", cantidad: 1 }, { sku: "QA-C-L", cantidad: 1 }] }));
+      expect([r.statusCode, r.json().error]).toEqual([409, "sin_stock"]);
+      expect(r.json().mensaje).toMatch(/ya no está a la venta/);
+      const { rows } = await pool.query("SELECT numero, estado FROM tienda.pedidos WHERE email = 'qa-compra-parcial@test.com'");
+      expect(rows[0].estado).toBe("sin_stock");
+      expect(stocker.cancelaciones).toContain(rows[0].numero);
+      expect(stocker.stock.get("QA-C-M")).toBe(5); // lo apartado volvió
+      expect(enviados.some((e) => e.nombre === "catalogo")).toBe(true);
+    } finally { stocker.desconocidos.clear(); }
   });
 
   it("Stocker caído: 503, no se cobra, y el pedido queda para limpiar", async () => {
@@ -419,7 +474,7 @@ describe("Mercado Pago: aviso de pago", () => {
     mp.pagos.set("5001", { id: 5001, status: "approved", external_reference: numero, transaction_amount: 10000, currency_id: "ARS" });
     expect((await post("/v1/pagos/mercadopago/aviso?type=payment&data.id=5001", {}, firmar("5001"))).json().aplicado).toBe(true);
     expect((await pool.query("SELECT estado FROM tienda.pedidos WHERE numero = $1", [numero])).rows[0].estado).toBe("pagado");
-    expect(enviados.filter((e) => e.nombre === "pagado")).toHaveLength(1);
+    expect(enviados.filter((e) => e.nombre === "cobro")).toHaveLength(1);
     expect(mails("pago_confirmado")).toHaveLength(1);
     expect((await post("/v1/pagos/mercadopago/aviso?type=payment&data.id=5001", {}, firmar("5001", "req-2"))).json().aplicado).toBe(false);
     expect(mails("pago_confirmado")).toHaveLength(1);
@@ -448,7 +503,7 @@ describe("registrar pagos por API (transferencias, local)", () => {
     const ok = await post("/v1/pagos/registrar", { pedido: r.numero, medio: "transferencia", monto: 1_600_000, referencia: "OP-778899", quien: "Caja" }, auth);
     expect(ok.json()).toMatchObject({ estado: "pagado", repetido: false });
     expect(stocker.pedidos.get(r.numero)?.pagoPendiente).toBe(true); // lo levanta el worker (cola), no la API
-    expect(enviados.some((e) => e.nombre === "pagado" && e.datos.numero === r.numero)).toBe(true);
+    expect(enviados.some((e) => e.nombre === "cobro" && e.datos.numero === r.numero)).toBe(true);
     expect((await post("/v1/pagos/registrar", { pedido: r.numero, medio: "transferencia", monto: 1_600_000, referencia: "OP-778899", quien: "Caja" }, auth)).json().repetido).toBe(true);
     const ev = await pool.query("SELECT e.estado, e.actor FROM tienda.pedido_eventos e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1 ORDER BY e.id", [r.numero]);
     expect(ev.rows.map((x) => x.estado)).toEqual(["reservando", "esperando_transferencia", "esperando_transferencia", "pagado"]);

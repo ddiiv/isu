@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
+import { CLAVE_CURSOR_NOVEDADES, HORAS_MAXIMAS_PAGO } from "@isu/shared";
 import { CP, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
 import { firmaOpinar, type Paquete, type Transportes } from "@isu/envios";
 import type { CotizadorEnvios } from "../envios/cotizador.js";
@@ -265,23 +266,33 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     }
 
     // ── Reserva en Stocker ──
-    const horas = a[HORAS[medioPago]] as number;
+    // Stocker libera solo lo que no se cobró en 7 días: el plazo de la tienda nunca pasa de ahí.
+    const horas = Math.min(a[HORAS[medioPago]] as number, HORAS_MAXIMAS_PAGO);
     const venceEn = new Date(Date.now() + horas * 3600_000);
+    const nuevo = {
+      numero: p.numero,
+      ocurrioEn: p.creado_en,
+      // El precio que se cobró de verdad (con el cupón repartido), para que la venta en Stocker cierre.
+      items: paraStocker(c),
+      comprador: { nombre: `${contacto.nombre} ${contacto.apellido}`, email: contacto.email, documento: contacto.dni },
+      total: pesos(c.total),
+      pagoPendiente: true,
+      pagoDetalle: `${NOMBRE_MEDIO[medioPago]}${c.aplicado ? ` · ${conCupon(c.aplicado.cupon)}` : ""} · vence ${vence(venceEn)}`,
+      pagoVenceEn: venceEn,
+      // Para Envíos del día: con qué sale (y el corte si es en el día).
+      envio: entrega.tipo === "retiro"
+        ? { tipo: "retiro" }
+        : { tipo: !opcion || opcion.transporte === "estandar" ? "envio" : opcion.transporte, ...(corteEnElDia ? { despacharAntesDe: corteEnElDia.toISOString() } : {}) },
+    };
     let r;
     try {
-      r = await stocker.crearPedido({
-        pedido: p.numero,
-        // El precio que se cobró de verdad (con el cupón repartido), para que la venta en Stocker cierre.
-        items: paraStocker(c),
-        comprador: { nombre: `${contacto.nombre} ${contacto.apellido}`, email: contacto.email, documento: contacto.dni },
-        total: pesos(c.total),
-        pagoPendiente: true,
-        pagoDetalle: `${NOMBRE_MEDIO[medioPago]}${c.aplicado ? ` · ${conCupon(c.aplicado.cupon)}` : ""} · vence ${vence(venceEn)}`,
-        // Para Envíos del día: con qué sale (y el corte si es en el día).
-        envio: entrega.tipo === "retiro"
-          ? { tipo: "retiro" }
-          : { tipo: !opcion || opcion.transporte === "estandar" ? "envio" : opcion.transporte, ...(corteEnElDia ? { despacharAntesDe: corteEnElDia.toISOString() } : {}) },
-      });
+      r = await stocker.crearPedido(nuevo);
+      // 202: Stocker lo guardó pero no llegó a apartar. Reenviarlo es seguro (mismo id) y lo procesa ya.
+      if (r.estado === "pendiente") {
+        await new Promise((ok) => setTimeout(ok, 1500));
+        r = await stocker.crearPedido(nuevo);
+      }
+      if (r.estado === "pendiente") throw new ErrorStocker("Stocker guardó el pedido pero todavía no apartó la mercadería (202)", 202);
     } catch (e) {
       // No se sabe si Stocker llegó a apartar: el vencimiento lo cancela del otro lado (es idempotente).
       await pool.query("UPDATE tienda.pedidos SET estado = 'error_reserva', vence_en = now(), actualizado_en = now() WHERE id = $1", [p.id]);
@@ -290,16 +301,26 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       throw new ErrorHttp(503, "sin_stocker", "No pudimos confirmar el stock en este momento. No se te cobró nada: probá de nuevo en unos minutos.");
     }
 
-    if (!["aceptado"].includes(r.estado)) {
+    if (r.estado !== "aceptado") {
       await pool.query("UPDATE tienda.pedidos SET estado = 'sin_stock', stocker_estado = $2, actualizado_en = now() WHERE id = $1", [p.id, r.estado]);
       await evento(pool, p.id, "sin_stock", "stocker", r.motivo ?? undefined);
+      const skus = [...new Set(c.lineas.map((l) => l.sku))];
+      if (r.estado === "parcial") {
+        // Stocker no conoce algún SKU (o es de un evento) y apartó sólo el resto: un pedido incompleto no se vende.
+        await stocker.cancelarPedido(p.numero, "La tienda no vende un pedido incompleto").catch((e) =>
+          deps.log.error({ err: (e as Error).message, pedido: p.numero }, "no se pudo liberar un pedido parcial: lo libera el vencimiento de Stocker"));
+        // La vidriera tiene algo que Stocker ya no tiene: que se ponga al día.
+        await deps.colas.stocker("catalogo", {}, `catalogo-parcial-${Math.floor(Date.now() / 60_000)}`);
+      }
       // Que la tienda deje de ofrecer lo que ya no hay.
-      await deps.colas.stocker("stock", { skus: [...new Set(c.lineas.map((l) => l.sku))] });
+      await deps.colas.stocker("stock", { skus });
       const nombres = new Map(c.lineas.map((l) => [l.sku, `${l.nombre}${l.talle ? ` (${l.talle})` : ""}`]));
-      const faltantes = (r.faltantes ?? []).map((f) => ({ sku: f.sku, hay: f.hay, nombre: nombres.get(f.sku) ?? f.sku }));
-      throw new ErrorHttp(409, "sin_stock", faltantes.length
-        ? `Justo se vendió: ${faltantes.map((f) => f.hay ? `${f.nombre}, quedan ${f.hay}` : `${f.nombre}, se agotó`).join("; ")}.`
-        : "Justo se vendió algo de tu carrito. Revisalo y probá de nuevo.", { faltantes });
+      const faltantes = r.faltantes.map((f) => ({ sku: f.sku, hay: f.hay ?? 0, nombre: nombres.get(f.sku) ?? f.sku }));
+      throw new ErrorHttp(409, "sin_stock", r.estado === "parcial"
+        ? "Algo de tu carrito ya no está a la venta. Revisalo y probá de nuevo."
+        : faltantes.length
+          ? `Justo se vendió: ${faltantes.map((f) => f.hay ? `${f.nombre}, quedan ${f.hay}` : `${f.nombre}, se agotó`).join("; ")}.`
+          : "Justo se vendió algo de tu carrito. Revisalo y probá de nuevo.", { faltantes });
     }
 
     const estado = ESTADO_INICIAL[medioPago];
@@ -317,7 +338,6 @@ export function crearServicioPedidos(deps: DepsPedidos) {
         deps.log.error({ err: (e as Error).message, pedido: p.numero }, "no se pudo asignar a dónde transferir: van los datos de Ajustes");
       }
     }
-    await deps.colas.stocker("cliente", { email: contacto.email, nombre: contacto.nombre, apellido: contacto.apellido, telefono: contacto.telefono, dni: contacto.dni });
 
     let redirigir: string | null = null;
     try {
@@ -388,6 +408,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     const cli = await pool.connect();
     let p: FilaPedido;
     let cambio = false;
+    let tarde = false;
+    let pagoId: number | undefined;
     try {
       await cli.query("BEGIN");
       const r = await cli.query<FilaPedido>("SELECT * FROM tienda.pedidos WHERE numero = $1 FOR UPDATE", [numero]);
@@ -403,6 +425,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
         [p.id, pago.proveedor, pago.externo, alcanza ? "aprobado" : "insuficiente", pago.monto, pago.detalle ? JSON.stringify(pago.detalle) : null, pago.quien.slice(0, 150)],
       );
       if (ins.rowCount === 0) { await cli.query("ROLLBACK"); return { numero, estado: p.estado, repetido: true, insuficiente: false }; }
+      pagoId = (ins.rows[0] as { id: number }).id;
       if (!alcanza) {
         await evento(cli, p.id, p.estado, pago.quien, `Pago de ${formatearPesos(pago.monto)} menor al total (${formatearPesos(p.total)}): a revisar`);
         await cli.query("COMMIT");
@@ -415,6 +438,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       } else if (["vencido", "cancelado", "sin_stock", "error_reserva"].includes(p.estado)) {
         p = (await cli.query<FilaPedido>("UPDATE tienda.pedidos SET estado = 'pagado_tarde', actualizado_en = now() WHERE id = $1 RETURNING *", [p.id])).rows[0]!;
         await evento(cli, p.id, "pagado_tarde", pago.quien, "Se cobró un pedido que ya no tenía la mercadería apartada: revisar stock o devolver el dinero");
+        tarde = true;
       }
       await cli.query("COMMIT");
     } catch (e) {
@@ -428,10 +452,13 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       if (p.transporte === "mercado_envios" && pago.proveedor === "mercadopago") {
         await deps.colas.envios("mercado-envios", { numero: p.numero, pagoId: pago.externo }, `me-${p.numero}`);
       }
-      // Que Stocker levante la marca "sin pagar" (con reintentos: sin esto el depósito no lo despacha).
-      await deps.colas.stocker("pagado", { numero: p.numero, detalle: `Pagado · ${NOMBRE_MEDIO[p.medio_pago]}${p.cupon_nombre ? ` · ${conCupon({ codigo: p.cupon_codigo, nombre: p.cupon_nombre })}` : ""}` }, `pagado-${p.numero}`);
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
     }
+    /*
+     * El cobro a Stocker (con reintentos: sin él el depósito no lo despacha). También
+     * el que llegó tarde: Stocker lo anota sin aplicarlo y queda a la vista para devolverlo.
+     */
+    if (cambio || tarde) await deps.colas.stocker("cobro", { numero: p.numero }, `cobro-${pagoId ?? p.numero}`);
     return { numero: p.numero, estado: p.estado, repetido: false, insuficiente: false };
   }
 
@@ -469,11 +496,13 @@ export function crearServicioPedidos(deps: DepsPedidos) {
   /** Devuelve lo apartado y deja el pedido `vencido` o `cancelado`. */
   async function liberar(p: FilaPedido, estado: "vencido" | "cancelado", motivo: string, quien: string) {
     const stocker = await stockerOError();
-    await stocker.cancelarPedido(p.numero, motivo);
+    const c = await stocker.cancelarPedido(p.numero, motivo);
     const r = await pool.query<FilaPedido>(
       `UPDATE tienda.pedidos SET estado = $2, actualizado_en = now() WHERE id = $1 AND estado = $3 RETURNING *`, [p.id, estado, p.estado],
     );
     if (r.rows[0]) await evento(pool, p.id, estado, quien, motivo);
+    // El depósito lo despachó justo antes: Stocker no devuelve el stock y el paquete va en camino.
+    if (c?.yaSalio) await evento(pool, p.id, estado, "stocker", "Stocker: ya se había despachado. Si vuelve, entra por devolución; avisale al cliente.");
     return r.rows[0] ?? null;
   }
 
@@ -529,10 +558,29 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     return { revisados: rows.length };
   }
 
-  /** ¿La caja todavía no salió del depósito? (para cancelar un pedido ya cobrado) */
+  /*
+   * ¿La caja todavía no salió del depósito? (para cancelar un pedido ya cobrado)
+   *
+   * Stocker ya no contesta por un pedido suelto: se lee el feed de novedades
+   * desde donde lo dejó el worker, sin moverle el cursor. Lo que el worker ya
+   * leyó está en la base (el pedido pasó a enviado o retirado). Sin cursor
+   * todavía, o con Stocker caído, no se sabe: se contesta que no (falla cerrado).
+   */
   async function sigueEnDeposito(numero: string) {
-    const e = await (await stockerOError()).estadoPedido(numero);
-    return !!e && e.estado !== "cancelado" && e.estadoEnvio !== "despachado";
+    const stocker = await stockerOError();
+    const { rows } = await pool.query<{ estado: string }>("SELECT estado FROM tienda.pedidos WHERE numero = $1", [numero]);
+    if (!rows[0] || !["pagado", "listo_para_retirar"].includes(rows[0].estado)) return false;
+    let desde = await leerAjuste<string | null>(pool, CLAVE_CURSOR_NOVEDADES, null);
+    if (typeof desde !== "string" || !desde) return false;
+    for (let vuelta = 0; vuelta < 20; vuelta++) {
+      const r = await stocker.resoluciones(desde, 500);
+      for (const x of r.cambios) {
+        if (x.pedidoExterno === numero && (x.despachadoEn || x.canceladoEn || x.estadoEnvio === "despachado")) return false;
+      }
+      if (!r.hayMas || r.cursor === desde) return true;
+      desde = r.cursor;
+    }
+    return false;
   }
 
   return { sigueEnDeposito, crear, delDueno, publico, pagar, aplicarPagoMp, consultarMp, linkDePago, liberar, vencer, conciliarMp, datosMail, evento, transferencias };

@@ -251,7 +251,7 @@ for (const ruta of ["/fotos/../.env", "/fotos/p/1/..%2f..%2f.env", "/fotos/p/1/a
     ["GET", "resumen"], ["GET", "pedidos"], ["GET", "pedidos/ISU-1001"], ["GET", "productos"], ["GET", "productos/1"], ["GET", "ajustes"],
     ["GET", "usuarios"], ["GET", "auditoria"], ["GET", "guias-talles"], ["GET", "clientes"], ["GET", "pedidos/ISU-1001/comprobantes/1"],
     ["PATCH", "productos/1"], ["POST", "productos/masivo"], ["PUT", "ajustes"], ["POST", "usuarios"], ["POST", "guias-talles"],
-    ["DELETE", "fotos/1"], ["POST", "pedidos/ISU-1001/pago"], ["POST", "clientes/sincronizar"], ["POST", "sincronizar-catalogo"],
+    ["DELETE", "fotos/1"], ["POST", "pedidos/ISU-1001/pago"], ["POST", "pedidos/ISU-1001/cancelar"], ["POST", "sincronizar-catalogo"],
   ];
   let abiertas = 0, conFalso = 0;
   for (const [m, r] of rutas) {

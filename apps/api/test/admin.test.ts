@@ -44,16 +44,27 @@ const colas: Colas = {
   async cerrar() {},
 };
 
-// Stocker simulado: sólo lo que usa el backoffice (estado y cancelar).
+// Stocker simulado (v3.39): sólo lo que usa el backoffice (cancelar y el feed de novedades).
 const cancelados = new Set<string>();
+const feed: Array<Record<string, unknown>> = [];
 let servidor: http.Server;
 async function levantarStocker() {
   servidor = http.createServer((req, res) => {
-    const m = /\/pedidos\/(ISU-\d+)(\/cancelar)?$/.exec(req.url ?? "");
-    res.writeHead(m ? 200 : 404, { "content-type": "application/json" });
-    if (!m) return res.end("{}");
-    if (m[2]) cancelados.add(m[1]!);
-    res.end(JSON.stringify({ id: 1, pedido: m[1], estado: cancelados.has(m[1]!) ? "cancelado" : "aceptado", pagoPendiente: false, estadoEnvio: null, despachadoEn: null, canceladoEn: null, motivo: null }));
+    const u = new URL(req.url ?? "/", "http://x");
+    const enviar = (status: number, cuerpo: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(cuerpo)); };
+    if (u.pathname.endsWith("/pedidos/resoluciones")) {
+      // Cursor de mentira ("c:<posición>"): para la tienda es opaco.
+      const desde = u.searchParams.get("desde");
+      if (!desde) return enviar(200, { cursor: `c:${feed.length}`, cambios: [] });
+      const i = Number(desde.slice(2));
+      const cambios = feed.slice(i, i + Number(u.searchParams.get("limite") ?? 100));
+      return enviar(200, { cursor: `c:${i + cambios.length}`, cambios, hayMas: false });
+    }
+    const m = /\/pedidos\/(ISU-\d+)\/cancelar$/.exec(u.pathname);
+    if (!m) return enviar(404, { message: "No existe." });
+    const ya = cancelados.has(m[1]!);
+    cancelados.add(m[1]!);
+    enviar(200, ya ? { accion: "ya_cancelado", pedidoId: 1 } : { accion: "cancelado", pedidoId: 1, liberadas: 1, yaSalio: false });
   });
   await new Promise<void>((r) => servidor.listen(0, "127.0.0.1", r));
   return `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
@@ -492,7 +503,7 @@ describe("pedidos", () => {
     enviados.length = 0;
     const r = await req("POST", `/v1/admin/pedidos/${n}/pago`, operador, { medio: "local", monto: 1000000, referencia: "caja-1" });
     expect(r.json()).toMatchObject({ estado: "pagado" });
-    expect(enviados.some((e) => e.nombre === "pagado")).toBe(true);
+    expect(enviados.some((e) => e.nombre === "cobro")).toBe(true);
     expect((await req("POST", `/v1/admin/pedidos/${n}/entrega`, operador, { estado: "entregado" })).json().error).toBe("transicion");
     expect((await req("POST", `/v1/admin/pedidos/${n}/entrega`, operador, { estado: "retirado" })).statusCode).toBe(200);
     const d = (await req("GET", `/v1/admin/pedidos/${n}`, operador)).json();
@@ -505,6 +516,20 @@ describe("pedidos", () => {
     expect(r.json()).toMatchObject({ estado: "cancelado", reembolsar: false });
     expect(cancelados.has(n)).toBe(true);
     expect((await req("POST", `/v1/admin/pedidos/${n}/cancelar`, operador, { motivo: "otra vez" })).statusCode).toBe(409);
+  });
+  it("uno ya cobrado se cancela sólo si el feed de Stocker no dice que salió (y sin feed todavía, no)", async () => {
+    await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'cursorNovedadesStocker'");
+    const a = await crear("pagado");
+    expect((await req("POST", `/v1/admin/pedidos/${a}/cancelar`, operador, { motivo: "Sin feed no se sabe" })).json().error).toBe("no_cancelable");
+    await pool.query("INSERT INTO tienda.ajustes (clave, valor) VALUES ('cursorNovedadesStocker', $1)", [JSON.stringify(`c:${feed.length}`)]);
+    const b = await crear("pagado");
+    feed.push({ pedidoExterno: b, cambio: "despachado", estado: "aceptado", estadoEnvio: "despachado", despachadoEn: new Date().toISOString(), en: new Date().toISOString() });
+    expect((await req("POST", `/v1/admin/pedidos/${b}/cancelar`, operador, { motivo: "Ya salió" })).json().error).toBe("no_cancelable");
+    expect(cancelados.has(b)).toBe(false);
+    const r = await req("POST", `/v1/admin/pedidos/${a}/cancelar`, operador, { motivo: "Sigue en el depósito" });
+    expect(r.json()).toMatchObject({ estado: "cancelado", reembolsar: true });
+    expect(cancelados.has(a)).toBe(true);
+    await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'cursorNovedadesStocker'");
   });
   it("notas internas y buscador", async () => {
     const n = await crear("a_pagar_en_local");
@@ -1187,7 +1212,7 @@ describe("transferencias recibidas (lo que no se pudo asignar solo)", () => {
     const r = await req("POST", `/v1/admin/transferencias/${id}/asignar`, operador, { pedido: p.numero.toLowerCase() });
     expect(r.statusCode, r.body).toBe(200);
     expect(r.json()).toMatchObject({ estado: "pagado" });
-    expect(enviados.some((e) => e.nombre === "pagado")).toBe(true);
+    expect(enviados.some((e) => e.nombre === "cobro")).toBe(true);
     const t = (await pool.query("SELECT estado, pedido_id, resuelta_por FROM tienda.transferencias_recibidas WHERE id = $1", [id])).rows[0];
     expect(t).toMatchObject({ estado: "aplicada", pedido_id: p.id, resuelta_por: expect.stringMatching(/^qa-adm/) });
     const aud = await pool.query("SELECT accion FROM tienda.auditoria WHERE entidad = 'transferencia' AND entidad_id = $1", [String(id)]);
