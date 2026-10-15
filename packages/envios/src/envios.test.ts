@@ -31,8 +31,10 @@ describe("estados", () => {
     expect(estadoMercadoEnvios("shipped", "waiting_for_withdrawal")).toBe("en_sucursal");
     expect(estadoMercadoEnvios("not_delivered", "receiver_absent")).toBe("no_entregado");
     expect(estadoMercadoEnvios("delivered")).toBe("entregado");
-    expect(estadoCabify("picked_up")).toBe("en_reparto");
-    expect(estadoCabify("failed")).toBe("no_entregado");
+    expect(estadoCabify("delivering")).toBe("en_reparto");
+    expect(estadoCabify("undelivered")).toBe("no_entregado");
+    expect(estadoCabify("requestercancel")).toBe("cancelado");
+    expect(estadoCabify("pickingup")).toBe("creado");
   });
   it("no retrocede, pero después de una visita fallida puede volver a salir", () => {
     expect(avanza("en_reparto", "en_camino")).toBe(false);
