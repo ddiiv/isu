@@ -43,12 +43,13 @@ export function estadoMercadoEnvios(status: string, substatus?: string | null): 
 
 export function estadoCabify(status: string): EstadoEnvio {
   switch (status) {
-    case "delivered": case "completed": return "entregado";
-    case "picked_up": case "in_transit": return "en_reparto";
-    case "failed": return "no_entregado";
-    case "returned": return "devuelto";
-    case "cancelled": case "canceled": return "cancelado";
-    default: return "creado";
+    case "delivered": return "entregado";
+    case "intransit": case "delivering": case "onroutetodelivery": return "en_reparto";
+    case "onroutetofinalhub": case "receivedonfinalhub": case "readytodispatch": return "en_camino";
+    case "undelivered": case "pickupfailed": case "incident": return "no_entregado";
+    case "returning": case "onroutetoreturn": case "returned": return "devuelto";
+    case "requestercancel": case "internalcancel": return "cancelado";
+    default: return "creado"; // ready, qualifiedforpickup, onroutetopickup, readytopickup, pickingup
   }
 }
 

@@ -41,7 +41,7 @@ export function crearTransportes(envOriginal: Env = process.env): Transportes {
     ANDREANI_URL: `${sim}/andreani`, ANDREANI_USUARIO: "demo", ANDREANI_CLAVE: "demo", ANDREANI_CLIENTE: "CL0001", ANDREANI_CONTRATO_DOMICILIO: "400006709", ANDREANI_CONTRATO_SUCURSAL: "400006711",
     OCA_URL: `${sim}/oca`, OCA_USUARIO: "demo", OCA_CLAVE: "demo", OCA_CUIT: "30-00000000-0", OCA_CUENTA: "111757/001", OCA_OPERATIVA_DOMICILIO: "64665", OCA_OPERATIVA_SUCURSAL: "62342",
     ML_API_URL: `${sim}/meli`, MP_API_URL: envOriginal.MP_API_URL ?? `${sim}/mp`, MP_ACCESS_TOKEN: envOriginal.MP_ACCESS_TOKEN ?? "APP_USR-demo", MERCADO_ENVIOS_ACTIVO: "true",
-    CABIFY_URL: `${sim}/cabify`, CABIFY_CLIENTE_ID: "demo", CABIFY_CLIENTE_SECRETO: "demo",
+    CABIFY_URL: `${sim}/cabify`, CABIFY_AUTH_URL: `${sim}/cabify/auth/api/authorization`, CABIFY_CLIENTE_ID: "demo", CABIFY_CLIENTE_SECRETO: "demo", CABIFY_TIPO_ENVIO: "00000000-0000-0000-0000-000000000001",
     WHATSAPP_META_URL: `${sim}/whatsapp`, WHATSAPP_META_TOKEN: "demo", WHATSAPP_META_PHONE_NUMBER_ID: "100000000000001",
     ...envOriginal,
   } : envOriginal;
@@ -72,7 +72,10 @@ export function crearTransportes(envOriginal: Env = process.env): Transportes {
     a.mercado_envios = me;
   }
   if (hay(env.CABIFY_CLIENTE_ID, env.CABIFY_CLIENTE_SECRETO)) {
-    a.cabify = cabify({ url: env.CABIFY_URL ?? "https://logistics.api.cabify.com", clienteId: env.CABIFY_CLIENTE_ID!, clienteSecreto: env.CABIFY_CLIENTE_SECRETO! });
+    // Sandbox: CABIFY_URL=https://logistics.api.cabify-sandbox.com (el token sale de cabify-sandbox.com, credenciales aparte).
+    const url = env.CABIFY_URL || "https://logistics.api.cabify.com";
+    const auth = env.CABIFY_AUTH_URL || `https://${url.includes("cabify-sandbox") ? "cabify-sandbox.com" : "cabify.com"}/auth/api/authorization`;
+    a.cabify = cabify({ url, auth, clienteId: env.CABIFY_CLIENTE_ID!, clienteSecreto: env.CABIFY_CLIENTE_SECRETO!, tipoEnvio: env.CABIFY_TIPO_ENVIO || null });
   }
   const wa = hay(env.WHATSAPP_META_TOKEN, env.WHATSAPP_META_PHONE_NUMBER_ID)
     ? whatsapp({ url: env.WHATSAPP_META_URL ?? "https://graph.facebook.com", version: env.WHATSAPP_META_API_VERSION ?? "v22.0", token: env.WHATSAPP_META_TOKEN!, telefonoId: env.WHATSAPP_META_PHONE_NUMBER_ID!, idioma: env.WHATSAPP_IDIOMA ?? "es_AR" })

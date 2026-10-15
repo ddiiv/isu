@@ -23,14 +23,14 @@ const PASOS: Record<Transporte, string[]> = {
   andreani: ["Pendiente de ingreso", "Ingreso al circuito operativo", "En distribución", "Entregado"],
   oca: ["Pre-Imposición", "Ingresado - En Tránsito", "En Distribución", "Entregado"],
   meli: ["ready_to_ship", "shipped", "shipped/out_for_delivery", "delivered"],
-  cabify: ["pending", "picked_up", "in_transit", "delivered"],
+  cabify: ["ready", "intransit", "delivering", "delivered"],
 };
 const SUCURSAL_LISTA: Record<string, string> = {
   correo: "DISPONIBLE PARA RETIRAR EN SUCURSAL", andreani: "En sucursal de destino - Disponible para retirar", oca: "Disponible para retirar en sucursal",
 };
 const FALLA: Record<Transporte, string> = {
   correo: "NO ENTREGADO - DOMICILIO CERRADO", andreani: "Visita - Domicilio cerrado", oca: "No entregado - Ausente",
-  meli: "not_delivered/receiver_absent", cabify: "failed",
+  meli: "not_delivered/receiver_absent", cabify: "undelivered",
 };
 
 /** Lo cargado en MiCorreo (/shipping/import): sin número hasta que se «paga e imprime» el rótulo. */
@@ -318,24 +318,32 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
       if (mo) return json(200, { id: Number(mo[1]), shipments: [{ id: 40_000_000 + Number(mo[1]) }], shipping_cost: 4500 });
 
       // ── Cabify Logistics ──
-      if (p === "/cabify/auth/token" && req.method === "POST") {
-        if (!body.client_id || !body.client_secret) return json(401, { error: "invalid_client" });
+      if (p === "/cabify/auth/api/authorization" && req.method === "POST") {
+        if (body.grant_type !== "client_credentials" || !body.client_id || !body.client_secret) return json(401, { error: "invalid_client" });
         return json(200, { access_token: nuevoToken(), expires_in: 3600, token_type: "Bearer" });
       }
       if (p.startsWith("/cabify/")) {
-        if (!autorizado(req)) return json(401, { error: "unauthorized" });
-        if (p === "/cabify/api/v1/estimates" && req.method === "POST") {
-          return json(200, { estimates: [{ product: "express", price: { amount: 3500, currency: "ARS" }, eta_minutes: 180 }] });
+        if (!autorizado(req)) return json(401, { errors: ["unauthorized"] });
+        if (p === "/cabify/v3/parcels/estimate" && req.method === "POST") {
+          if (!body.shipping_type_id || !body.parcels?.[0]?.dropoff_location) return json(400, { errors: ["shipping_type_id and parcels required"] });
+          return json(200, { deliveries: [{ parcels: body.parcels, estimation: { price: { amount: 350_000, currency: "ARS" }, asset_kind: "moped" } }] });
         }
-        if (p === "/cabify/api/v1/deliveries" && req.method === "POST") {
-          if (!body.dropoff?.address) return json(422, { error: "dropoff required" });
-          const e = crear("cabify", String(body.external_id ?? ""), "en_el_dia");
-          return json(201, { id: e.seguimiento, status: "pending" });
+        if (p === "/cabify/v1/parcels" && req.method === "POST") {
+          const np = body.parcels?.[0];
+          if (!np?.dropoff_info?.contact || !(np.dropoff_info.addr || np.dropoff_info.loc)) return json(400, { errors: ["dropoff_info required"] });
+          const e = crear("cabify", String(np.external_id ?? ""), "en_el_dia");
+          return json(200, { parcels: [{ ...np, id: e.seguimiento }] });
         }
-        const d = /^\/cabify\/api\/v1\/deliveries\/([^/]+)$/.exec(p);
+        if (p === "/cabify/v1/parcels/ship" && req.method === "POST") {
+          const ids: string[] = body.parcel_ids ?? [];
+          if (!body.shipping_type_id || !ids.length) return json(400, { errors: ["parcel_ids and shipping_type_id required"] });
+          if (ids.some((i) => !envios.has(i))) return json(404, { errors: ["parcel not found"] });
+          return json(202, { shipping_type_id: body.shipping_type_id, parcels: ids.map((id) => ({ id, shipping_type_id: body.shipping_type_id, tracking_url: `https://logistics.follow.cabify.com/${id}` })) });
+        }
+        const d = /^\/cabify\/v1\/parcels\/([^/]+)\/timeline$/.exec(p);
         if (d) {
           const e = envios.get(decodeURIComponent(d[1]!));
-          return e ? json(200, { id: e.seguimiento, status: e.eventos.at(-1)!.texto, events: e.eventos.map((ev) => ({ status: ev.texto, timestamp: ev.fecha.toISOString(), description: ev.texto })) }) : json(404, {});
+          return e ? json(200, { id: e.seguimiento, timeline: e.eventos.map((ev) => ({ state: ev.texto, state_updated_at: ev.fecha.toISOString() })) }) : json(404, {});
         }
       }
 
