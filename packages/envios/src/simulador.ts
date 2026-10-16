@@ -274,6 +274,9 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
           if (q.get("usr") !== "demo" || q.get("psw") !== "demo") return texto(200, xml("<Errores><Descripcion>Usuario o clave incorrectos</Descripcion></Errores>"));
           const datos = q.get("xml_Datos") ?? "";
           const pedido = /nroremito="([^"]*)"/.exec(datos)?.[1] ?? "";
+          // El manual v2.0 pide la altura como `nro` (no `numero`) en el origen y en el destinatario.
+          if (!/<origen [^>]*\bnro="[^"]+"/.test(datos)) return texto(200, xml("<Errores><Descripcion>Falta el número de calle del origen</Descripcion></Errores>"));
+          if (!/idci="(?!0")[^"]+"/.test(datos) && !/<destinatario [^>]*\bnro="[^"]+"/.test(datos)) return texto(200, xml("<Errores><Descripcion>Falta el número de calle del destinatario</Descripcion></Errores>"));
           const e = crear("oca", pedido, /idci="(?!0")[^"]+"/.test(datos) ? "sucursal" : "domicilio");
           return texto(200, xml(`<Resumen><CodigoOperacion>${++seq.n}</CodigoOperacion></Resumen><DetalleIngresos><OrdenRetiro>${seq.n}</OrdenRetiro><NumeroEnvio>${e.seguimiento}</NumeroEnvio></DetalleIngresos>`));
         }
