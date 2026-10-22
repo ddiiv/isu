@@ -6,7 +6,7 @@ import type { Adaptador, Cotizacion, EventoEnvio, Paquete, Servicio, Sucursal } 
 /*
  * Correo Argentino — API MiCorreo (la de e-commerce; PaqAr es para ERP).
  * Manual «Correo Argentino - API MiCorreo» (versión 2026-05-18):
- *
+ * a
  *   Ingreso:      POST /token (Basic usuario:clave) → { token, expires: "AAAA-MM-DD hh:mm:ss" }
  *   Cotizar:      POST /rates — sin deliveredType devuelve domicilio (D) y sucursal (S) juntos.
  *                 Peso 1 a 50.000 g, cada lado hasta 200 cm y los tres sumados hasta 300 cm.
