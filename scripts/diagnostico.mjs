@@ -79,7 +79,7 @@ if (!s.r || s.r.status === 404 || !salud) {
   if (salud.redis === true) bien("la API llega a Redis"); else if (salud.redis === false) mal("la API NO llega a Redis", "Revisá REDIS_URL en el servicio api.");
   if (salud.productos > 0) bien(`hay ${salud.productos} productos publicados`);
   else if (salud.productos === 0) ojo("no hay productos publicados todavía",
-    "La tienda anda igual, pero vacía. Los productos los trae el worker desde Stocker (mirá su log: STOCKER_TOKEN,\nlocales que abastecen online) y después las fotos: `pnpm mayorista:importar --aplicar` en la consola del worker.");
+    "La tienda anda igual, pero vacía. Los productos los trae el worker desde Stocker (mirá su log: STOCKER_TOKEN,\nlocales que abastecen online) y después las fotos: `node apps/worker/dist/mayorista/cli.js --aplicar` en la consola del worker.");
   if (!salud.credencialInterna) mal("falta INTERNO_TOKEN en el servicio web", "Tiene que ser el mismo que en la api: sin él, la API frena a la propia tienda por exceso de pedidos.");
   if (salud.coincide) bien(`el dominio configurado coincide (${salud.sitioConfigurado})`);
   else ojo(`entraste por ${salud.entraste}, pero NEXT_PUBLIC_SITE_URL dice ${salud.sitioConfigurado}`,

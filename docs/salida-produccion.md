@@ -31,9 +31,9 @@ publicada y **cerrada** (sin dominio público) hasta la última prueba.
 3. Desplegar **api** primero: al arrancar aplica las migraciones (0001 a 0011) con un candado, así dos réplicas no migran a la vez. Mirar el log: "migraciones aplicadas".
 4. Desplegar **worker**: trae el catálogo de Stocker (en el log: productos y variantes aplicados). Si dice "sin locales online", volver al paso 1.3.
 5. **Fotos y categorías del mayorista** (consola del servicio **worker** — Railway → worker → los tres puntos del deploy → *Shell*, o `railway ssh --service worker` —, con el catálogo ya sincronizado; ahí `DATABASE_URL` y `R2_*` ya son los de producción):
-   `node dist/mayorista/cli.js` muestra el plan sin escribir nada (productos enganchados, fotos por color, categorías, los que no están en Stocker). Revisarlo y después `node dist/mayorista/cli.js --aplicar` (tarda ~15 min: le pide las fotos al sitio mayorista de a una). Si se corta, volver a correrlo: completa lo que falta sin duplicar.
+   `node apps/worker/dist/mayorista/cli.js` muestra el plan sin escribir nada (productos enganchados, fotos por color, categorías, los que no están en Stocker). Revisarlo y después `node apps/worker/dist/mayorista/cli.js --aplicar` (tarda ~15 min: le pide las fotos al sitio mayorista de a una). Si se corta, volver a correrlo: completa lo que falta sin duplicar.
 6. Desplegar **web** y **admin**, y comprobar: `pnpm diagnostico https://<web> https://<admin>` (desde tu compu) → "Todo bien".
-7. Primer usuario del backoffice: consola del servicio api → `node dist/cli/crear-admin.js dueno@<dominio> "Nombre"`.
+7. Primer usuario del backoffice: consola del servicio api → `node apps/api/dist/cli/crear-admin.js dueno@<dominio> "Nombre"`.
 
 ## 3. Cloudflare y dominio
 
