@@ -275,10 +275,13 @@ Corregila en *Variables* y Railway vuelve a desplegar solo.
 En Railway → `isu` → el deploy activo → *Shell*:
 
 ```bash
+while IFS= read -r -d '' v; do export "$v"; done < /proc/1/environ   # la Shell abre sin las variables del servicio: sin esto, «node: command not found»
 node apps/api/dist/cli/crear-admin.js vos@mail.com "Tu Nombre"
 ```
 
 Ese comando crea el primer usuario del backoffice e imprime una contraseña provisoria. Al entrar en la dirección del puerto 3001, pide configurar el doble factor (Google Authenticator o similar) y cambiar la clave.
+
+Si abrís otra *Shell* más tarde, repetí primero la línea `while … /proc/1/environ`.
 
 **Cuando Stocker ya mande el catálogo**, también desde la *Shell*:
 

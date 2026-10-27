@@ -111,6 +111,7 @@ y después líneas `[worker]` de la sincronización con Stocker.
 En Railway → `isu` → el deploy activo → *Shell*:
 
 ```bash
+while IFS= read -r -d '' v; do export "$v"; done < /proc/1/environ   # la Shell abre sin las variables del servicio: sin esto, «node: command not found»
 node apps/api/dist/cli/crear-admin.js vos@mail.com "Tu Nombre"   # primer usuario del backoffice
 node apps/worker/dist/mayorista/cli.js --aplicar                 # fotos y categorías del mayorista (~15 min)
 ```
