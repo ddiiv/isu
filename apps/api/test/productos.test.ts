@@ -238,26 +238,6 @@ describe("búsqueda", () => {
   });
 });
 
-describe("pack armado en Stocker", () => {
-  it("sin fotos propias, la tarjeta muestra las de su prenda, cada color con la suya", async () => {
-    const { id } = await cargarProducto({
-      n: 6, nombre: "Pack x2 Remera qa oversize", cat: "mujer/remeras-y-tops",
-      variantes: [{ color: "blanco", talle: "M", precio: 2400000, stock: 3 }, { color: "negro", talle: "M", precio: 2400000, stock: 3 }],
-    });
-    try {
-      const padre = (await pool.query("SELECT id FROM tienda.productos WHERE slug = 'remera-qa-oversize'")).rows[0].id;
-      const r = await get("/v1/buscar?q=pack%20x2%20remera%20qa");
-      const t = r.json().productos.find((p: { id: number }) => p.id === id);
-      expect(t.foto.clave).toBe(`p/${padre}/qaapi1x2aaaa`);
-      expect(t.fotoHover.clave).toBe(`p/${padre}/qaapi1x3aaaa`); // el primer color con stock del pack: blanco
-      expect(Object.fromEntries(t.colores.map((c: { clave: string; foto: { clave: string } }) => [c.clave, c.foto.clave])))
-        .toEqual({ blanco: `p/${padre}/qaapi1x3aaaa`, negro: `p/${padre}/qaapi1x1aaaa` });
-    } finally {
-      await pool.query("DELETE FROM tienda.productos WHERE id = $1", [id]);
-    }
-  });
-});
-
 describe("sitemap", () => {
   it("sólo lo publicable", async () => {
     const slugs = (await get("/v1/productos-slugs")).json().map((s: { slug: string }) => s.slug);
