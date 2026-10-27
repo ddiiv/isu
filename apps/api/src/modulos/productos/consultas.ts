@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { conRebaja, type Descuentos } from "../../lib/descuentos.js";
 import {
-  compararTalles, normalizar, STOCK_VISIBLE_MAX, GuiaTalles, guiaPublica,
+  compararTalles, leerRutaPack, normalizar, STOCK_VISIBLE_MAX, GuiaTalles, guiaPublica,
   type FotoPublica, type GuiaPublica, type ProductoDetalle, type ProductoTarjeta,
 } from "@isu/shared";
 
@@ -53,6 +53,28 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
     return m;
   };
   const V = agrupar(vs.rows), C = agrupar(cs.rows), F = agrupar(fs.rows);
+  /*
+   * Un pack armado en Stocker ("Pack x2 Remera…") llega como otro producto, sin
+   * fotos, y su dirección ya lleva a la página del pack de su prenda (si está
+   * publicada): la tarjeta muestra las fotos de esa prenda, cada color con la suya.
+   */
+  const packsSinFotos = productos.filter((p) => !F.has(p.id) && leerRutaPack(p.slug));
+  if (packsSinFotos.length) {
+    const padres = await pool.query<FilaFoto & { slug: string; color: string | null }>(
+      `SELECT p.slug, f.tipo, c.clave AS color, f.clave, f.ancho, f.alto, f.alt
+         FROM tienda.productos p JOIN tienda.fotos f ON f.producto_id = p.id
+         LEFT JOIN tienda.producto_colores c ON c.id = f.color_id
+        WHERE p.slug = ANY($1::text[]) AND ${PUBLICABLE} ORDER BY (f.tipo = 'exhibicion') DESC, f.orden, f.id`,
+      [packsSinFotos.map((p) => leerRutaPack(p.slug)!.slug)],
+    );
+    for (const p of packsSinFotos) {
+      const padre = leerRutaPack(p.slug)!.slug;
+      const colorId = new Map((C.get(p.id) ?? []).map((c) => [c.clave, c.id]));
+      const suyas = padres.rows.filter((f) => f.slug === padre)
+        .map((f) => ({ ...f, producto_id: p.id, color_id: f.color ? colorId.get(f.color) ?? null : null }));
+      if (suyas.length) F.set(p.id, suyas);
+    }
+  }
   const rebajas = await desc.para(ids);
 
   const salida: ProductoTarjeta[] = [];

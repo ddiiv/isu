@@ -31,10 +31,12 @@ Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno 
 
 La primera vez, en este orden (si se cargan las `ISU_*` antes, el mayorista pasa a mostrar las fotos viejas de la tienda y, durante la importación, fotos rotas):
 1. Desplegar la tienda (api con `MAYORISTA_TOKEN`) y el mayorista nuevo **sin** las `ISU_*`.
-2. Informe en seco, sin escribir nada: `node apps/worker/dist/mayorista/cli.js --reemplazar` (Railway → el servicio con el worker → deploy activo → *Shell*; ahí no hay `pnpm`, va con `node`). Mirar los avisos: «fotos cargadas a mano en la tienda: --reemplazar las borra», «tope de…» y «salteada».
+2. Informe en seco, sin escribir nada: `node apps/worker/dist/mayorista/cli.js --reemplazar` (Railway → el servicio con el worker → deploy activo → *Shell*; ahí no hay `pnpm`, va con `node`, ver abajo). Mirar los avisos: «fotos cargadas a mano en la tienda: --reemplazar las borra», «tope de…» y «salteada».
 3. `node apps/worker/dist/mayorista/cli.js --aplicar --reemplazar`. Si una foto no sirve («✗»), el resto entra igual; si no sirve ninguna de un producto, ése no se toca.
 4. En el panel del mayorista, a los productos que no entraron completos (avisos de tope, salteadas o «✗»), «Mostrar las de acá»: siguen mostrando todas las suyas.
 5. Recién ahí cargar `ISU_API_URL`, `ISU_TOKEN` e `ISU_FOTOS_URL` en el mayorista.
+
+La *Shell* de Railway abre sin las variables del servicio (da «node: command not found»): primero `while IFS= read -r -d '' v; do export "$v"; done < /proc/1/environ`, que trae el `PATH` de `node`, `DATABASE_URL` y las `R2_*` del proceso que está corriendo. Vale para todos los comandos de consola de esta guía.
 
 **Primer usuario del backoffice** (etapa 3), una sola vez, desde la consola del servicio `tienda-api` en Railway:
 `node apps/api/dist/cli/crear-admin.js dueno@<dominio> "Nombre Apellido"` — imprime una contraseña provisoria; al entrar pide configurar el doble factor y cambiarla. Los demás usuarios se crean desde Backoffice → Usuarios. Si el único dueño pierde el celular, el mismo comando lo restablece.
