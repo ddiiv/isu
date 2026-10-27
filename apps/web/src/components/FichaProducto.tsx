@@ -119,7 +119,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
         )}
       </section>
 
-      <section aria-label="Comprar" className="lg:sticky lg:top-28 lg:self-start">
+      <section aria-label="Comprar" className="lg:sticky lg:top-32 xl:top-28 lg:self-start">
         {p.liquidacion && (
           <Link href="/liquidacion" className="mb-2 inline-block rounded-full bg-tinta px-3 py-1 text-xs font-bold uppercase tracking-wider text-white hover:bg-marca-fuerte">Liquidación</Link>
         )}

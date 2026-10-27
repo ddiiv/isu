@@ -123,7 +123,7 @@ function Transferencias() {
         })}
         {!datos.transferencias.length && (
           <li className="rounded-2xl border border-dashed border-linea p-10 text-center text-tinta-tenue">
-            {estado === "por_resolver" ? "No hay transferencias por resolver: todas se asignaron solas." : "Todavía no entró ninguna transferencia."}
+            {estado !== "por_resolver" ? "Todavía no entró ninguna transferencia." : "No hay transferencias por resolver."}
           </li>
         )}
       </ul>

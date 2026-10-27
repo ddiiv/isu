@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtemp } from "node:fs/promises";
@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Redis } from "ioredis";
 import { crearPool, migrar } from "@isu/db";
-import { crearTransportes, firmaSeguimiento } from "@isu/envios";
+import { crearTransportes, ErrorTransporte, firmaSeguimiento } from "@isu/envios";
 import { levantarSimulador, type Simulador } from "@isu/envios/simulador";
 import { construirApp } from "../src/app.js";
 import { leerEntorno } from "../src/entorno.js";
@@ -28,6 +28,7 @@ const pool = crearPool({ url: DB, max: 6 });
 const redis = new Redis(REDIS, { maxRetriesPerRequest: 1 });
 let app: Awaited<ReturnType<typeof construirApp>>;
 let sim: Simulador;
+let transportes: ReturnType<typeof crearTransportes>;
 
 const enviados: Array<{ tipo: string; nombre: string; datos: Record<string, unknown> }> = [];
 const colas: Colas = {
@@ -80,6 +81,7 @@ beforeAll(async () => {
   const urlStocker = await levantar(async (req, res) => {
     const u = new URL(req.url!, "http://x");
     const b = req.method === "GET" ? {} : await leerCuerpo(req);
+    if (u.pathname === "/api/integraciones/tienda/pedidos/resoluciones") return json(res, 200, { cursor: "c-qa", cambios: [], hayMas: false });
     if (u.pathname === "/api/integraciones/tienda/pedidos" && req.method === "POST") {
       stockerRecibidos.push(b.datos);
       return json(res, 201, { pedidoExterno: b.datos.pedidoExterno, estado: "aceptado", motivo: null, repetido: false });
@@ -95,7 +97,7 @@ beforeAll(async () => {
     }
     return json(res, 404, {});
   });
-  const transportes = crearTransportes({ NODE_ENV: "test", TRANSPORTES_SIMULADOR: sim.url, MP_API_URL: `${sim.url}/mp`, MP_ACCESS_TOKEN: TOKEN_MP });
+  transportes = crearTransportes({ NODE_ENV: "test", TRANSPORTES_SIMULADOR: sim.url, MP_API_URL: `${sim.url}/mp`, MP_ACCESS_TOKEN: TOKEN_MP });
   app = await construirApp({
     env: leerEntorno({
       NODE_ENV: "test", LOG_LEVEL: "silent", DATABASE_URL: DB, REDIS_URL: REDIS, CACHE_SEGUNDOS: "0",
@@ -288,6 +290,71 @@ describe("seguimiento público", () => {
     expect(r.json().nombre).toBe("Ana");
     expect(r.json().envio.transporte).toBe("oca");
     for (const dato of ["qa-envio", "Bacacay", "30111222", "5555", "Envío\""]) expect(r.body).not.toContain(dato);
+  });
+});
+
+describe("envíos que se preparan solos al cobrarse", () => {
+  const interno = (numero: string, token = INTERNO) => app.inject({ method: "POST", url: `/v1/interno/envios/${numero}/preparar`, headers: { "x-isu-interno": token } });
+  const pagado = async (opcion: string, sufijo: string) => {
+    const r = await post("/v1/pedidos", pedido(sufijo, { opcion }));
+    expect(r.statusCode, r.body).toBe(201);
+    const numero = r.json().numero as string;
+    const { rows } = await pool.query("SELECT total FROM tienda.pedidos WHERE numero = $1", [numero]);
+    expect((await post(`/v1/admin/pedidos/${numero}/pago`, { medio: "transferencia", monto: rows[0].total, referencia: `QA-AUTO-${sufijo}` }, adm(adminOperador))).statusCode).toBe(200);
+    return numero;
+  };
+  afterEach(() => pool.query("DELETE FROM tienda.ajustes WHERE clave IN ('prepararEnviosSolos', 'cursorNovedadesStocker')"));
+
+  it("al registrar el pago se encola la preparación, y la vuelta del worker crea el envío y le pasa el número a Stocker", async () => {
+    const numero = await pagado("andreani:domicilio", "auto1");
+    expect(enviados.some((e) => e.tipo === "envios" && e.nombre === "preparar" && e.datos.numero === numero)).toBe(true);
+    expect((await interno(numero, "otro-token-de-mas-de-32-caracteres-x")).statusCode).toBe(404);
+    const r = await interno(numero);
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ preparado: true, etiqueta: true });
+    expect(enviados.some((e) => e.nombre === "envio" && e.datos.numero === numero && e.datos.seguimiento === r.json().seguimiento)).toBe(true);
+    // Repetido (un reintento del worker, o alguien lo preparó a mano y lo descartó): no crea otro.
+    expect((await interno(numero)).json()).toEqual({ preparado: false, motivo: "ya_tuvo_envio" });
+    // Sin credencial, 404 también con un número mal formado (no se deja ver que la ruta existe).
+    expect((await app.inject({ method: "POST", url: "/v1/interno/envios/cualquiera/preparar" })).statusCode).toBe(404);
+  });
+  it("sin respuesta del transporte no se reintenta (pudo haberlo creado): queda el aviso de revisar su portal; un 503 sí se reintenta", async () => {
+    const andreani = transportes.adaptadores.andreani!;
+    const original = andreani.crearEnvio;
+    try {
+      andreani.crearEnvio = async () => { throw new ErrorTransporte("andreani", "sin respuesta (tiempo agotado)"); };
+      const numero = await pagado("andreani:domicilio", "auto4");
+      expect((await interno(numero)).json()).toEqual({ preparado: false, motivo: "revisar" });
+      const ev = await pool.query("SELECT e.detalle FROM tienda.pedido_eventos e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1 AND e.actor = 'automático'", [numero]);
+      expect(ev.rows.map((r) => r.detalle).join(" ")).toMatch(/revisá su portal/);
+      andreani.crearEnvio = async () => { throw new ErrorTransporte("andreani", "HTTP 503 caído", 503, true); };
+      const otro = await pagado("andreani:domicilio", "auto5");
+      expect((await interno(otro)).statusCode).toBe(503);
+    } finally {
+      andreani.crearEnvio = original;
+    }
+  });
+  it("cancelar un pedido pagado saca su envío de Envíos y avisa que hay que anularlo en el portal", async () => {
+    await pool.query("INSERT INTO tienda.ajustes (clave, valor) VALUES ('cursorNovedadesStocker', '\"c-qa\"') ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor");
+    const numero = await pagado("oca:domicilio", "auto6");
+    expect((await interno(numero)).json()).toMatchObject({ preparado: true });
+    const r = await post(`/v1/admin/pedidos/${numero}/cancelar`, { motivo: "el cliente se arrepintió" }, adm(adminOperador));
+    expect(r.statusCode, r.body).toBe(200);
+    const e = await pool.query("SELECT e.activo, e.estado FROM tienda.envios e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1", [numero]);
+    expect(e.rows).toEqual([{ activo: false, estado: "cancelado" }]);
+    const ev = await pool.query("SELECT e.detalle FROM tienda.pedido_eventos e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1", [numero]);
+    expect(ev.rows.map((x) => x.detalle).join(" ")).toMatch(/anulalo en su portal/);
+  });
+  it("apagado en Ajustes no prepara nada: queda en «Para preparar»", async () => {
+    await pool.query("INSERT INTO tienda.ajustes (clave, valor) VALUES ('prepararEnviosSolos', 'false')");
+    const numero = await pagado("oca:domicilio", "auto2");
+    expect((await interno(numero)).json()).toEqual({ preparado: false, motivo: "apagado" });
+    expect((await pool.query("SELECT 1 FROM tienda.envios e JOIN tienda.pedidos p ON p.id = e.pedido_id WHERE p.numero = $1", [numero])).rowCount).toBe(0);
+  });
+  it("Cabify no se prepara solo (pide el cadete en el momento)", async () => {
+    const r = await post("/v1/pedidos", pedido("auto3", { opcion: "cabify:en_el_dia" }));
+    if (r.statusCode !== 201) return; // fuera de la zona o del horario del día: no hay pedido de Cabify que probar
+    expect((await interno(r.json().numero)).json()).toEqual({ preparado: false, motivo: "no_corresponde" });
   });
 });
 

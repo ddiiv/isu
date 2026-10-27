@@ -36,7 +36,8 @@ export default function Guias() {
     try {
       const r = await api<Importacion>("guias-talles/excel", { archivo });
       const creadas = r.guias.filter((g) => g.accion === "crear").length;
-      aviso.ok(`Listo: ${creadas} guías nuevas y ${r.guias.length - creadas} actualizadas${r.errores.length ? ` (${r.errores.length} hojas con errores no se importaron)` : ""}.`);
+      const n = (k: number, uno: string, varios: string) => `${k} ${k === 1 ? uno : varios}`;
+      aviso.ok(`Listo: ${n(creadas, "guía nueva", "guías nuevas")} y ${n(r.guias.length - creadas, "actualizada", "actualizadas")}${r.errores.length ? ` (${n(r.errores.length, "hoja con errores no se importó", "hojas con errores no se importaron")})` : ""}.`);
       setArchivo(null); setVista(null);
       await recargar();
     } catch (e) { aviso.error(e); }
@@ -58,7 +59,7 @@ export default function Guias() {
       {vista && (
         <Tarjeta className="mb-6" titulo={`Importar «${archivo?.name ?? "archivo"}»`} acciones={<div className="flex gap-2">
           <Boton variante="texto" onClick={() => { setVista(null); setArchivo(null); }}>Cancelar</Boton>
-          <Boton disabled={trabajando || !vista.guias.length} onClick={() => void importar()}>{trabajando ? "Importando…" : `Importar ${vista.guias.length} guías`}</Boton>
+          <Boton disabled={trabajando || !vista.guias.length} onClick={() => void importar()}>{trabajando ? "Importando…" : `Importar ${vista.guias.length} ${vista.guias.length === 1 ? "guía" : "guías"}`}</Boton>
         </div>}>
           <p className="mb-3 text-sm text-tinta-suave">Así va a quedar. Las que ya existen con el mismo nombre se actualizan y siguen asociadas a sus productos. Nada se guarda hasta que toques «Importar».</p>
           {vista.errores.length > 0 && (
@@ -71,7 +72,7 @@ export default function Guias() {
             {vista.guias.map((g) => (
               <li key={g.nombre} className="rounded-xl border border-linea p-3">
                 <span className="flex items-center justify-between gap-2"><b>{g.nombre}</b><Insignia clase={g.accion === "crear" ? "bg-ahorro-claro text-ahorro" : "bg-marca-claro text-marca-fuerte"}>{g.accion === "crear" ? "Nueva" : "Se actualiza"}</Insignia></span>
-                <span className="block text-xs text-tinta-tenue">{NOMBRE_TIPO_GUIA[g.tipo]} · {g.talles.join(" ")} · {g.medidas} medidas</span>
+                <span className="block text-xs text-tinta-tenue">{NOMBRE_TIPO_GUIA[g.tipo]} · {g.talles.join(" ")} · {g.medidas} {g.medidas === 1 ? "medida" : "medidas"}</span>
               </li>
             ))}
           </ul>
@@ -91,7 +92,7 @@ export default function Guias() {
                   <td className="px-4 py-3 text-xs" data-etiqueta="Medidas">{g.medidas.map((m) => infoMedida(m).nombre).join(", ")}</td>
                   <td className="px-4 py-3 text-right" data-etiqueta="Talles">{g.talles}</td>
                   <td className="px-4 py-3 text-right" data-etiqueta="Productos">{g.productos || <span className="text-oferta">0</span>}</td>
-                  <td className="px-4 py-3 text-xs text-tinta-tenue">{fecha(g.actualizadoEn)}{g.actualizadoPor ? ` · ${g.actualizadoPor}` : ""}</td>
+                  <td className="px-4 py-3 text-xs text-tinta-tenue">{fecha(g.actualizadoEn)}{g.actualizadoPor ? ` · ${g.actualizadoPor.startsWith("migracion") ? "carga inicial" : g.actualizadoPor}` : ""}</td>
                 </tr>
               ))}
               {!datos.guias.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-tinta-tenue">Todavía no hay guías. Creá la primera.</td></tr>}

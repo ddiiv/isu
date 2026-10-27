@@ -732,6 +732,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     paqueteEnvios: PaqueteEnvios,
     enviosEnElDia: EnviosEnElDia,
     avisosWhatsapp: z.boolean(),
+    // Preparar solo el envío (Correo, Andreani, OCA) apenas el pedido queda pagado.
+    prepararEnviosSolos: z.boolean(),
     // Etapa 5
     chatbot: AjusteChatbot,
     chatbotIa: AjusteChatbotIa,

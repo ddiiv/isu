@@ -30,6 +30,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/revisar-despachos  (viejo) lo mismo que stocker/novedades.
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
+ * envios/preparar        prepara solo el envío de un pedido recién pagado (lo hace la API).
  * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
  *                   el worker sólo marca el ritmo (cada 1 y 10 minutos).
  */
@@ -203,6 +204,12 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         const pagoId = String(t.data?.pagoId ?? "");
         if (!NUMERO.test(numero) || !/^\d{1,20}$/.test(pagoId)) throw sinReintento("Datos inválidos");
         return extras.envios.mercadoEnvios(numero, pagoId);
+      },
+      preparar: async (t) => {
+        if (!extras.api) throw sinReintento("Falta API_URL / INTERNO_TOKEN en el worker");
+        const numero = String(t.data?.numero ?? "");
+        if (!NUMERO.test(numero)) throw sinReintento("Datos inválidos");
+        return extras.api(`/v1/interno/envios/${numero}/preparar`);
       },
     },
     pagos: {

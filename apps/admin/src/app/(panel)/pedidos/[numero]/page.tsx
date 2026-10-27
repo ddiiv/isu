@@ -75,6 +75,7 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
           </Tarjeta>
           <Tarjeta titulo="Historial">
             <ol className="space-y-2 text-sm">
+              {!d.eventos.length && <li className="text-tinta-tenue">Sin movimientos todavía.</li>}
               {d.eventos.map((e, i) => (
                 <li key={i} className="flex flex-wrap gap-x-3"><span className="text-tinta-tenue">{fecha(e.creadoEn)}</span><span className="font-bold">{ESTADOS[e.estado]?.[0] ?? e.estado}</span><span className="text-tinta-suave">{e.detalle}</span><span className="text-xs text-tinta-tenue">({e.actor})</span></li>
               ))}
@@ -124,7 +125,7 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
               <div className="flex flex-wrap gap-2">
                 {entregas.map(([e, t]) => <Boton key={e} variante="borde" onClick={() => void accion(() => api(`pedidos/${p.numero}/entrega`, { cuerpo: { estado: e } }), "Estado actualizado.")}>{t}</Boton>)}
               </div>
-              <p className="mt-2 text-xs text-tinta-tenue">En la etapa 4 esto lo hacen solos los correos.</p>
+              <p className="mt-2 text-xs text-tinta-tenue">Los envíos con transporte se actualizan solos; éste se marca a mano.</p>
             </Tarjeta>
           )}
 

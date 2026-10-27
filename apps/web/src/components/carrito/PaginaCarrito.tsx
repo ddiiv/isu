@@ -20,7 +20,7 @@ export function PaginaCarrito({ descuento, cuotas, medios }: { descuento: number
       ) : (
         <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_380px]">
           <LineasCarrito />
-          <aside className="space-y-4 self-start rounded-[var(--radius-foto)] border border-linea p-5 lg:sticky lg:top-28">
+          <aside className="space-y-4 self-start rounded-[var(--radius-foto)] border border-linea p-5 lg:sticky lg:top-32 xl:top-28">
             <BarraEnvioGratis c={cotizacion} />
             <CampoCupon />
             <Totales c={cotizacion} />

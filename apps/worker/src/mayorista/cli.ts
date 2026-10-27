@@ -92,7 +92,7 @@ try {
     console.warn(`\n${r.productos} productos · ${r.fotosSubidas} fotos subidas · ${r.fotosOmitidas.length} omitidas`);
     if (r.ocultados.length) console.warn(`ocultos (sin fotos): ${r.ocultados.join(", ")}`);
     if (r.mostrados.length) console.warn(`visibles (ya tienen fotos): ${r.mostrados.join(", ")}`);
-    if (r.fallidos.length) console.warn(`salteados (la base estaba ocupada; volvé a correr la importación): ${r.fallidos.map((f) => f.sku).join(", ")}`);
+    if (r.fallidos.length) console.warn(`salteados (volvé a correr la importación cuando se resuelva):\n${r.fallidos.map((f) => `  ${f.sku}: ${f.motivo}`).join("\n")}`);
     if (process.env.REDIS_URL && r.slugs.length) {
       const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, lazyConnect: true, family: 0 });
       redis.on("error", () => {});

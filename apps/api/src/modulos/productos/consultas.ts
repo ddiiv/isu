@@ -322,6 +322,41 @@ export function guiaDe(g: Record<string, unknown> | null): GuiaPublica | null {
   return r.success ? guiaPublica(r.data) : null;
 }
 
+/*
+ * Lo que el sitio mayorista toma de la tienda: las fotos y la guía de talles
+ * de cada producto, por SKU padre. Precios, variantes y stock no: esos los
+ * lee de Stocker. Cada foto lleva los SKU de las variantes de su color, que
+ * son los mismos en el mayorista: así el color se cruza aunque los nombres
+ * difieran ("Negra" / "Negro"). Con los SKU de todas las variantes el
+ * mayorista engancha aunque el SKU padre no coincida, como el importador.
+ * Incluye productos que no se publican.
+ */
+export async function paraMayorista(pool: pg.Pool) {
+  const [ps, fs] = await Promise.all([
+    // El SKU padre se puede repetir: primero el visible, y el mayorista se queda con el primero.
+    pool.query<{ id: number; sku: string; variantes: string[] | null; guia: Record<string, unknown> | null }>(
+      `SELECT p.id, p.stocker_padre AS sku, (SELECT array_agg(v.sku ORDER BY v.id) FROM tienda.variantes v WHERE v.producto_id = p.id) AS variantes,
+              CASE WHEN g.id IS NULL THEN NULL ELSE jsonb_build_object('nombre', g.nombre, 'tipo', g.tipo, 'medidas', g.medidas, 'filas', g.filas, 'nota', g.nota) END AS guia
+         FROM tienda.productos p LEFT JOIN tienda.guias_talles g ON g.id = p.guia_talles_id
+        ORDER BY p.visible DESC, p.id`,
+    ),
+    pool.query<{ producto_id: number; clave: string; color: string | null; skus: string[] | null }>(
+      `SELECT f.producto_id, f.clave, c.nombre AS color,
+              (SELECT array_agg(v.sku ORDER BY v.orden, v.id) FROM tienda.variantes v WHERE v.color_id = f.color_id) AS skus
+         FROM tienda.fotos f LEFT JOIN tienda.producto_colores c ON c.id = f.color_id
+        ORDER BY f.producto_id, f.tipo = 'color', f.orden, f.id`,
+    ),
+  ]);
+  const fotos = new Map<number, Array<{ clave: string; color: string | null; skus: string[] }>>();
+  for (const f of fs.rows) {
+    if (!fotos.has(f.producto_id)) fotos.set(f.producto_id, []);
+    fotos.get(f.producto_id)!.push({ clave: f.clave, color: f.color, skus: f.skus ?? [] });
+  }
+  return ps.rows
+    .map((p) => ({ sku: p.sku, variantes: p.variantes ?? [], fotos: fotos.get(p.id) ?? [], guia: guiaDe(p.guia) }))
+    .filter((p) => p.fotos.length || p.guia);
+}
+
 export async function slugsPublicables(pool: pg.Pool) {
   // Con hasta 5 fotos (la principal primero): el sitemap las declara y Google Imágenes las encuentra antes.
   const { rows } = await pool.query<{ slug: string; nombre: string; actualizado_en: Date; fotos: string[] }>(

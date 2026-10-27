@@ -48,7 +48,8 @@ export default function Redirecciones() {
 
   const f = filtro.trim().toLowerCase();
   const lista = datos.redirecciones.filter((r) => !f || r.desde.includes(f) || (r.destino ?? r.hacia).includes(f) || r.sku?.toLowerCase().includes(f) || r.producto?.nombre.toLowerCase().includes(f));
-  const aPlanB = datos.redirecciones.filter((r) => r.sku && !r.producto?.publicado).length;
+  // Sólo los productos que existen y no están publicados: un SKU sin producto no tiene nada que publicar.
+  const aPlanB = datos.redirecciones.filter((r) => r.sku && r.producto && !r.producto.publicado).length;
 
   return (
     <>
@@ -57,7 +58,7 @@ export default function Redirecciones() {
         Las direcciones de la tienda anterior que Google ya conoce. Cada una manda a su página nueva con una redirección permanente (301),
         y así no se pierde el posicionamiento. Si era un producto, va a su ficha mientras esté publicado; si no, a su <b>plan B</b> (su categoría).
       </p>
-      {aPlanB > 0 && <div className="mb-4"><Mensaje tipo="info">{aPlanB} productos viejos todavía van a su categoría porque el producto no está publicado (sin fotos u oculto). Cuando lo publiques, la dirección vieja pasa a su ficha sola.</Mensaje></div>}
+      {aPlanB > 0 && <div className="mb-4"><Mensaje tipo="info">{aPlanB === 1 ? "1 dirección vieja todavía va a su categoría porque su producto no está publicado." : `${aPlanB} direcciones viejas todavía van a su categoría porque su producto no está publicado.`} Cuando lo publiques, pasa a su ficha sola.</Mensaje></div>}
       <div className="mb-4"><aviso.Aviso /></div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <Tarjeta>

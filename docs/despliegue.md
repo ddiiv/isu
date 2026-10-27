@@ -27,6 +27,15 @@
 
 Tokens nuevos (`INTERNO_TOKEN`, `REVALIDAR_TOKEN`): `openssl rand -hex 32`, uno distinto para cada uno.
 
+**Fotos y guías de talles con el sitio mayorista.** La tienda es la fuente de las fotos y las guías; el mayorista las lee de la API (`GET /v1/interno/catalogo-mayorista`). Variables: en la api, `MAYORISTA_TOKEN` (`openssl rand -hex 32`, distinta de `INTERNO_TOKEN`); en el mayorista, `ISU_API_URL`, `ISU_TOKEN` (= `MAYORISTA_TOKEN`) e `ISU_FOTOS_URL` (= `NEXT_PUBLIC_CDN_IMAGENES`).
+
+La primera vez, en este orden (si se cargan las `ISU_*` antes, el mayorista pasa a mostrar las fotos viejas de la tienda y, durante la importación, fotos rotas):
+1. Desplegar la tienda (api con `MAYORISTA_TOKEN`) y el mayorista nuevo **sin** las `ISU_*`.
+2. Informe en seco, sin escribir nada: `pnpm mayorista:importar --reemplazar` (consola del servicio). Mirar los avisos: «fotos cargadas a mano en la tienda: --reemplazar las borra», «tope de…» y «salteada».
+3. `pnpm mayorista:importar --aplicar --reemplazar`. Si una foto no sirve («✗»), el resto entra igual; si no sirve ninguna de un producto, ése no se toca.
+4. En el panel del mayorista, a los productos que no entraron completos (avisos de tope, salteadas o «✗»), «Mostrar las de acá»: siguen mostrando todas las suyas.
+5. Recién ahí cargar `ISU_API_URL`, `ISU_TOKEN` e `ISU_FOTOS_URL` en el mayorista.
+
 **Primer usuario del backoffice** (etapa 3), una sola vez, desde la consola del servicio `tienda-api` en Railway:
 `node dist/cli/crear-admin.js dueno@<dominio> "Nombre Apellido"` — imprime una contraseña provisoria; al entrar pide configurar el doble factor y cambiarla. Los demás usuarios se crean desde Backoffice → Usuarios. Si el único dueño pierde el celular, el mismo comando lo restablece.
 

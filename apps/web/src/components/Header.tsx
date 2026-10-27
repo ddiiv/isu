@@ -13,6 +13,10 @@ import { SITIO } from "@/lib/sitio";
  * compu a la derecha; en celular y tablet, en una segunda fila de accesos
  * (que se desliza de costado si no entra). Queda pegado arriba.
  *
+ * La fila completa (logo, categorías y botones) es desde xl (1280 px): mide
+ * unos 1060 px, y entre 1024 y 1279 no entraba (el logo se montaba sobre
+ * «Nuevos» y la página se desbordaba de costado).
+ *
  * Etapa 9: Packs y Liquidación con su desplegable por categoría (sólo las
  * que tienen algo), y cada categoría con 1 o 2 fotos de prendas que la
  * representan. En el celular, los accesos de las categorías, Packs y
@@ -32,14 +36,14 @@ export function Header({ categorias, menu }: { categorias: CategoriaNodo[]; menu
   const enLiquidacion = categorias.filter((c) => liquidacionEn.includes(c.slug));
   return (
     <header className="encabezado sticky top-0 z-40 border-b border-linea/70 bg-white">
-      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:h-20 lg:px-10">
+      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:px-10 xl:h-20">
         <div className="flex items-center gap-3">
           <MenuMovil categorias={categorias.map(paraMenu)} fotos={fotos} packsEn={packsEn} liquidacionEn={liquidacionEn} hayPacks={hayPacks} hayLiquidacion={hayLiquidacion} />
-          <Logo className="hidden lg:flex" />
+          <Logo className="hidden xl:flex" />
         </div>
 
-        <Logo className="lg:hidden" />
-        <nav aria-label="Categorías" className="hidden lg:block">
+        <Logo className="xl:hidden" />
+        <nav aria-label="Categorías" className="hidden xl:block">
           <ul className="flex items-center gap-6 text-[15px] xl:gap-7">
             <li><Link href="/nuevos" className="py-7 font-bold text-marca underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Nuevos</Link></li>
             {hayPacks && (
@@ -99,9 +103,9 @@ export function Header({ categorias, menu }: { categorias: CategoriaNodo[]; menu
         </nav>
 
         <div className="flex items-center justify-end gap-1 sm:gap-3">
-          <Link href="/outfits" className="hidden whitespace-nowrap rounded-full bg-marca px-4 py-2 text-sm font-bold text-white transition duration-200 ease-suave hover:bg-marca-fuerte active:scale-[0.97] lg:inline-block">Armá tu outfit</Link>
+          <Link href="/outfits" className="hidden whitespace-nowrap rounded-full bg-marca px-4 py-2 text-sm font-bold text-white transition duration-200 ease-suave hover:bg-marca-fuerte active:scale-[0.97] xl:inline-block">Armá tu outfit</Link>
           {/* Tienda por mayor: el destino sale de MAYORISTA_URL (ver /mayorista). */}
-          <a href={SITIO.mayorista} rel="nofollow" className="hidden whitespace-nowrap rounded-full border border-tinta px-4 py-2 text-sm font-bold transition duration-200 ease-suave hover:bg-tinta hover:text-white active:scale-[0.97] lg:inline-block">Pedido mayorista</a>
+          <a href={SITIO.mayorista} rel="nofollow" className="hidden whitespace-nowrap rounded-full border border-tinta px-4 py-2 text-sm font-bold transition duration-200 ease-suave hover:bg-tinta hover:text-white active:scale-[0.97] xl:inline-block">Pedido mayorista</a>
           <Link href="/buscar" aria-label="Buscar" className="rounded-full p-2.5 hover:bg-fondo-suave"><IconoBuscar /></Link>
           <Link href="/cuenta" aria-label="Mi cuenta" className="hidden rounded-full p-2 hover:bg-fondo-suave sm:block"><IconoCuenta /></Link>
           <BotonCarrito />
@@ -109,8 +113,8 @@ export function Header({ categorias, menu }: { categorias: CategoriaNodo[]; menu
       </div>
 
       {/* Celular y tablet: los accesos principales a la vista. Packs, Liquidación y las categorías abren el menú en su panel. */}
-      <nav aria-label="Accesos" className="border-t border-linea/70 lg:hidden">
-        <ul className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-4 py-2 text-sm [scrollbar-width:none] sm:px-6">
+      <nav aria-label="Accesos" className="border-t border-linea/70 xl:hidden">
+        <ul className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-4 py-2 text-sm [scrollbar-width:none] sm:px-6 lg:px-10">
           <li className="shrink-0"><Link href="/outfits" className="block whitespace-nowrap rounded-full bg-marca px-3.5 py-1.5 font-bold text-white">Armá tu outfit</Link></li>
           <li className="shrink-0"><a href={SITIO.mayorista} rel="nofollow" className="block whitespace-nowrap rounded-full border border-tinta px-3.5 py-1.5 font-bold">Pedido mayorista</a></li>
           <li className="shrink-0"><Link href="/nuevos" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-marca">Nuevos</Link></li>

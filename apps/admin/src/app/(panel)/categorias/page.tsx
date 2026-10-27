@@ -32,7 +32,7 @@ export default function Categorias() {
   }
   const Fila = ({ c, hija }: { c: Categoria; hija?: boolean }) => (
     <li className={`flex flex-wrap items-center justify-between gap-2 py-2.5 ${hija ? "pl-6" : ""}`}>
-      <span className={hija ? "" : "font-bold"}>{c.nombre} <span className="text-xs font-normal text-tinta-tenue">/{c.slug} · {c.productos} productos</span> {!c.visible && <Insignia>Oculta</Insignia>}</span>
+      <span className={hija ? "" : "font-bold"}>{c.nombre} <span className="text-xs font-normal text-tinta-tenue">/{c.slug} · {c.productos} {c.productos === 1 ? "producto" : "productos"}</span> {!c.visible && <Insignia>Oculta</Insignia>}</span>
       {operador && <span className="flex flex-wrap gap-2">
         {!hija && <Boton variante="texto" onClick={() => setEditando({ padreId: c.id, visible: true, orden: 0 })}>+ Subcategoría</Boton>}
         <Boton variante="texto" onClick={() => setEditando({ ...c })}>Editar</Boton>

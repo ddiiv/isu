@@ -4,8 +4,9 @@ import type pg from "pg";
 import { z } from "zod";
 import { ListadoProductos, ProductoDetalle, slug } from "@isu/shared";
 import type { CacheCorta } from "../../lib/cache.js";
+import { iguales } from "../../lib/cripto.js";
 import { noEncontrado } from "../../lib/errores.js";
-import { buscar, coleccion, detalle, fotosDelMenu, leerAjuste, productosDeCategoria, productosNuevos, slugsPublicables, tarjetas } from "./consultas.js";
+import { buscar, coleccion, detalle, fotosDelMenu, leerAjuste, paraMayorista, productosDeCategoria, productosNuevos, slugsPublicables, tarjetas } from "./consultas.js";
 import type { Descuentos } from "../../lib/descuentos.js";
 
 /*
@@ -19,6 +20,7 @@ import type { Descuentos } from "../../lib/descuentos.js";
  *   GET /v1/productos/:slug                                  ficha
  *   GET /v1/buscar?q=remera                                  búsqueda
  *   GET /v1/productos-slugs                                  para el sitemap
+ *   GET /v1/interno/catalogo-mayorista                       fotos y guías para el sitio mayorista (MAYORISTA_TOKEN)
  *
  * La grilla devuelve la categoría entera (no paginada): los filtros de talle,
  * color y orden son instantáneos en el navegador y la página sale completa
@@ -27,7 +29,7 @@ import type { Descuentos } from "../../lib/descuentos.js";
  */
 const CACHE_PUBLICO = "public, max-age=30, s-maxage=60, stale-while-revalidate=300";
 
-export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool; cache: CacheCorta; descuentos: Descuentos }) {
+export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool; cache: CacheCorta; descuentos: Descuentos; mayorista?: string }) {
   const api = app.withTypeProvider<ZodTypeProvider>();
   const agotadosVisibles = () => deps.cache.obtener("ajuste:mostrarAgotados", () => leerAjuste(deps.pool, "mostrarAgotados", true));
 
@@ -133,4 +135,11 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
       return deps.cache.obtener("slugs", () => slugsPublicables(deps.pool));
     },
   );
+
+  api.get("/v1/interno/catalogo-mayorista", async (req, reply) => {
+    const h = req.headers["x-isu-mayorista"];
+    if (!deps.mayorista || typeof h !== "string" || !iguales(h, deps.mayorista)) throw noEncontrado();
+    reply.header("cache-control", "no-store");
+    return { productos: await deps.cache.obtener("mayorista", () => paraMayorista(deps.pool)) };
+  });
 }

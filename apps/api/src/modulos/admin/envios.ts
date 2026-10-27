@@ -11,7 +11,8 @@ import type { Almacen } from "@isu/almacen";
 import type { Entorno } from "../../entorno.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorHttp } from "../../lib/errores.js";
-import { ipDe } from "../../lib/cliente.js";
+import { esInterno, ipDe } from "../../lib/cliente.js";
+import { leerAjuste } from "../productos/consultas.js";
 import type { CotizadorEnvios, PrendaDelPaquete } from "../envios/cotizador.js";
 import { auditar, exigir, registrarAcceso } from "./sesion.js";
 
@@ -30,6 +31,14 @@ import { auditar, exigir, registrarAcceso } from "./sesion.js";
  *   3. "En camino": el worker sigue cada envío y avisa al cliente.
  *   4. "Problemas": no se pudo entregar, se devolvió o el transporte no responde.
  *
+ * Con Ajustes → «Preparar los envíos solos» (prendido si no se tocó), el paso 1
+ * lo hace el worker apenas el pedido queda pagado (por Mercado Pago, una
+ * transferencia o un pago registrado a mano), para Correo, Andreani y OCA.
+ * Cabify no: preparar pide el cadete en el momento. Lo que no se pudo
+ * preparar solo queda en «Para preparar», con el motivo en la ficha. Cancelar
+ * un pedido pagado saca su envío de acá y avisa que hay que anularlo en el
+ * portal del transporte (ver liberar en pedidos/servicio.ts).
+ *
  * Mercado Envíos no se "prepara": el envío lo crea Mercado Pago con el pago;
  * acá sólo se trae (si todavía no llegó) y se baja su etiqueta.
  */
@@ -40,6 +49,8 @@ export interface DepsEnviosAdmin {
 const NUMERO = z.string().regex(/^ISU-\d{4,10}$/);
 const Numeros = z.array(NUMERO).min(1).max(30);
 const VISTAS = ["preparar", "etiquetados", "en_camino", "problemas", "entregados"] as const;
+/** Los que el worker prepara solos al cobrarse (Cabify no: pide el cadete en el momento; Mercado Envíos lo crea Mercado Pago). */
+export const SE_PREPARAN_SOLOS = new Set(["correo_argentino", "andreani", "oca"]);
 /** Los que reintenta el worker sin respuesta del transporte: desde acá, "problema". */
 const ERRORES_PROBLEMA = 5;
 
@@ -133,6 +144,53 @@ export async function rutasEnviosAdmin(app: FastifyInstance, deps: DepsEnviosAdm
     return { resultados };
   });
 
+  /*
+   * El worker, cuando el pedido queda pagado. Lo que no corresponde (apagado,
+   * ya preparado, otro transporte) contesta 200 y no se reintenta; si el
+   * transporte falla, 503 y el worker reintenta con espera. En los dos casos el
+   * pedido sigue en «Para preparar» para hacerlo a mano.
+   */
+  api.post<{ Params: { numero: string } }>("/v1/interno/envios/:numero/preparar", async (req) => {
+    // Sin la credencial, 404 siempre (también con un número mal formado): no se deja ver que la ruta existe.
+    if (!esInterno(req, deps.env.INTERNO_TOKEN) || !NUMERO.safeParse(req.params.numero).success) throw new ErrorHttp(404, "no_encontrado", "No existe.");
+    if (!(await leerAjuste(pool, "prepararEnviosSolos", true))) return { preparado: false, motivo: "apagado" };
+    const { numero } = req.params;
+    const p = (await pool.query<{ transporte: string | null; tuvo: boolean }>(
+      "SELECT transporte, EXISTS (SELECT 1 FROM tienda.envios e WHERE e.pedido_id = p.id) AS tuvo FROM tienda.pedidos p WHERE numero = $1", [numero])).rows[0];
+    if (!p?.transporte || !SE_PREPARAN_SOLOS.has(p.transporte)) return { preparado: false, motivo: "no_corresponde" };
+    // Ya tuvo un envío (preparado a mano, o descartado por una persona): un reintento atrasado no lo rehace.
+    if (p.tuvo) return { preparado: false, motivo: "ya_tuvo_envio" };
+    const candado = `isu:preparar:${numero}`;
+    if (await deps.redis.set(candado, "1", "EX", 120, "NX").catch(() => "OK") !== "OK") throw new ErrorHttp(503, "ocupado", "Ya se está preparando.");
+    try {
+      return { preparado: true, ...await preparar(numero, await deps.cotizador.config(), "automático") };
+    } catch (e) {
+      if (e instanceof ErrorHttp && ["ya_preparado", "no_pagado"].includes(e.codigo)) return { preparado: false, motivo: e.codigo };
+      const nombre = e instanceof ErrorTransporte ? NOMBRE_TRANSPORTE[e.transporte as TransporteTienda] ?? e.transporte : "";
+      /*
+       * Se reintenta sólo si el transporte contestó que no (5xx o 429): ahí no creó
+       * nada. Sin respuesta (tiempo agotado, red) pudo haberlo creado y cobrado, y
+       * reintentar compraría otro: queda para que una persona mire su portal.
+       */
+      const reintentar = e instanceof ErrorTransporte && e.reintentable && e.status !== null;
+      const detalle = e instanceof ErrorHttp ? `No se pudo preparar solo el envío: ${e.message}`
+        : reintentar ? `${nombre} no respondió bien (HTTP ${(e as ErrorTransporte).status}): se reintenta en unos minutos.`
+        : e instanceof ErrorTransporte && e.status !== null ? `No se pudo preparar solo el envío: ${e.message}`
+        : `No se pudo confirmar si ${nombre || "el transporte"} creó el envío: revisá su portal antes de prepararlo a mano (para no pagarlo dos veces).`;
+      if (!(e instanceof ErrorHttp)) req.log.warn({ err: e, numero }, "no se pudo preparar solo el envío");
+      // En la ficha, una vez por motivo (los reintentos no lo repiten).
+      await pool.query(
+        `INSERT INTO tienda.pedido_eventos (pedido_id, estado, detalle, actor)
+         SELECT p.id, p.estado, $2::text, 'automático' FROM tienda.pedidos p
+          WHERE p.numero = $1 AND NOT EXISTS (SELECT 1 FROM tienda.pedido_eventos x WHERE x.pedido_id = p.id AND x.detalle = $2::text)`,
+        [numero, detalle.slice(0, 300)]);
+      if (reintentar) throw new ErrorHttp(503, "transporte", "El transporte no respondió.");
+      return { preparado: false, motivo: e instanceof ErrorHttp ? e.codigo : "revisar" };
+    } finally {
+      await deps.redis.del(candado).catch(() => 0);
+    }
+  });
+
   async function preparar(numero: string, cfg: Awaited<ReturnType<CotizadorEnvios["config"]>>, quien: string) {
     const { rows } = await pool.query<FilaPreparar>(
       `SELECT p.*, (SELECT COALESCE(sum(cantidad), 0)::int FROM tienda.pedido_items i WHERE i.pedido_id = p.id) AS prendas
@@ -183,11 +241,20 @@ export async function rutasEnviosAdmin(app: FastifyInstance, deps: DepsEnviosAdm
       etiqueta = creado.etiqueta ?? (seguimiento ? await ad.etiqueta({ seguimiento, externoId }).catch(() => null) : null);
     }
 
+    /*
+     * El envío ya está creado (y cobrado) en el transporte: desde acá nada tira,
+     * o se volvería a crear otro. Una etiqueta que no es PDF, o que no se pudo
+     * guardar a tiempo, queda sin guardar: «Imprimir etiquetas» la vuelve a pedir.
+     */
     let clave: string | null = null;
-    if (etiqueta && deps.etiquetas) {
-      if (etiqueta.subarray(0, 5).toString("latin1") !== "%PDF-") throw new ErrorHttp(502, "etiqueta", "El transporte devolvió una etiqueta que no es un PDF.");
-      clave = `e/${p.id}/${randomBytes(12).toString("hex")}.pdf`;
-      await deps.etiquetas.guardar(clave, etiqueta, "application/pdf");
+    if (etiqueta && deps.etiquetas && etiqueta.subarray(0, 5).toString("latin1") === "%PDF-") {
+      const c = `e/${p.id}/${randomBytes(12).toString("hex")}.pdf`;
+      let tope: NodeJS.Timeout | undefined;
+      const guardada = await Promise.race([
+        deps.etiquetas.guardar(c, etiqueta, "application/pdf").then(() => true),
+        new Promise<false>((r) => { tope = setTimeout(() => r(false), 20_000); }),
+      ]).catch(() => false).finally(() => clearTimeout(tope));
+      if (guardada) clave = c;
     }
     // El mismo número otra vez (Mercado Envíos después de descartar): se reactiva. De OTRO pedido: error.
     const ins = await pool.query(

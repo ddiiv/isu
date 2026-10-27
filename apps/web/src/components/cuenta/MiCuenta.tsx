@@ -27,6 +27,8 @@ export function MiCuenta() {
 
 function Ingreso({ alEntrar }: { alEntrar: () => void }) {
   const [modo, setModo] = useState<"ingresar" | "registro" | "olvide">("ingresar");
+  // /cuenta#olvide (desde un enlace de restablecer que no sirve): directo a pedir otro.
+  useEffect(() => { if (window.location.hash === "#olvide") setModo("olvide"); }, []);
   const [f, setF] = useState({ email: "", contrasena: "", nombre: "", apellido: "", aceptaNovedades: false });
   const [msg, setMsg] = useState<{ tipo: "error" | "ok"; texto: string } | null>(null);
   const [enviando, setEnviando] = useState(false);

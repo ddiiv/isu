@@ -124,12 +124,12 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
           <Tarjeta titulo="Variantes (de Stocker)">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="text-tinta-tenue"><tr><th className="py-2">SKU</th><th>Color</th><th>Talle</th><th className="text-right">Precio</th><th className="text-right">Stock</th><th className="pl-3 text-center">En la tienda</th></tr></thead>
+                <thead className="text-tinta-tenue"><tr><th className="py-2 pr-3">SKU</th><th className="pr-3">Color</th><th className="pr-3">Talle</th><th className="text-right">Precio</th><th className="text-right">Stock</th><th className="pl-3 text-center">En la tienda</th></tr></thead>
                 <tbody className="divide-y divide-linea">
                   {d.variantes.map((v) => (
                     <tr key={v.sku} className={v.activo ? "" : "text-tinta-tenue"}>
                       <td className={`py-1.5 ${v.activo ? "" : "line-through"}`}>{v.sku}</td><td>{d.colores.find((c) => c.id === v.colorId)?.nombre ?? "—"}</td><td>{v.talle ?? "—"}</td>
-                      <td className="text-right">{pesos(v.precio)}</td><td className={`text-right ${v.stock ? "" : "text-oferta"}`}>{v.stock}</td>
+                      <td className="whitespace-nowrap text-right">{pesos(v.precio)}</td><td className={`text-right ${v.stock ? "" : "text-oferta"}`}>{v.stock}</td>
                       <td className="pl-3 text-center">
                         {/* Un talle que existe en Stocker pero no se vende online (ej. una musculosa sólo en talle Único). */}
                         <input type="checkbox" checked={!v.oculta} disabled={!operador} aria-label={`Vender ${v.sku} en la tienda`} className="size-4 accent-marca"
@@ -192,7 +192,11 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
           <Tarjeta titulo="Guía de talles">
             <select className={claseEntrada} disabled={!operador} value={f.guiaTallesId ?? ""} onChange={(e) => cambiar("guiaTallesId", e.target.value ? Number(e.target.value) : null)} aria-label="Guía de talles">
               <option value="">Sin guía</option>
-              {guiasDisponibles.map((g) => <option key={g.id} value={g.id}>{g.nombre} ({g.tipo === "nino" ? "niños" : g.tipo === "adulto" ? "adulto" : "talles propios"})</option>)}
+              {guiasDisponibles.map((g) => {
+                // El tipo, salvo que el nombre ya lo diga («Niños (remeras…)» no repite «(niños)»).
+                const tipo = g.tipo === "nino" ? "niños" : g.tipo === "adulto" ? "adulto" : "talles propios";
+                return <option key={g.id} value={g.id}>{g.nombre}{g.nombre.toLowerCase().includes(tipo) ? "" : ` (${tipo})`}</option>;
+              })}
             </select>
             <p className="mt-2 text-xs text-tinta-tenue">Talles de este producto: {tallesProducto.join(" · ") || "—"}</p>
             <p className="mt-1 text-xs"><Link href={f.guiaTallesId ? `/guias-talles/${f.guiaTallesId}` : "/guias-talles/nueva"} className="text-marca hover:underline">{f.guiaTallesId ? "Editar esta guía" : "Crear una guía nueva"}</Link></p>
@@ -210,7 +214,7 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
             </p>
             {faltanMedidas && (
               <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900 ring-1 ring-amber-200">
-                Faltan datos. Hasta que los cargues, se cotiza con la prenda por defecto de Ajustes → Envíos.
+                Faltan datos. Hasta que los cargues, se cotiza con la prenda por defecto de Ajustes → «Paquete: todo en una bolsa».
               </p>
             )}
             <div className="grid grid-cols-2 gap-3">

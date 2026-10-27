@@ -10,7 +10,7 @@ import { Boton, Campo, Casilla, claseEntrada, Tarjeta } from "./ui";
  * transporte NO van acá: son variables del servidor.
  */
 export interface ValoresEnvios {
-  transportes?: AjusteTransportes; origenEnvios?: OrigenEnvios; paqueteEnvios?: PaqueteEnvios; enviosEnElDia?: EnviosEnElDia; avisosWhatsapp?: boolean;
+  transportes?: AjusteTransportes; origenEnvios?: OrigenEnvios; paqueteEnvios?: PaqueteEnvios; enviosEnElDia?: EnviosEnElDia; avisosWhatsapp?: boolean; prepararEnviosSolos?: boolean;
 }
 const DIAS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 
@@ -113,6 +113,11 @@ export function AjustesEnvios({ v, poner }: { v: ValoresEnvios; poner: (k: keyof
           </div>
         </Tarjeta>
       )}
+      <Tarjeta titulo="Preparar los envíos">
+        <Casilla etiqueta="Prepararlos solos apenas el pedido queda pagado (Correo Argentino, Andreani y OCA)"
+          ayuda="Por Mercado Pago, una transferencia o un pago registrado a mano. Andreani y OCA: crea el envío y la etiqueta y le pasa el número a Stocker. Correo Argentino: lo carga en MiCorreo, donde se paga e imprime el rótulo. Lo que no se pueda preparar solo queda en Envíos → Para preparar, con el motivo en la ficha. Cabify se prepara a mano: pide el cadete en el momento."
+          marcada={v.prepararEnviosSolos ?? true} onChange={(x) => poner("prepararEnviosSolos", x)} />
+      </Tarjeta>
       {v.avisosWhatsapp !== undefined && (
         <Tarjeta titulo="Avisos de envío">
           <Casilla etiqueta="Mandar avisos por WhatsApp (a quien lo pidió en el checkout)" ayuda="Los mails se mandan siempre. WhatsApp necesita las plantillas aprobadas en Meta." marcada={v.avisosWhatsapp} onChange={(x) => poner("avisosWhatsapp", x)} />

@@ -116,7 +116,7 @@ export function ArmadorOutfits({ descuento }: { descuento: number }) {
 
   return (
     <div className="grid gap-10 lg:grid-cols-[380px_minmax(0,1fr)] lg:gap-14">
-      <form className="space-y-7 lg:sticky lg:top-28 lg:self-start" onSubmit={(e) => { e.preventDefault(); void armar(0); }} noValidate>
+      <form className="space-y-7 lg:sticky lg:top-32 xl:top-28 lg:self-start" onSubmit={(e) => { e.preventDefault(); void armar(0); }} noValidate>
         <fieldset>
           <legend className="text-sm font-bold">¿Para quién?</legend>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -197,7 +197,7 @@ export function ArmadorOutfits({ descuento }: { descuento: number }) {
           <div className="grid min-h-80 place-items-center rounded-[var(--radius-foto)] border border-dashed border-linea p-8 text-center">
             <div>
               <p className="font-display text-3xl">Tu outfit en un minuto</p>
-              <p className="mt-2 text-tinta-suave">Completá lo de la izquierda y te mostramos combinaciones con lo que hay en tu talle.</p>
+              <p className="mt-2 text-tinta-suave">Elegí tu talle y te mostramos combinaciones con lo que hay para vos.</p>
             </div>
           </div>
         ) : !outfits.length ? (

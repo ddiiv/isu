@@ -172,6 +172,7 @@ MAYORISTA_URL=https://isumayoristapedidos-production.up.railway.app
 | `INTERNO_TOKEN` | Las partes de la tienda se reconocen entre sí | Una clave hex |
 | `REVALIDAR_TOKEN` | El worker le avisa a la tienda que regenere páginas | Otra clave hex |
 | `PAGOS_TOKEN` | Para registrar pagos desde afuera (`POST /v1/pagos/registrar`) | Otra clave hex |
+| `MAYORISTA_TOKEN` | Opcional: el sitio mayorista lee las fotos y guías de la tienda (va también en el mayorista como `ISU_TOKEN`; orden de la primera vez en `despliegue.md`) | Otra clave hex, **distinta** de `INTERNO_TOKEN` |
 | `ADMIN_CLAVE_CIFRADO` | Cifra el doble factor del backoffice | `openssl rand -base64 32`. **No la cambies después** de que alguien configure el doble factor: todos tendrían que volver a configurarlo |
 
 **Botón Mayorista**

@@ -1,7 +1,7 @@
 import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
-import { CLAVE_CURSOR_NOVEDADES, HORAS_MAXIMAS_PAGO } from "@isu/shared";
+import { CLAVE_CURSOR_NOVEDADES, HORAS_MAXIMAS_PAGO, NOMBRE_TRANSPORTE } from "@isu/shared";
 import { CP, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
 import { firmaOpinar, type Paquete, type Transportes } from "@isu/envios";
 import type { CotizadorEnvios } from "../envios/cotizador.js";
@@ -10,6 +10,7 @@ import { envioPublico } from "../envios/publico.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { sha256, tokenNuevo } from "../../lib/cripto.js";
 import type { Colas } from "../../lib/colas.js";
+import { SE_PREPARAN_SOLOS } from "../admin/envios.js";
 import { ErrorMp, type MercadoPago, type PagoMp } from "../../lib/mercadopago.js";
 import type { Talo } from "../../lib/talo.js";
 import { crearTransferencias } from "./transferencias.js";
@@ -452,6 +453,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       if (p.transporte === "mercado_envios" && pago.proveedor === "mercadopago") {
         await deps.colas.envios("mercado-envios", { numero: p.numero, pagoId: pago.externo }, `me-${p.numero}`);
       }
+      // Correo, Andreani y OCA: el envío se prepara solo (si está prendido en Ajustes; lo decide la API).
+      if (p.transporte && SE_PREPARAN_SOLOS.has(p.transporte)) await deps.colas.envios("preparar", { numero: p.numero }, `preparar-${p.numero}`);
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
     }
     /*
@@ -500,7 +503,19 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     const r = await pool.query<FilaPedido>(
       `UPDATE tienda.pedidos SET estado = $2, actualizado_en = now() WHERE id = $1 AND estado = $3 RETURNING *`, [p.id, estado, p.estado],
     );
-    if (r.rows[0]) await evento(pool, p.id, estado, quien, motivo);
+    if (r.rows[0]) {
+      await evento(pool, p.id, estado, quien, motivo);
+      // Un envío preparado (y quizás cobrado) no se anula solo en el transporte: sale de Envíos y queda el aviso en la ficha.
+      const envios = await pool.query<{ transporte: string; seguimiento: string | null }>(
+        "UPDATE tienda.envios SET activo = false, estado = 'cancelado', actualizado_en = now() WHERE pedido_id = $1 AND activo AND despachado_en IS NULL AND transporte <> 'mercado_envios' RETURNING transporte, seguimiento",
+        [p.id]);
+      for (const e of envios.rows) {
+        const nombre = NOMBRE_TRANSPORTE[e.transporte as keyof typeof NOMBRE_TRANSPORTE] ?? e.transporte;
+        await evento(pool, p.id, estado, "automático", e.transporte === "correo_argentino"
+          ? "Tenía el envío cargado en MiCorreo: borralo de los envíos importados para no pagarlo."
+          : `Tenía el envío preparado en ${nombre}${e.seguimiento ? ` (${e.seguimiento})` : ""}: anulalo en su portal para no pagarlo.`);
+      }
+    }
     // El depósito lo despachó justo antes: Stocker no devuelve el stock y el paquete va en camino.
     if (c?.yaSalio) await evento(pool, p.id, estado, "stocker", "Stocker: ya se había despachado. Si vuelve, entra por devolución; avisale al cliente.");
     return r.rows[0] ?? null;

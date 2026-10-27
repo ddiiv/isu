@@ -66,6 +66,7 @@ Todas en el mismo servicio. Las referencias `${{…}}` las completa Railway solo
 | `API_PUBLICA_URL` | la dirección de la API (paso 5) |
 | `ORIGENES_PERMITIDOS` | la de la tienda y la del backoffice, separadas por coma |
 | `INTERNO_TOKEN`, `REVALIDAR_TOKEN`, `PAGOS_TOKEN` | cada uno `openssl rand -hex 32`, distintos |
+| `MAYORISTA_TOKEN` | opcional, para que el sitio mayorista lea fotos y guías: otra `openssl rand -hex 32` (el mismo valor va en el mayorista como `ISU_TOKEN`; orden de la primera vez en `despliegue.md`) |
 | `ADMIN_CLAVE_CIFRADO` | `openssl rand -base64 32`, **y no la cambies nunca** |
 | `STOCKER_API_URL` | `http://${{<backend de Stocker>.RAILWAY_PRIVATE_DOMAIN}}:<su puerto>` (sin `/api`) |
 | `STOCKER_TOKEN` | la credencial de Stocker con origen «Tienda online minorista» |
