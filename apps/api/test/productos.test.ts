@@ -98,6 +98,37 @@ const get = (url: string) => app.inject(url);
 type Tarjeta = { nombre: string; agotado: boolean };
 const qa = (ps: Tarjeta[]) => ps.filter((p) => / qa /.test(p.nombre));
 
+describe("catálogo para el sitio mayorista", () => {
+  it("sólo con la credencial del mayorista; fotos de exhibición primero, cada una con los SKU de su color", async () => {
+    const MAYORISTA = "m".repeat(32);
+    const INTERNO = "i".repeat(32);
+    const otra = await construirApp({
+      env: leerEntorno({ NODE_ENV: "test", LOG_LEVEL: "silent", DATABASE_URL: DB, REDIS_URL: REDIS, INTERNO_TOKEN: INTERNO, MAYORISTA_TOKEN: MAYORISTA }), pool, redis,
+    });
+    try {
+      const url = "/v1/interno/catalogo-mayorista";
+      expect((await otra.inject(url)).statusCode).toBe(404);
+      expect((await otra.inject({ url, headers: { "x-isu-mayorista": "otra-cosa" } })).statusCode).toBe(404);
+      // La credencial interna de la tienda no la abre: son dos llaves distintas.
+      expect((await otra.inject({ url, headers: { "x-isu-interno": INTERNO, "x-isu-mayorista": INTERNO } })).statusCode).toBe(404);
+      const r = await otra.inject({ url, headers: { "x-isu-mayorista": MAYORISTA } });
+      expect(r.statusCode).toBe(200);
+      const ps = r.json().productos as Array<{ sku: string; fotos: Array<{ clave: string; color: string | null; skus: string[] }>; guia: unknown }>;
+      const p = ps.find((x) => x.sku === "QA-API-1")!;
+      expect(p.fotos.map((f) => [f.clave.slice(-6), f.color, f.skus])).toEqual([
+        ["x2aaaa", "Negro", ["QA-API-1-1", "QA-API-1-2"]],
+        ["x1aaaa", "Negro", ["QA-API-1-1", "QA-API-1-2"]],
+        ["x3aaaa", "Blanco", ["QA-API-1-3"]],
+      ]);
+      expect(r.json().productos.find((x: { sku: string }) => x.sku === "QA-API-1").variantes).toEqual(["QA-API-1-1", "QA-API-1-2", "QA-API-1-3", "QA-API-1-4"]);
+      // Sin fotos ni guía, no viaja.
+      expect(ps.some((x) => x.sku === "QA-API-2")).toBe(false);
+    } finally {
+      await otra.close();
+    }
+  });
+});
+
 describe("grilla por categoría", () => {
   it("la categoría de arriba incluye sus subcategorías; ocultos y de baja no salen", async () => {
     const r = await get("/v1/productos?categoria=mujer");

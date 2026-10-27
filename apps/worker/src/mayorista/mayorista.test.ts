@@ -150,6 +150,29 @@ describe("importar del mayorista", () => {
     const plan2 = await planificar(pool, mayorista, { reemplazar: true });
     await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), plan2, descargar, { reemplazar: true });
     expect((await fotos(BASE + 1)).map((x) => x.origen)).not.toContain(null);
+    expect(plan2.productos[0]!.avisos).toContain("tiene 1 fotos cargadas a mano en la tienda: --reemplazar las borra");
+  });
+
+  it("--reemplazar no borra nada si ninguna foto nueva sirve (el producto no queda sin fotos ni oculto)", async () => {
+    const pid = await id(BASE + 1);
+    await pool.query("UPDATE tienda.productos SET visible = true WHERE id = $1", [pid]);
+    await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, clave) VALUES ($1, 'exhibicion', $2)", [pid, `p/${pid}/amanoamano02`]);
+    const nada: Descargar = async () => { throw Object.assign(new Error("404"), { final: true }); };
+    const plan = await planificar(pool, mayorista, { reemplazar: true });
+    const r = await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), plan, nada, { reemplazar: true });
+    expect(r.fallidos.map((f) => f.sku)).toContain("isuclorem");
+    expect((await fotos(BASE + 1)).map((x) => x.origen)).toEqual([null]);
+    expect((await pool.query("SELECT visible FROM tienda.productos WHERE id = $1", [pid])).rows[0].visible).toBe(true);
+  });
+
+  it("las categorías fijadas en la tienda (a mano o por otra importación) no se tocan", async () => {
+    const pid = await id(BASE + 3);
+    await pool.query("UPDATE tienda.productos SET categorias_fijas = true WHERE id = $1", [pid]);
+    const antes = (await pool.query("SELECT categoria_id FROM tienda.producto_categorias WHERE producto_id = $1 ORDER BY 1", [pid])).rows;
+    const plan = await planificar(pool, mayorista);
+    expect(plan.productos[2]).toMatchObject({ categorias: [], categoriaIds: [] });
+    await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), plan, descargar);
+    expect((await pool.query("SELECT categoria_id FROM tienda.producto_categorias WHERE producto_id = $1 ORDER BY 1", [pid])).rows).toEqual(antes);
   });
 
   describe("con la base ocupada (la sincronización con Stocker escribiendo a la vez)", () => {

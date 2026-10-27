@@ -85,7 +85,7 @@ export function Grilla({
   return (
     <div>
       {filtros && (
-        <div className="sticky top-16 z-30 -mx-4 border-b border-linea bg-white/95 px-4 py-3 sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0">
+        <div className="sticky top-29 z-30 -mx-4 border-b border-linea bg-white/95 px-4 py-3 sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0">
           <div className="flex items-center justify-between gap-3">
             <button type="button" onClick={() => setAbierto(!abierto)} aria-expanded={abierto} aria-controls="panel-filtros"
               className="inline-flex items-center gap-2 rounded-full border border-tinta px-4 py-2 text-sm font-bold">

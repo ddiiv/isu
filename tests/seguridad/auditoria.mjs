@@ -160,7 +160,7 @@ for (const ruta of ["/fotos/../.env", "/fotos/p/1/..%2f..%2f.env", "/fotos/p/1/a
 {
   const secretos = ["STOCKER_TOKEN", "INTERNO_TOKEN", "REVALIDAR_TOKEN", "R2_SECRET_ACCESS_KEY", "PAGOS_TOKEN", "MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET", "ADMIN_CLAVE_CIFRADO",
     // Etapa 4: credenciales de transportes y WhatsApp.
-    "WHATSAPP_META_TOKEN", "ANDREANI_CLAVE", "OCA_CLAVE", "CORREO_AR_CLAVE", "CABIFY_CLIENTE_SECRETO"].map((k) => process.env[k]).filter((v) => v && v.length >= 20);
+    "WHATSAPP_META_TOKEN", "ANDREANI_CLAVE", "OCA_CLAVE", "CORREO_AR_CLAVE", "CABIFY_CLIENTE_SECRETO", "MAYORISTA_TOKEN"].map((k) => process.env[k]).filter((v) => v && v.length >= 20);
   const paginas = ["/", "/mujer", unSlug ? `/producto/${unSlug}` : "/", "/checkout", "/cuenta", "/carrito"];
   let texto = "";
   for (const p of paginas) {

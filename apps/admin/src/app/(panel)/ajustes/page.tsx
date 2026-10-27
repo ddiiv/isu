@@ -61,7 +61,7 @@ export default function Ajustes() {
   return (
     <>
       <Titulo acciones={<Boton onClick={() => void guardar()}>Guardar ajustes</Boton>}>Ajustes</Titulo>
-      <div className="mb-4 space-y-2"><aviso.Aviso />{ultima && <p className="text-xs text-tinta-tenue">Último cambio: {fecha(ultima.actualizadoEn)} · {ultima.actualizadoPor}</p>}</div>
+      <div className="mb-4 space-y-2"><aviso.Aviso />{ultima && <p className="text-xs text-tinta-tenue">Último cambio: {fecha(ultima.actualizadoEn)} · {ultima.actualizadoPor?.startsWith("migracion") ? "carga inicial" : ultima.actualizadoPor}</p>}</div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Tarjeta titulo="Tienda">
           <div className="space-y-3">

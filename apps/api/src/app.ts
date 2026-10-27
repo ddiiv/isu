@@ -111,7 +111,7 @@ export async function construirApp(deps: Dependencias) {
   await rutasDirecciones(app, { pool, redis, env, cache, google, georef });
   await rutasCategorias(app, { db, cache });
   const descuentos = crearDescuentos(pool, cache);
-  await rutasProductos(app, { pool, cache, descuentos });
+  await rutasProductos(app, { pool, cache, descuentos, mayorista: env.MAYORISTA_TOKEN });
   await rutasOutfits(app, { pool, cache, descuentos });
   if (env.FOTOS_DIR) await rutasFotos(app, { dir: env.FOTOS_DIR });
 

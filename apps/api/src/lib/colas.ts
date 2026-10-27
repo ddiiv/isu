@@ -12,8 +12,8 @@ export type Plantilla = "bienvenida" | "restablecer" | "pedido_recibido" | "pago
 export interface Colas {
   email(plantilla: Plantilla, para: string, datos: Record<string, unknown>): Promise<void>;
   stocker(nombre: "cobro" | "stock" | "invalidar" | "catalogo" | "envio", datos: Record<string, unknown>, id?: string): Promise<void>;
-  /** Etapa 4: trabajos de envíos (Mercado Envíos después del pago, seguir un envío ya). */
-  envios(nombre: "mercado-envios" | "seguir", datos: Record<string, unknown>, id?: string): Promise<void>;
+  /** Etapa 4: trabajos de envíos (Mercado Envíos después del pago, seguir un envío ya, preparar solo uno recién pagado). */
+  envios(nombre: "mercado-envios" | "seguir" | "preparar", datos: Record<string, unknown>, id?: string): Promise<void>;
   cerrar(): Promise<void>;
 }
 

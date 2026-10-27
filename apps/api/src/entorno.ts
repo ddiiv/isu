@@ -32,6 +32,8 @@ const Entorno = z.object({
   LIMITE_PEDIDOS_POR_MINUTO: z.coerce.number().int().min(1).default(300),
   // Credencial del servidor de la tienda (web → API): no cuenta para el límite por IP.
   INTERNO_TOKEN: z.string().min(32).optional(),
+  // Credencial del sitio mayorista: sólo lee fotos y guías (no es INTERNO_TOKEN, que firma enlaces y saltea límites).
+  MAYORISTA_TOKEN: z.string().min(32).optional(),
   CACHE_SEGUNDOS: z.coerce.number().int().min(0).max(3600).default(30),
 
   // Sólo desarrollo/pruebas: sirve /fotos/* desde esta carpeta (en producción, R2).

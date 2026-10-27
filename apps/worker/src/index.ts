@@ -127,7 +127,7 @@ if (api) {
   // Transferencias que se confirman solas (Talo y la cuenta de Mercado Pago), por si se perdió un aviso.
   await colaPagos.upsertJobScheduler("conciliar-transferencias", { every: 2 * 60_000 }, { name: "conciliar-transferencias" });
 } else {
-  console.warn("Sin API_URL / INTERNO_TOKEN: los pedidos sin pagar no vencen solos.");
+  console.warn("Sin API_URL / INTERNO_TOKEN: los pedidos sin pagar no vencen solos y los envíos no se preparan solos.");
 }
 
 // Seguimiento de los envíos (una sola programación aunque haya varias réplicas).

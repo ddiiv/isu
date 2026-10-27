@@ -92,7 +92,7 @@ export interface Plan {
 }
 
 interface Tienda {
-  productos: Array<{ id: number; padre: string; nombre: string; slug: string }>;
+  productos: Array<{ id: number; padre: string; nombre: string; slug: string; fijas: boolean }>;
   variantes: Map<string, { productoId: number; colorId: number | null }>;
   colores: Map<number, Array<{ id: number; clave: string; nombre: string; activo: boolean }>>;
   fotos: Map<number, Array<{ origen: string | null }>>;
@@ -101,8 +101,8 @@ interface Tienda {
 
 async function leerTienda(pool: pg.Pool): Promise<Tienda> {
   const [ps, vs, cs, fs, cats] = await Promise.all([
-    pool.query<{ id: number; padre: string; nombre: string; slug: string }>(
-      "SELECT id, upper(stocker_padre) AS padre, nombre, slug FROM tienda.productos WHERE en_stocker"),
+    pool.query<{ id: number; padre: string; nombre: string; slug: string; fijas: boolean }>(
+      "SELECT id, upper(stocker_padre) AS padre, nombre, slug, categorias_fijas AS fijas FROM tienda.productos WHERE en_stocker"),
     pool.query<{ sku: string; producto_id: number; color_id: number | null }>(
       "SELECT upper(v.sku) AS sku, v.producto_id, v.color_id FROM tienda.variantes v JOIN tienda.productos p ON p.id = v.producto_id AND p.en_stocker"),
     pool.query<{ id: number; producto_id: number; clave: string; nombre: string; activo: boolean }>(
@@ -157,9 +157,11 @@ function planDe(m: ProductoMayorista, prod: Tienda["productos"][number], t: Tien
   const ajuste: Ajuste = AJUSTES[sku] ?? {};
   const avisos: string[] = [];
 
-  // ── Categorías ──
-  let categorias = [...(CATEGORIAS[sku] ?? [])];
-  if (!categorias.length) {
+  // ── Categorías ── (las fijadas en la tienda, a mano o por una importación anterior, no se tocan)
+  let categorias = prod.fijas ? [] : [...(CATEGORIAS[sku] ?? [])];
+  if (prod.fijas) {
+    avisos.push("categorías fijadas en la tienda: no se tocan");
+  } else if (!categorias.length) {
     const cat = m.categoriaId !== null && m.categoriaId !== undefined ? categoriasMayorista.get(m.categoriaId) : null;
     categorias = proponerCategorias(cat, m.genero, m.titulo).map(([padre, hija]) => (hija ? `${padre}/${hija}` : padre));
     if (categorias.length) avisos.push(`categoría deducida del nombre: ${categorias.join(" + ")}`);
@@ -186,7 +188,9 @@ function planDe(m: ProductoMayorista, prod: Tienda["productos"][number], t: Tien
 
   // ── Fotos ──
   const actuales = t.fotos.get(prod.id) ?? [];
-  const conFotosPropias = !reemplazar && actuales.some((f) => !f.origen?.startsWith("mayorista:"));
+  const aMano = actuales.filter((f) => !f.origen?.startsWith("mayorista:")).length;
+  const conFotosPropias = !reemplazar && aMano > 0;
+  if (reemplazar && aMano && m.fotos.length) avisos.push(`tiene ${aMano} fotos cargadas a mano en la tienda: --reemplazar las borra`);
   const yaImportadas = new Set(reemplazar ? [] : actuales.map((f) => f.origen));
   const activos = (t.colores.get(prod.id) ?? []).filter((c) => c.activo).length;
   const tope = activos * 5;
@@ -312,7 +316,8 @@ export function conCache(descargar: Descargar, dir: string): Descargar {
 }
 
 export async function leerCatalogo(base: string): Promise<CatalogoMayorista> {
-  const r = await fetch(`${new URL(base).origin}/api/catalogo`, { redirect: "error", signal: AbortSignal.timeout(60_000), headers: { accept: "application/json" } });
+  // propias=1: las fotos cargadas en el mayorista, no las de la tienda que el mayorista muestra cuando las tiene.
+  const r = await fetch(`${new URL(base).origin}/api/catalogo?propias=1`, { redirect: "error", signal: AbortSignal.timeout(60_000), headers: { accept: "application/json" } });
   if (!r.ok) throw new Error(`el mayorista contestó ${r.status}`);
   return CatalogoMayorista.parse(await r.json());
 }
@@ -344,6 +349,19 @@ export async function aplicar(
   const reintentos = o.reintentos ?? 5;
   for (const p of plan.productos) {
     log(`${p.sku} · ${p.nombre}`);
+    // Se adelantan unas pocas (la descarga va en fila; el procesado, en paralelo); el guardado, en orden.
+    const paralelo = Math.max(1, o.paralelo ?? 3);
+    const procesadas = new Map<string, Promise<Awaited<ReturnType<typeof procesarFoto>>>>();
+    const preparar = (f: FotoPlan) => {
+      if (!procesadas.has(f.origen)) procesadas.set(f.origen, descargar(f.ruta).then(procesarFoto));
+      return procesadas.get(f.origen)!;
+    };
+    // --reemplazar borra las fotos que había: antes, que alguna de las nuevas sirva (si no, el producto quedaría sin fotos y oculto).
+    if (o.reemplazar && p.fotos.length && !(await Promise.allSettled(p.fotos.map(preparar))).some((x) => x.status === "fulfilled")) {
+      res.fallidos.push({ sku: p.sku, motivo: "ninguna foto del mayorista se pudo usar: no se borró nada" });
+      log("  ✗ salteado: ninguna foto del mayorista se pudo usar; quedan las que tenía");
+      continue;
+    }
     // Si la base está ocupada con este producto (la sincronización con Stocker lo está escribiendo),
     // se espera y se reintenta; si sigue, se saltea y se sigue con los demás. Nunca se corta todo.
     let teniaFotos: boolean | null = null;
@@ -364,13 +382,6 @@ export async function aplicar(
       continue;
     }
 
-    // Se adelantan unas pocas (la descarga va en fila; el procesado, en paralelo); el guardado, en orden.
-    const paralelo = Math.max(1, o.paralelo ?? 3);
-    const procesadas = new Map<string, Promise<Awaited<ReturnType<typeof procesarFoto>>>>();
-    const preparar = (f: FotoPlan) => {
-      if (!procesadas.has(f.origen)) procesadas.set(f.origen, descargar(f.ruta).then(procesarFoto));
-      return procesadas.get(f.origen)!;
-    };
     for (let i = 0; i < p.fotos.length; i++) {
       for (const g of p.fotos.slice(i, i + paralelo)) preparar(g).catch(() => {});
       const f = p.fotos[i]!;
@@ -472,7 +483,7 @@ export function informe(plan: Plan): string {
     const fotos = p.conFotosPropias ? "fotos propias (no se tocan)"
       : `${p.fotos.length} fotos${p.yaEstaban ? ` (+${p.yaEstaban} ya estaban)` : ""}: ${[...porColor].map(([k, n]) => `${k} ${n}`).join(", ") || "—"}`;
     l.push(`${p.sku.padEnd(10)} ${p.nombre}`);
-    l.push(`           → ${p.categorias.join(" + ") || "(sin categoría)"} · ${fotos}`);
+    l.push(`           → ${p.categorias.join(" + ") || "(categorías sin cambios)"} · ${fotos}`);
     if (p.soloTalles) l.push(`           talles a la venta: ${p.soloTalles.join(", ")} (el resto, oculto)`);
     for (const c of p.colores.filter((x) => x.nombreFijo)) l.push(`           color: «${c.nombre}» ${c.hex ?? ""} (nombre fijo)`);
     for (const a of p.avisos) l.push(`           ! ${a}`);

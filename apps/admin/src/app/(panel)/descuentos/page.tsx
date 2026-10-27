@@ -41,7 +41,7 @@ export default function Descuentos() {
   async function buscar() {
     try { setEncontrados((await api<{ productos: FilaProducto[] }>("productos", { query: { q, filtro: "visibles" } })).productos.slice(0, 20)); } catch (e) { aviso.error(e); }
   }
-  const alcance = (d: Descuento) => d.alcance === "todo" ? "Toda la tienda" : d.alcance === "categorias" ? d.categoriaIds.map((c) => nombres.get(c) ?? `#${c}`).join(", ") : `${d.productoIds.length} productos`;
+  const alcance = (d: Descuento) => d.alcance === "todo" ? "Toda la tienda" : d.alcance === "categorias" ? d.categoriaIds.map((c) => nombres.get(c) ?? `#${c}`).join(", ") : `${d.productoIds.length} ${d.productoIds.length === 1 ? "producto" : "productos"}`;
 
   return (
     <>

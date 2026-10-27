@@ -27,7 +27,7 @@ export function revisar(env = process.env) {
 
   const VARIABLES = ["DATABASE_URL", "REDIS_URL", "NEXT_PUBLIC_SITE_URL", "SITIO_URL", "ADMIN_URL", "API_PUBLICA_URL", "ORIGENES_PERMITIDOS",
     "STOCKER_API_URL", "STOCKER_TOKEN", "INTERNO_TOKEN", "REVALIDAR_TOKEN", "PAGOS_TOKEN", "ADMIN_CLAVE_CIFRADO", "NEXT_PUBLIC_CDN_IMAGENES",
-    "MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET", "SMTP_URL", "MAYORISTA_URL", "R2_CUENTA", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+    "MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET", "SMTP_URL", "MAYORISTA_URL", "MAYORISTA_TOKEN", "R2_CUENTA", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
     "TALO_API_URL", "TALO_USER_ID", "TALO_CLIENT_ID", "TALO_CLIENT_SECRET", "GOOGLE_MAPS_API_KEY", "GOOGLE_PLACES_URL", "GEOREF_URL"];
   const conRelleno = new Set();
   for (const k of VARIABLES) {
@@ -104,6 +104,9 @@ export function revisar(env = process.env) {
   for (const k of ["INTERNO_TOKEN", "REVALIDAR_TOKEN", "PAGOS_TOKEN"]) {
     if (valida(k) && env[k].length < 32) ojo(k, "es corta: generá una con  openssl rand -hex 32");
   }
+  // La del sitio mayorista: corta, la API no arranca; igual a INTERNO_TOKEN, el mayorista tendría la llave maestra.
+  if (valida("MAYORISTA_TOKEN") && env.MAYORISTA_TOKEN.length < 32) mal("MAYORISTA_TOKEN", "tiene que tener 32 caracteres o más (si no, la API no arranca): openssl rand -hex 32");
+  if (valida("MAYORISTA_TOKEN") && env.MAYORISTA_TOKEN === env.INTERNO_TOKEN) mal("MAYORISTA_TOKEN", "es igual a INTERNO_TOKEN: tiene que ser otra clave (el sitio mayorista sólo lee fotos y guías). openssl rand -hex 32");
   if (!env.REVALIDAR_TOKEN) ojo("REVALIDAR_TOKEN", "falta: los cambios de stock tardan hasta 5 minutos en verse en la tienda. openssl rand -hex 32");
   if (!env.STOCKER_API_URL || !env.STOCKER_TOKEN) ojo("STOCKER_API_URL / STOCKER_TOKEN", "faltan: la tienda arranca, pero sin productos (no puede traer el catálogo ni mandar pedidos a Stocker).");
   else if (valida("STOCKER_TOKEN") && env.STOCKER_TOKEN.length < 20) mal("STOCKER_TOKEN", "es muy corta para ser una credencial de Stocker: copiala del backoffice de Stocker (origen «Tienda online minorista»).");

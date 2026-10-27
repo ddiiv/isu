@@ -82,7 +82,7 @@ export function FormOpinar({ numero, firma, estrellasIniciales }: { numero: stri
   }
   if (!pedido) {
     return error
-      ? <div className="rounded-2xl border border-linea p-6"><h1 className="text-2xl">No pudimos abrir tu opinión</h1><p className="mt-2 text-tinta-suave" role="alert">{error}</p></div>
+      ? <div className="rounded-2xl border border-linea p-6"><h1 className="text-2xl">No pudimos abrir tu opinión</h1><p className="mt-2 text-tinta-suave" role="alert">{error}</p><Link href="/" className="boton-primario mt-6">Ir a la tienda</Link></div>
       : <p className="text-tinta-tenue">Cargando tu pedido…</p>;
   }
   const pendientes = pedido.productos.filter((x) => !x.yaOpino);

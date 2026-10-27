@@ -26,7 +26,7 @@ export default function Terminos() {
       </ul>
 
       <h2>Envíos y retiro</h2>
-      <p>Enviamos a todo el país con Correo Argentino, Andreani o Mercado Envíos, y en el día dentro de CABA y GBA según la zona y el horario de compra. El costo y el plazo se calculan en el checkout con tu código postal. También podés retirar gratis en <Link href="/locales">nuestros locales</Link>.</p>
+      <p>Enviamos a todo el país con Correo Argentino, Andreani, OCA o Mercado Envíos, y en el día (con Cabify) dentro de CABA y GBA según la zona y el horario de compra. El costo y el plazo se calculan en el checkout con tu código postal. También podés retirar gratis en <Link href="/locales">nuestros locales</Link>.</p>
 
       <h2>Cambios, devoluciones y arrepentimiento</h2>
       <p>Ver <Link href="/devoluciones">Cambios y devoluciones</Link> y el <Link href="/arrepentimiento">Botón de arrepentimiento</Link>.</p>

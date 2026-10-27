@@ -12,7 +12,7 @@ import { expect, test, verResumen, type Page } from "./base";
  *   · antes de pagar, el checkout muestra lo que cobra Correo Argentino (a
  *     domicilio y a sucursal, con las sucursales donde se puede retirar);
  *   · el backoffice pide peso y medidas en cada producto (y de a muchos);
- *   · «Preparar» carga el envío en MiCorreo; el rótulo se paga e imprime en
+ *   · al cobrarse, el envío se carga solo en MiCorreo; el rótulo se paga e imprime en
  *     MiCorreo (acá, su simulador) y el número se carga en el backoffice;
  *     de ahí sale, se sigue y el cliente lo ve en su seguimiento;
  *   · quién abrió los datos del cliente queda en Auditoría.
@@ -121,7 +121,7 @@ test.describe("backoffice", () => {
     expect(errores).toEqual([]);
   });
 
-  test("Correo Argentino: preparar lo carga en MiCorreo, el rótulo se imprime allá y su número se carga acá", async ({ page, request }) => {
+  test("Correo Argentino: al cobrarse se carga solo en MiCorreo, el rótulo se imprime allá y su número se carga acá", async ({ page, request }) => {
     test.setTimeout(150_000);
     const errores = vigilar(page);
     const sku = await skuConStock(request);
@@ -137,12 +137,11 @@ test.describe("backoffice", () => {
     expect((await request.post(`${API}/v1/pagos/registrar`, { headers: { authorization: `Bearer ${PAGOS}` }, data: { pedido: numero, medio: "transferencia", monto: 99_999_999, referencia: `E2E-CA-${Date.now()}`, quien: "e2e" } })).ok()).toBe(true);
 
     await ingresar(page, `e2e-micorreo-${Date.now()}@test.com`);
-    await page.goto(`${ADMIN}/envios`);
-    await page.getByLabel(`Elegir ${numero}`).check();
-    await page.getByRole("button", { name: "Preparar envíos" }).click();
-    await expect(page.getByText(/quedó cargado en MiCorreo/)).toBeVisible({ timeout: 20_000 });
-
-    await page.getByRole("button", { name: /^Etiquetados/ }).click();
+    // Cobrado → el worker lo carga solo en MiCorreo (todavía sin el número del rótulo).
+    await expect(async () => {
+      await page.goto(`${ADMIN}/envios?vista=etiquetados`);
+      await expect(page.getByRole("row", { name: numero })).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 30_000 });
     const fila = page.getByRole("row", { name: numero });
     await expect(fila.getByText("Falta el número del rótulo")).toBeVisible();
     await expect(fila).toContainText(/bolsa (Chica|Mediana|Grande)/);

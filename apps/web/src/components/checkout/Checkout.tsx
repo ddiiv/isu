@@ -23,7 +23,7 @@ import { AvisoDireccion, CampoCalle } from "./Direccion";
  * (/checkout?pago=transferencia).
  */
 const MEDIOS: Array<{ id: MedioPago; titulo: string; detalle: (c: ConfigPublica) => string }> = [
-  { id: "transferencia", titulo: "Transferencia bancaria", detalle: (c) => `${c.descuentoTransferencia}% OFF. Te damos los datos al confirmar y separamos tus prendas mientras transferís.` },
+  { id: "transferencia", titulo: "Transferencia bancaria", detalle: () => "Te damos los datos al confirmar y separamos tus prendas mientras transferís." },
   { id: "mercadopago", titulo: "Mercado Pago", detalle: (c) => `Tarjeta de crédito o débito, dinero en cuenta. Hasta ${c.cuotasSinInteres} cuotas sin interés.` },
   { id: "pagofacil", titulo: "Pago Fácil / Rapipago", detalle: () => "Pagás en efectivo con el código que te da Mercado Pago. Tenés 3 días." },
   { id: "local", titulo: "Pagar al retirar en el local", detalle: () => "Efectivo, débito o transferencia al retirar. Te guardamos las prendas 3 días." },

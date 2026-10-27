@@ -55,7 +55,12 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
     };
     document.addEventListener("keydown", alTeclado);
     document.body.style.overflow = "hidden";
+    // Si la ventana pasa al encabezado de escritorio (xl) con el menú abierto, se cierra: si no, la página queda trabada.
+    const escritorio = window.matchMedia("(min-width: 80rem)");
+    const alCruzar = () => { if (escritorio.matches) setAbierto(false); };
+    escritorio.addEventListener("change", alCruzar);
     return () => {
+      escritorio.removeEventListener("change", alCruzar);
       document.removeEventListener("keydown", alTeclado);
       document.body.style.overflow = "";
       boton.current?.focus();
@@ -68,13 +73,13 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
 
   return (
     <>
-      <button ref={boton} type="button" className="-ml-2 p-2.5 lg:hidden" aria-label="Abrir menú" aria-expanded={abierto} aria-controls={id} onClick={() => { setPanel(null); setAbierto(true); }}>
+      <button ref={boton} type="button" className="-ml-2 p-2.5 xl:hidden" aria-label="Abrir menú" aria-expanded={abierto} aria-controls={id} onClick={() => { setPanel(null); setAbierto(true); }}>
         <IconoMenu />
       </button>
       {/* Portal al body: así el cajón nunca queda atrapado dentro del header
           (un transform o filtro en un ancestro cambia a qué se pega el "fixed"). */}
       {montado && createPortal(
-        <div className={`fixed inset-0 z-50 lg:hidden ${saliendo ? "pointer-events-none" : ""}`} role="dialog" aria-modal="true" aria-label="Menú" inert={saliendo}>
+        <div className={`fixed inset-0 z-50 xl:hidden ${saliendo ? "pointer-events-none" : ""}`} role="dialog" aria-modal="true" aria-label="Menú" inert={saliendo}>
           <div className={`absolute inset-0 bg-black/40 ${saliendo ? "animate-desvanece" : "animate-fundido"}`} onClick={cerrar} />
           <nav id={id} className={`absolute inset-y-0 left-0 flex w-[88%] max-w-sm flex-col overflow-y-auto overscroll-contain bg-white px-5 pb-8 pt-4 shadow-2xl ${saliendo ? "animate-sale-izq" : "animate-entra-izq"}`}>
             <div className="mb-2 flex items-center justify-between">

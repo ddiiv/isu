@@ -9,7 +9,7 @@ import { expect, test, verResumen, type Page } from "./base";
  * Etapa 4 en un navegador real, de punta a punta:
  *
  *   checkout con opciones de envío (a sucursal, con su lista) → pago →
- *   backoffice: Preparar (etiqueta en Andreani) e Imprimir → Stocker
+ *   backoffice: se prepara solo al cobrarse (etiqueta en Andreani); descartar y Preparar a mano; Imprimir → Stocker
  *   despacha (Envíos del día) → el pedido pasa a "En camino", se avisa
  *   por WhatsApp y el enlace de seguimiento público muestra el envío.
  *
@@ -103,7 +103,7 @@ test.describe("backoffice de envíos", () => {
   test.skip(({ isMobile }) => isMobile, "El backoffice se prueba en escritorio");
   const EMAIL = "e2e-envios@isuwaya.test";
 
-  test("preparar, imprimir, despachar en Stocker → en camino, WhatsApp y seguimiento público", async ({ page, request }) => {
+  test("se prepara solo al cobrarse; también a mano; imprimir, despachar en Stocker → en camino, WhatsApp y seguimiento público", async ({ page, request }) => {
     test.setTimeout(120_000);
     const errores = vigilar(page);
     // Un pedido pagado con Andreani a domicilio (por la API, como lo haría la tienda).
@@ -122,6 +122,15 @@ test.describe("backoffice de envíos", () => {
     expect((await request.post(`${API}/v1/pagos/registrar`, { headers: { authorization: `Bearer ${PAGOS}` }, data: { pedido: numero, medio: "transferencia", monto: 99_999_999, referencia: `E2E-ADM-${Date.now()}`, quien: "e2e" } })).ok()).toBe(true);
 
     await ingresar(page, EMAIL);
+    // Cobrado → el worker lo prepara solo (Ajustes → «Preparar los envíos», prendido si no se tocó).
+    await expect(async () => {
+      await page.goto(`${ADMIN}/envios?vista=etiquetados`);
+      await expect(page.getByRole("row", { name: numero })).toContainText(/36\d{6,}/, { timeout: 2000 });
+    }).toPass({ timeout: 30_000 });
+    // A mano también: se descarta (vuelve a «Para preparar») y se prepara con el botón.
+    page.once("dialog", (d) => d.accept("dirección a revisar"));
+    await page.getByRole("row", { name: numero }).getByRole("button", { name: "Descartar" }).click();
+    await expect(page.getByRole("row", { name: numero })).toHaveCount(0, { timeout: 10_000 });
     await page.goto(`${ADMIN}/envios`);
     await page.getByLabel(`Elegir ${numero}`).check();
     await page.getByRole("button", { name: "Preparar envíos" }).click();
