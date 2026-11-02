@@ -200,7 +200,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       querystring: z.object({
         q: z.string().trim().max(80).optional(),
         categoria: Id.optional(),
-        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "sin_medidas", "de_baja", "eliminados"]).default("todos"),
+        filtro: z.enum(["todos", "visibles", "ocultos", "sin_fotos", "agotados", "destacados", "nuevos", "packs", "sin_descripcion", "sin_seo", "sin_medidas", "de_baja", "eliminados"]).default("todos"),
         pagina: Pagina,
       }).strict(),
     },
@@ -217,6 +217,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       agotados: "p.en_stocker AND NOT EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0)",
       destacados: "p.destacado", nuevos: "p.nuevo", packs: "p.pack",
       sin_descripcion: "p.en_stocker AND p.descripcion IS NULL AND p.stocker_descripcion IS NULL",
+      sin_seo: "p.en_stocker AND p.seo_titulo IS NULL",
       // Etapa 15: peso y medidas para cotizar el envío.
       sin_medidas: "p.en_stocker AND (p.peso_gramos IS NULL OR p.alto_cm IS NULL OR p.ancho_cm IS NULL OR p.largo_cm IS NULL)",
     };

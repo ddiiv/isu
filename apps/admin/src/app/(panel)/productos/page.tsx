@@ -8,7 +8,7 @@ import { puede, useYo } from "@/components/Marco";
 import { nombresCategorias, type Categoria, type FilaProducto } from "@/lib/catalogo";
 
 const FILTROS: Array<[string, string]> = [
-  ["todos", "Todos"], ["visibles", "Publicados"], ["ocultos", "Ocultos"], ["destacados", "Destacados"], ["nuevos", "Nuevos"], ["packs", "Se venden en pack"], ["sin_descripcion", "Sin descripción"],
+  ["todos", "Todos"], ["visibles", "Publicados"], ["ocultos", "Ocultos"], ["destacados", "Destacados"], ["nuevos", "Nuevos"], ["packs", "Se venden en pack"], ["sin_descripcion", "Sin descripción"], ["sin_seo", "Sin título SEO"],
   ["sin_medidas", "Sin peso o medidas"], ["sin_fotos", "Sin fotos"], ["agotados", "Agotados"], ["de_baja", "Dados de baja en Stocker"], ["eliminados", "Eliminados"],
 ];
 

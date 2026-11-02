@@ -303,6 +303,11 @@ describe("productos: destacados, nuevos, edición masiva", () => {
   it("filtros del listado y cambios que no se aceptan", async () => {
     const d = (await req("GET", "/v1/admin/productos?filtro=destacados&q=qa%20adm", operador)).json();
     expect(d.productos.map((p: { sku: string }) => p.sku)).toEqual(["QA-ADM-3"]);
+    const sinSeo = async () => (await req("GET", "/v1/admin/productos?filtro=sin_seo&q=qa%20adm", operador)).json().productos.map((p: { id: number }) => p.id);
+    expect(await sinSeo()).toContain(ids["qa-adm-4"]);
+    expect((await req("PATCH", `/v1/admin/productos/${ids["qa-adm-4"]}`, operador, { seoTitulo: "Remera nena" })).statusCode).toBe(200);
+    expect(await sinSeo()).not.toContain(ids["qa-adm-4"]);
+    await req("PATCH", `/v1/admin/productos/${ids["qa-adm-4"]}`, operador, { seoTitulo: "" });
     expect((await req("PATCH", `/v1/admin/productos/${ids["qa-adm-1"]}`, operador, { precio: 1 })).statusCode).toBe(400);
     expect((await req("PATCH", `/v1/admin/productos/${ids["qa-adm-1"]}`, operador, { categorias: [999999] })).statusCode).toBe(400);
     expect((await req("PATCH", "/v1/admin/productos/99999999", operador, { visible: true })).statusCode).toBe(404);
