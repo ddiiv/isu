@@ -14,7 +14,7 @@ export function NuevosIngresos({
         <h2 id={`titulo-${id}`} className="text-[clamp(2rem,5vw,3.6rem)] leading-none">{titulo}</h2>
         {verTodo && <Link href={verTodo} className="inline-flex shrink-0 items-center gap-1 text-[15px] font-bold text-marca hover:underline">Ver todo <IconoFlecha /></Link>}
       </div>
-      <Grilla productos={productos} lista={titulo} descuento={descuento} cuotas={cuotas} filtros={false} />
+      <Grilla productos={productos} lista={titulo} descuento={descuento} cuotas={cuotas} filtros={false} prioridad={false} />
     </section>
   );
 }

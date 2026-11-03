@@ -106,7 +106,7 @@ export default async function Inicio() {
               </div>
               <Link href="/packs" className="inline-flex shrink-0 items-center gap-1 text-[15px] font-bold text-ahorro hover:underline">Ver todos los packs <IconoFlecha /></Link>
             </div>
-            <Grilla productos={packs.productos} lista="Inicio · Packs" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} filtros={false} packs={config.packs} />
+            <Grilla productos={packs.productos} lista="Inicio · Packs" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} filtros={false} packs={config.packs} prioridad={false} />
           </div>
         </section>
       )}
