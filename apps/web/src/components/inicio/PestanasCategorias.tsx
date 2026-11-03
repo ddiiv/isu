@@ -30,7 +30,7 @@ export function PestanasCategorias({ grupos, descuento, cuotas }: {
         ))}
       </div>
       <div key={g.slug} role="tabpanel" id={`panel-${g.slug}`} aria-labelledby={`pestana-${g.slug}`} className={tocada ? "animate-fundido" : ""}>
-        <Grilla key={g.slug} productos={g.productos} lista={`Inicio · ${g.nombre}`} descuento={descuento} cuotas={cuotas} filtros={false} />
+        <Grilla key={g.slug} productos={g.productos} lista={`Inicio · ${g.nombre}`} descuento={descuento} cuotas={cuotas} filtros={false} prioridad={false} />
       </div>
     </section>
   );

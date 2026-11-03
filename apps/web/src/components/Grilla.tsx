@@ -16,8 +16,12 @@ type Orden = "destacados" | "precio" | "precio-desc" | "nuevos";
 const ORDENES: Array<[Orden, string]> = [["destacados", "Destacados"], ["precio", "Menor precio"], ["precio-desc", "Mayor precio"], ["nuevos", "Más nuevos"]];
 
 export function Grilla({
-  productos, lista, descuento, cuotas, filtros = true, packs,
-}: { productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean; packs?: AjustePacks }) {
+  productos, lista, descuento, cuotas, filtros = true, packs, prioridad = true,
+}: {
+  productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean; packs?: AjustePacks;
+  /** false en las grillas de abajo del pliegue: que no le peleen la red al banner (el LCP). */
+  prioridad?: boolean;
+}) {
   const [talles, setTalles] = useState<string[]>([]);
   const [colores, setColores] = useState<string[]>([]);
   const [orden, setOrden] = useState<Orden>("destacados");
@@ -142,7 +146,7 @@ export function Grilla({
       {visibles.length ? (
         <ul className="mt-6 grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-5 md:grid-cols-3 lg:grid-cols-4">
           {visibles.map((p, i) => (
-            <li key={p.id}><TarjetaProducto p={p} descuento={descuento} cuotas={cuotas} lista={lista} indice={i} prioridad={i < 2} packs={packs} /></li>
+            <li key={p.id}><TarjetaProducto p={p} descuento={descuento} cuotas={cuotas} lista={lista} indice={i} prioridad={prioridad && i < 2} packs={packs} /></li>
           ))}
         </ul>
       ) : (
