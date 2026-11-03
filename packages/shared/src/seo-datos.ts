@@ -355,20 +355,41 @@ export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: str
   return items;
 }
 
+/**
+ * El feed de Google con los precios del portal mayorista (el catálogo de
+ * WhatsApp vende por mayor). `precios`: SKU de variante en mayúsculas → precio
+ * en pesos. Sólo quedan las variantes con precio mayorista > 0; sin oferta, sin
+ * envío y con el link del portal (la tienda minorista tiene otros precios).
+ */
+export function itemsFeedMayorista(items: ItemFeed[], precios: ReadonlyMap<string, number>, link: string): ItemFeed[] {
+  // Meta no documenta WebP: la API sirve la misma foto en .jpg.
+  // shortcut: con CDN (R2) la foto no es de /fotos/ y queda en .webp, porque la .jpg no existe ahí; subir también las .jpg antes de usar CDN en este feed.
+  const aJpg = (u: string) => u.replace(/(\/fotos\/p\/[^?#]*)\.webp$/, "$1.jpg");
+  return items.flatMap((i) => {
+    const mayorista = precios.get(i.id.trim().toUpperCase());
+    if (!mayorista || !(mayorista > 0)) return [];
+    return [{ ...i, link, price: `${mayorista.toFixed(2)} ARS`, sale_price: null, shipping_price: null, image_link: aJpg(i.image_link), additional_image_link: i.additional_image_link.map(aJpg) }];
+  });
+}
+
 const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!)
   // Caracteres de control: XML no los admite y Merchant Center rechaza el archivo entero.
   // eslint-disable-next-line no-control-regex
   .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
 
-/** RSS 2.0 con el espacio g: (lo que pide Merchant Center como "feed programado"). */
-export function feedXml(items: ItemFeed[], ctx: Pick<ContextoSeo, "sitio" | "marca">): string {
+/**
+ * RSS 2.0 con el espacio g: (lo que pide Merchant Center como "feed programado").
+ * Meta (catálogo de WhatsApp) escribe la disponibilidad con espacio, "in stock":
+ * `disponibilidadConEspacio`.
+ */
+export function feedXml(items: ItemFeed[], ctx: Pick<ContextoSeo, "sitio" | "marca">, opciones: { disponibilidadConEspacio?: boolean } = {}): string {
   const campo = (k: string, v: string | null) => (v === null || v === "" ? "" : `<g:${k}>${xml(v)}</g:${k}>`);
   const filas = items.map((i) => [
     "<item>",
     campo("id", i.id), campo("item_group_id", i.item_group_id), `<title>${xml(i.title)}</title>`,
     `<description>${xml(i.description)}</description>`, `<link>${xml(i.link)}</link>`,
     campo("image_link", i.image_link), ...i.additional_image_link.map((u) => campo("additional_image_link", u)),
-    campo("availability", i.availability), campo("price", i.price), campo("sale_price", i.sale_price),
+    campo("availability", opciones.disponibilidadConEspacio ? i.availability.replaceAll("_", " ") : i.availability), campo("price", i.price), campo("sale_price", i.sale_price),
     campo("brand", i.brand), campo("condition", i.condition), campo("color", i.color), campo("size", i.size),
     campo("gender", i.gender), campo("age_group", i.age_group), campo("google_product_category", i.google_product_category),
     campo("product_type", i.product_type), campo("identifier_exists", i.identifier_exists),

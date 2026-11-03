@@ -3,6 +3,7 @@ import { Redis } from "ioredis";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 import { crearPool, migrar } from "@isu/db";
 import { construirApp, CANAL_INVALIDAR } from "../src/app.js";
 import { leerEntorno } from "../src/entorno.js";
@@ -256,6 +257,19 @@ describe("fotos en desarrollo", () => {
     expect(ok.statusCode).toBe(200);
     expect(ok.headers["content-type"]).toBe("image/webp");
     for (const u of ["/fotos/secreto.txt", "/fotos/p/1/../../secreto.txt", "/fotos/p/1/%2e%2e/%2e%2e/secreto.txt", "/fotos/p/1/abcdef12-800.png", "/fotos/p/1/noexiste1-800.webp"]) {
+      expect((await get(u)).statusCode, u).toBe(404);
+    }
+  });
+  it("la versión .jpg se convierte al vuelo desde la .webp", async () => {
+    await mkdir(path.join(dirFotos, "p/2"), { recursive: true });
+    await writeFile(path.join(dirFotos, "p/2/abcdef12-1200.webp"), await sharp({ create: { width: 8, height: 8, channels: 4, background: { r: 200, g: 20, b: 20, alpha: 1 } } }).webp().toBuffer());
+    const r = await get("/fotos/p/2/abcdef12-1200.jpg");
+    expect(r.statusCode).toBe(200);
+    expect(r.headers["content-type"]).toBe("image/jpeg");
+    expect(r.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    expect((await sharp(r.rawPayload).metadata()).format).toBe("jpeg");
+    // Sin la .webp no hay .jpg; y el .jpg sólo existe para las fotos de producto.
+    for (const u of ["/fotos/p/2/noexiste1-1200.jpg", "/fotos/p/2/abcdef12-1200.jpeg", "/fotos/p/2/abcdef12-1000.jpg", "/fotos/b/2/abcdef12-800.jpg"]) {
       expect((await get(u)).statusCode, u).toBe(404);
     }
   });

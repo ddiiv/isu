@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { noEncontrado } from "../../lib/errores.js";
 
 /*
@@ -13,8 +14,8 @@ import { noEncontrado } from "../../lib/errores.js";
  * formato que genera la tienda: nada de "..", ni barras de más, ni otras
  * extensiones.
  */
-// Fotos de productos (p/…) y banners de la portada (b/…, etapa 8).
-const ARCHIVO = /^(p\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(400|800|1200)|b\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(800|1600|2400))\.webp$/;
+// Fotos de productos (p/…, también en .jpg para el catálogo de Meta) y banners de la portada (b/…, etapa 8).
+const ARCHIVO = /^(p\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(400|800|1200)\.(webp|jpg)|b\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(800|1600|2400)\.webp)$/;
 
 /* Una ruta relativa se toma desde la raíz del monorepo (donde está el .env), no desde apps/api. */
 export function desdeLaRaiz(dir: string): string {
@@ -30,7 +31,9 @@ export async function rutasFotos(app: FastifyInstance, deps: { dir: string }) {
   app.get<{ Params: { "*": string } }>("/fotos/*", async (req, reply) => {
     const rel = req.params["*"];
     if (!ARCHIVO.test(rel)) throw noEncontrado("Foto");
-    const archivo = path.join(raiz, rel);
+    // La .jpg no está en disco: se lee la .webp y se convierte.
+    const jpg = rel.endsWith(".jpg");
+    const archivo = path.join(raiz, jpg ? rel.replace(/\.jpg$/, ".webp") : rel);
     if (!archivo.startsWith(raiz + path.sep)) throw noEncontrado("Foto");
     try {
       // eslint-disable-next-line security/detect-non-literal-fs-filename -- ruta validada arriba
@@ -39,10 +42,13 @@ export async function rutasFotos(app: FastifyInstance, deps: { dir: string }) {
     } catch {
       throw noEncontrado("Foto");
     }
+    // JPEG no tiene transparencia: se aplana sobre blanco. Antes de las cabeceras: un error no puede quedar cacheado un año.
+    const convertida = jpg ? await sharp(archivo).flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer() : null;
     reply
-      .header("content-type", "image/webp")
+      .header("content-type", jpg ? "image/jpeg" : "image/webp")
       .header("cache-control", "public, max-age=31536000, immutable")
       .header("cross-origin-resource-policy", "cross-origin");
+    if (convertida) return reply.send(convertida);
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- ruta validada arriba
     return reply.send(createReadStream(archivo));
   });
