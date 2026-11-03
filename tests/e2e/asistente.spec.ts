@@ -46,6 +46,19 @@ test.describe("asistente", () => {
     expect(errores).toEqual([]);
   });
 
+  test("si el panel no baja (sin red o tras un deploy), la tienda sigue en pie y ofrece WhatsApp", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await page.route("**/_next/static/chunks/**", (r) => r.abort());
+    await page.getByRole("button", { name: "Abrir el asistente de la tienda" }).click();
+    const panel = page.getByRole("dialog", { name: "Asistente Isuwaya" });
+    await expect(panel.getByText(/No pudimos abrir el asistente/)).toBeVisible();
+    await expect(panel.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("href", /^https:\/\/wa\.me\/\d+$/);
+    await expect(page.locator("main")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+  });
+
   test("costo de envío: pide el código postal y cotiza con los transportes", async ({ page }) => {
     await page.goto("/");
     const panel = await abrir(page);

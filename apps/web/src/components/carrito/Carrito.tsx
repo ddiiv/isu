@@ -171,7 +171,7 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     } catch {
       return null;
     } finally {
-      // Mientras haya uno más nuevo en camino sigue "cotizando" (el botón de pagar sigue bloqueado).
+      // Mientras haya uno más nuevo en camino sigue "cotizando" (el botón de confirmar del checkout sigue bloqueado).
       if (n === ultimaCotizacion.current) setCotizando(false);
     }
   }, [lineas, cupon]);
