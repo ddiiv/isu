@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, feedXml, horarioSchema, itemsFeed, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, feedXml, horarioSchema, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -167,6 +167,28 @@ describe("feed de Google Shopping", () => {
   });
   it("sin fotos no se publica (Merchant Center la rechaza)", () => {
     expect(itemsFeed(producto({ exhibicion: [], colores: [{ clave: "negro", nombre: "Negro", hex: null, fotos: [] }] }), ctx, "d")).toEqual([]);
+  });
+  it("para Meta, la disponibilidad lleva espacio; Google sigue igual", () => {
+    const items = itemsFeed(producto(), ctx, "d");
+    expect(feedXml(items, ctx)).toContain("<g:availability>out_of_stock</g:availability>");
+    const meta = feedXml(items, ctx, { disponibilidadConEspacio: true });
+    expect(meta).toContain("<g:availability>out of stock</g:availability>");
+    expect(meta).toContain("<g:availability>in stock</g:availability>");
+    expect(meta).not.toMatch(/availability>\w+_\w+/);
+  });
+  it("mayorista: sólo las variantes con precio > 0 del portal, sin oferta ni envío, con fotos .jpg", () => {
+    const items = itemsFeed(producto(), ctx, "d");
+    const [a, b] = items;
+    const precios = new Map([[a!.id.toUpperCase(), 12345.5], [b!.id.toUpperCase(), 0]]);
+    const out = itemsFeedMayorista(items, precios, "https://mayorista.example/");
+    expect(out.map((i) => i.id)).toEqual([a!.id]);
+    expect(out[0]).toMatchObject({ price: "12345.50 ARS", sale_price: null, shipping_price: null, link: "https://mayorista.example/" });
+    // Con CDN las fotos no son de /fotos/: quedan como están.
+    expect(out[0]!.image_link).toBe(a!.image_link);
+    // El SKU de la tienda cruza aunque venga con minúsculas o espacios (en Stocker hay "ISUFluSHO…").
+    expect(itemsFeedMayorista([{ ...a!, id: ` ${a!.id.toLowerCase()} ` }], precios, "https://m/")).toHaveLength(1);
+    const api = itemsFeedMayorista([{ ...a!, image_link: "https://api.test/fotos/p/1/azul1-1200.webp", additional_image_link: ["https://api.test/fotos/p/1/azul2-1200.webp?v=1", "https://cdn.test/p/1/x-1200.webp"] }], precios, "https://m/");
+    expect(api[0]).toMatchObject({ image_link: "https://api.test/fotos/p/1/azul1-1200.jpg", additional_image_link: ["https://api.test/fotos/p/1/azul2-1200.webp?v=1", "https://cdn.test/p/1/x-1200.webp"] });
   });
   it("escapa caracteres de control que romperían el XML", () => {
     const items = itemsFeed(producto({ nombre: "Remera\u0001 «Box»" }), ctx, "d");

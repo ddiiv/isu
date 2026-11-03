@@ -53,6 +53,14 @@ hacer una vez (cuentas de Google, día del cambio de dominio).
    - Es lo que aparece en Maps y en «isuwaya flores».
 4. **Bing Webmaster Tools** (bing.com/webmasters): *Importar desde Google Search Console*. Un clic.
 
+## Catálogo de WhatsApp (precios mayoristas)
+
+`https://<dominio>/feed/whatsapp.xml` es el mismo feed con las fotos y los textos de la tienda, pero con los **precios del portal mayorista**: sólo salen las variantes (por SKU) que el portal vende con precio mayor a 0, sin oferta ni envío, y el link lleva al portal (`MAYORISTA_URL`). Las fotos van en `.jpg` (Meta no documenta WebP). Si el portal no responde, el feed contesta **503** y Meta conserva el catálogo anterior: una fuente programada reemplaza el catálogo, así que un feed vacío lo borraría entero.
+
+1. **Meta Commerce Manager** (business.facebook.com/commerce): elegí el catálogo (o creá uno) → *Fuentes de datos → Agregar artículos → Lista de datos programada*.
+2. URL `https://<dominio>/feed/whatsapp.xml`, moneda ARS, frecuencia **diaria**. Revisá en *Diagnóstico* que no haya artículos rechazados.
+3. **WhatsApp Manager** → el número mayorista → *Catálogo*: conectá ese catálogo y dejá visible el ícono de carrito.
+
 ## El día del cambio de dominio (Jumpseller → tienda nueva)
 
 > **Clave:** que la tienda nueva quede en **el mismo dominio** (`www.isuwaya.com`). Así las redirecciones hacen su trabajo y Google no pierde nada. Si va a otro dominio, también hay que redirigir el dominio viejo entero al nuevo (Cloudflare → *Redirect Rules*) y avisar en Search Console (*Cambio de dirección*).
