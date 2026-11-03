@@ -8,8 +8,8 @@ import { src } from "@/lib/fotos";
 import { IconoCerrar, IconoChat, IconoEnviar, IconoWhatsapp } from "../iconos";
 
 /*
- * El asistente de la tienda: una burbuja abajo a la derecha (donde estaba el
- * botón de WhatsApp) que abre un panel de chat. En el celular ocupa la
+ * El panel del asistente de la tienda (la burbuja que lo abre está en
+ * BotonAsistente, que carga este archivo recién cuando hace falta). En el celular ocupa la
  * pantalla. Todo lo que se muestra es texto: nunca se interpreta HTML de las
  * respuestas, y sólo se muestran enlaces de la tienda o de su WhatsApp.
  * La charla se guarda sólo en esta pestaña (sessionStorage).
@@ -23,13 +23,11 @@ const MAX = 40;
 const WA = /^https:\/\/wa\.me\/\d{10,15}\?text=[^\s"'<>]*$/;
 const enlaceValido = (u: string) => ENLACE_TIENDA.test(u) || WA.test(u);
 
-export function Asistente({ saludo, whatsapp }: { saludo: string; whatsapp: string }) {
-  const [abierto, setAbierto] = useState(false);
+export function PanelAsistente({ saludo, whatsapp, abierto, cerrar }: { saludo: string; whatsapp: string; abierto: boolean; cerrar: () => void }) {
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [texto, setTexto] = useState("");
   const [esperando, setEsperando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const boton = useRef<HTMLButtonElement>(null);
   const entrada = useRef<HTMLInputElement>(null);
   const lista = useRef<HTMLDivElement>(null);
   const titulo = useId();
@@ -50,14 +48,7 @@ export function Asistente({ saludo, whatsapp }: { saludo: string; whatsapp: stri
     const tecla = (e: KeyboardEvent) => { if (e.key === "Escape") cerrar(); };
     window.addEventListener("keydown", tecla);
     return () => window.removeEventListener("keydown", tecla);
-  }, [abierto]);
-
-  // Al cerrar, el foco vuelve a la burbuja (en el celular está oculta mientras el panel está abierto: se espera a que aparezca).
-  const devolverFoco = useRef(false);
-  function cerrar() { devolverFoco.current = true; setAbierto(false); }
-  useEffect(() => {
-    if (!abierto && devolverFoco.current) { devolverFoco.current = false; boton.current?.focus(); }
-  }, [abierto]);
+  }, [abierto, cerrar]);
   const ultimaBot = [...mensajes].reverse().find((m): m is Extract<Mensaje, { de: "bot" }> => m.de === "bot");
   const esperandoCp = ultimaBot?.r.esperando === "cp";
   const esperandoPedido = ultimaBot?.r.esperando === "pedido";
@@ -102,12 +93,6 @@ export function Asistente({ saludo, whatsapp }: { saludo: string; whatsapp: stri
 
   return (
     <>
-      <button ref={boton} type="button" onClick={() => (abierto ? cerrar() : setAbierto(true))} aria-expanded={abierto} aria-controls="asistente"
-        aria-label={abierto ? "Cerrar el asistente" : "Abrir el asistente de la tienda"}
-        className={`fixed bottom-5 right-5 z-40 grid size-14 place-items-center rounded-full bg-marca text-white shadow-lg shadow-black/20 transition hover:scale-105 focus-visible:outline-offset-4 ${abierto ? "max-sm:hidden" : ""}`}>
-        {abierto ? <IconoCerrar /> : <IconoChat />}
-      </button>
-
       {abierto && (
         <section id="asistente" role="dialog" aria-modal="false" aria-labelledby={titulo}
           className="fixed inset-0 z-50 flex animate-entra-abajo flex-col bg-white sm:inset-auto sm:bottom-24 sm:right-5 sm:h-[min(600px,calc(100dvh-8rem))] sm:w-[380px] sm:origin-bottom-right sm:animate-sube sm:rounded-[var(--radius-foto)] sm:border sm:border-linea sm:shadow-2xl">

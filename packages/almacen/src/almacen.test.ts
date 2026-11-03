@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { almacenEnDisco, PATRON_COMPROBANTES, PATRON_FOTOS } from "./index.js";
+import { almacenEnDisco, almacenR2, PATRON_COMPROBANTES, PATRON_FOTOS } from "./index.js";
 
 describe("almacén en disco", () => {
   it("fotos: no sale de su carpeta ni acepta otros nombres", async () => {
@@ -21,5 +21,22 @@ describe("almacén en disco", () => {
     await a.guardar("c/12/abcdef0123456789.pdf", Buffer.from("%PDF"), "application/pdf");
     await expect(a.guardar("c/12/abcdef0123456789.html", Buffer.from("<script>"), "text/html")).rejects.toThrow();
     await expect(a.guardar("p/1/abcdefgh-400.webp", Buffer.from("x"), "image/webp")).rejects.toThrow();
+  });
+});
+
+describe("almacén en R2", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  it("cada pedido lleva tope (más largo al subir) y si R2 no contesta, falla", async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const topes = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => real(5));
+    // R2 colgado: sólo termina cuando se corta el pedido.
+    vi.stubGlobal("fetch", (req: Request) => new Promise((_, rechazar) => {
+      if (req.signal.aborted) rechazar(req.signal.reason);
+      req.signal.addEventListener("abort", () => rechazar(req.signal.reason));
+    }));
+    const a = almacenR2({ cuenta: "c", bucket: "b", id: "i", secreto: "s" }, PATRON_FOTOS);
+    await expect(a.leer("p/1/abcdefgh-400.webp")).rejects.toThrow();
+    await expect(a.guardar("p/1/abcdefgh-400.webp", Buffer.from("x"), "image/webp")).rejects.toThrow();
+    expect(topes.mock.calls).toEqual([[10_000], [30_000]]);
   });
 });
