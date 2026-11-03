@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatearPesos, formatearPesosExactos, type PedidoPublico } from "@isu/shared";
+import { formatearPesos, formatearPesosExactos, type PedidoPublico } from "@isu/shared/puro";
 import { api, guardarAcceso, leerAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 import { SeguimientoEnvio } from "./SeguimientoEnvio";

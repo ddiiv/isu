@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { formatearPesos, type ClientePublico } from "@isu/shared";
+import { formatearPesos, type ClientePublico } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
 
 interface Cuenta { cliente: ClientePublico; pedidos: Array<{ numero: string; estado: string; total: number; creadoEn: string; articulos: number }> }

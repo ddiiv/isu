@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { conDescuento, type Centavos } from "./plata.js";
 
 /*
@@ -24,26 +23,6 @@ export const PACK_TOPE = 20;
 export interface AjustePacks { minimo: number; maximo: number; porcentajes: number[] }
 
 export const PACKS_POR_DEFECTO: AjustePacks = { minimo: 2, maximo: 10, porcentajes: [10, 15, 18, 20, 21, 22, 23, 24, 25] };
-
-export const Packs = z.object({
-  minimo: z.number().int().min(2).max(PACK_TOPE),
-  maximo: z.number().int().min(2).max(PACK_TOPE),
-  porcentajes: z.array(z.number().int().min(0).max(60)).min(1).max(PACK_TOPE - 1),
-}).strict()
-  .refine((p) => p.maximo >= p.minimo, { message: "El máximo no puede ser menor que el mínimo", path: ["maximo"] })
-  .refine((p) => p.porcentajes.length === p.maximo - p.minimo + 1, { message: "Va un % por cada cantidad, del mínimo al máximo", path: ["porcentajes"] })
-  .refine((p) => p.porcentajes.every((v, i) => i === 0 || v >= p.porcentajes[i - 1]!), { message: "Llevando más, el descuento no puede ser menor", path: ["porcentajes"] });
-
-/** El ajuste guardado, sea del formato nuevo o del viejo ([x2, x3, x4, x5]); si no sirve, el de fábrica. */
-export function leerPacks(v: unknown): AjustePacks {
-  const nuevo = Packs.safeParse(v);
-  if (nuevo.success) return nuevo.data;
-  if (Array.isArray(v) && v.length >= 1 && v.every((x) => Number.isInteger(x) && x >= 0 && x <= 60)) {
-    const viejo = Packs.safeParse({ minimo: 2, maximo: 1 + v.length, porcentajes: v });
-    if (viejo.success) return viejo.data;
-  }
-  return PACKS_POR_DEFECTO;
-}
 
 /** Las cantidades que se ofrecen: [2, 3, …, 10]. */
 export const cantidadesPack = (p: AjustePacks) => Array.from({ length: p.maximo - p.minimo + 1 }, (_, i) => p.minimo + i);

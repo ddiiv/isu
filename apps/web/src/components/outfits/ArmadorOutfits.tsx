@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   FAMILIAS, MEDIDAS, MUESTRA_FAMILIA, NOMBRE_FAMILIA, NOMBRE_PARTE, PARTES, TALLES_ADULTO, TALLES_NINO_HABITUALES, formatearPesos,
   type Familia, type MedidasCliente, type Parte, type PedidoOutfits, type PiezaOutfit, type RespuestaOutfits,
-} from "@isu/shared";
+} from "@isu/shared/puro";
 import { api, ErrorApi } from "@/lib/cliente-api";
 import { useMedidas } from "@/lib/medidas";
 import { evento } from "@/lib/ga";

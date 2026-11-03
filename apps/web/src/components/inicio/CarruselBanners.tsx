@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatearPesos, type BannerPublico } from "@isu/shared";
+import { formatearPesos, type BannerPublico } from "@isu/shared/puro";
 import { Banner } from "@isu/ui/banner";
 import { src, srcBanner, srcSetBanner } from "@/lib/fotos";
 

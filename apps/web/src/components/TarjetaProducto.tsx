@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { conDescuento, centavos, esClaro, formatearPesos, maxPorcentajePack, rutaPack, type AjustePacks, type ProductoTarjeta } from "@isu/shared";
+import { conDescuento, centavos, esClaro, formatearPesos, maxPorcentajePack, rutaPack, type AjustePacks, type ProductoTarjeta } from "@isu/shared/puro";
 import { Foto } from "./Foto";
 import { Precio } from "./Precio";
 import { ResumenEstrellas } from "./Estrellas";

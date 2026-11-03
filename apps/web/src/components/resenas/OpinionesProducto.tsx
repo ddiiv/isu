@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { TEXTO_CALCE, type ResenaPublica, type ResenasProducto } from "@isu/shared";
+import { TEXTO_CALCE, type ResenaPublica, type ResenasProducto } from "@isu/shared/puro";
 import { api } from "@/lib/cliente-api";
 import { Estrellas, decimal } from "../Estrellas";
 

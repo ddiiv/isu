@@ -1,5 +1,5 @@
 import type { FotoPublica, ProductoDetalle, ProductoTarjeta } from "./catalogo.js";
-import { compararTalles } from "./catalogo.js";
+import { compararTalles } from "./talles.js";
 import { formatearPesos } from "./plata.js";
 import type { ResenaPublica } from "./resenas.js";
 

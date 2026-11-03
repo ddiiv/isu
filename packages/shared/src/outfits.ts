@@ -2,6 +2,7 @@ import { z } from "zod";
 import { normalizar } from "./texto.js";
 import { CLAVES_MEDIDA } from "./talles.js";
 import { FotoPublica } from "./catalogo.js";
+import { FAMILIAS, PARTES, type Familia, type Parte } from "./constantes.js";
 
 /*
  * "Armá tu outfit": en una sola pantalla el cliente dice para quién es, su
@@ -10,9 +11,6 @@ import { FotoPublica } from "./catalogo.js";
  * entran en el presupuesto. Cada prenda se puede cambiar por otra y el outfit
  * entero va al carrito con un toque.
  */
-export const PARTES = ["arriba", "abajo", "abrigo"] as const;
-export type Parte = (typeof PARTES)[number];
-export const NOMBRE_PARTE: Record<Parte, string> = { arriba: "Arriba", abajo: "Abajo", abrigo: "Abrigo" };
 
 const REGLAS: Array<[RegExp, Parte]> = [
   [/\b(buzos?|camperas?|canguros?|hoodies?|chalecos?|camperon|parkas?|sweaters?|sacos?|cardigans?|polar|rompevientos?|tapados?)\b/, "abrigo"],
@@ -36,14 +34,6 @@ export function parteDe(categoria: string | null | undefined, nombre: string): P
  * prenda de color fuerte; el resto, neutros (negro, blanco, gris, beige,
  * jean, azul marino) o de la misma familia.
  */
-export const FAMILIAS = ["neutros", "azules", "verdes", "rojos", "rosas", "violetas", "amarillos", "tierra"] as const;
-export type Familia = (typeof FAMILIAS)[number];
-export const NOMBRE_FAMILIA: Record<Familia, string> = {
-  neutros: "Neutros", azules: "Azules", verdes: "Verdes", rojos: "Rojos", rosas: "Rosas", violetas: "Violetas", amarillos: "Amarillos y naranjas", tierra: "Tierra",
-};
-export const MUESTRA_FAMILIA: Record<Familia, string> = {
-  neutros: "#8a8a8a", azules: "#1f3f8f", verdes: "#2e7d4f", rojos: "#c62828", rosas: "#f2a7bd", violetas: "#6a3fa0", amarillos: "#f5d33a", tierra: "#9a6a3a",
-};
 
 export function familiaDeColor(hex: string | null | undefined): Familia {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex ?? "");

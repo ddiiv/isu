@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { compararTalles, esClaro, type AjustePacks, type ProductoTarjeta } from "@isu/shared";
+import { compararTalles, esClaro, type AjustePacks, type ProductoTarjeta } from "@isu/shared/puro";
 import { TarjetaProducto } from "./TarjetaProducto";
 import { evento, item } from "@/lib/ga";
 

@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { CLAVES_MEDIDA, type MedidasCliente } from "@isu/shared";
+import { CLAVES_MEDIDA, type MedidasCliente } from "@isu/shared/puro";
 
 /*
  * "Mis medidas": las que el cliente cargó en la guía de talles o en "Armá tu

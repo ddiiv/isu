@@ -1,4 +1,4 @@
-import { ANCHOS_BANNER, ANCHOS_FOTO, urlFoto, type FotoPublica } from "@isu/shared";
+import { ANCHOS_BANNER, ANCHOS_FOTO, urlFoto, type FotoPublica } from "@isu/shared/puro";
 
 /* De dónde salen las fotos (R2 en producción; la API en desarrollo). */
 const CDN = (process.env.NEXT_PUBLIC_CDN_IMAGENES ?? "").split(",")[0]?.trim() || "/fotos";
