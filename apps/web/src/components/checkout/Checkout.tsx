@@ -34,7 +34,7 @@ const campo = "w-full rounded-lg border border-linea bg-white px-3.5 py-3 text-b
 
 export function Checkout({ config }: { config: ConfigPublica }) {
   const router = useRouter();
-  const { lineas, cotizacion, cotizar, vaciar, unidades, cupon, ponerCupon } = useCarrito();
+  const { lineas, cotizacion, cotizando, cotizar, vaciar, unidades, cupon, ponerCupon } = useCarrito();
   const locales = config.locales.filter((l) => l.retiro);
   const [c, setC] = useState<Campos>({ email: "", nombre: "", apellido: "", telefono: "", dni: "", calle: "", numero: "", piso: "", cp: "", localidad: "", provincia: "CABA", indicaciones: "", notas: "" });
   const [entrega, setEntrega] = useState<"envio" | "retiro">("envio");
@@ -269,9 +269,9 @@ export function Checkout({ config }: { config: ConfigPublica }) {
             {err("aceptaTerminos")}
             {cotizacion?.problemas.map((p) => <p key={p.mensaje} className="mt-3 text-sm font-bold text-oferta" role="alert">{p.mensaje}</p>)}
             {general && <p className="mt-4 rounded-xl bg-oferta/10 p-3 text-sm font-bold text-oferta" role="alert">{general}</p>}
-            <button type="submit" disabled={enviando || !!cotizacion?.problemas.length} className="boton mt-5 w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte disabled:cursor-not-allowed disabled:bg-linea disabled:text-tinta-tenue">
+            <button type="submit" disabled={enviando || cotizando || !!cotizacion?.problemas.length} className="boton mt-5 w-full bg-tinta py-4 text-base text-white hover:bg-marca-fuerte disabled:cursor-not-allowed disabled:bg-linea disabled:text-tinta-tenue">
               {enviando ? "Confirmando…" : medio === "mercadopago" || medio === "pagofacil" ? "Ir a pagar" : "Confirmar compra"}
-              {!enviando && cotizacion ? ` · ${formatearPesos(cotizacion.total)}` : ""}
+              {!enviando && !cotizando && cotizacion ? ` · ${formatearPesos(cotizacion.total)}` : ""}
             </button>
             <p className="mt-3 text-center text-xs text-tinta-tenue">Tus datos viajan cifrados. No guardamos datos de tarjetas: los maneja Mercado Pago.</p>
           </div>

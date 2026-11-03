@@ -51,3 +51,30 @@ test("/api/vitals: anota una medida válida y rechaza cualquier otra cosa", asyn
   }
   expect((await request.post("/api/vitals", { data: "x".repeat(2000) })).status()).toBe(413);
 });
+
+test("checkout: mientras recotiza al cambiar el pago, no se puede confirmar con el total viejo", async ({ page, request }) => {
+  const ficha = await (await request.get(`${API}/v1/productos/remera-oversize-algodon-peinado`)).json() as {
+    slug: string; nombre: string; variantes: Array<{ sku: string; stock: number; precio: number }>;
+  };
+  const v = ficha.variantes.find((x) => x.stock >= 1);
+  test.skip(!v, "sin stock");
+  await page.addInitScript((l) => localStorage.setItem("isu:carrito", JSON.stringify([l])),
+    { sku: v!.sku, cantidad: 1, nombre: ficha.nombre, slug: ficha.slug, color: null, talle: null, precio: v!.precio, foto: null });
+  // La cotización con Mercado Pago tarda.
+  let soltar = () => {};
+  const frenada = new Promise<void>((ok) => { soltar = ok; });
+  await page.route("**/api/t/carrito", async (ruta) => {
+    if ((ruta.request().postDataJSON() as { medioPago?: string }).medioPago === "mercadopago") await frenada;
+    await ruta.fallback();
+  });
+  await page.goto("/checkout?pago=transferencia");
+  const confirmar = page.getByRole("button", { name: /^Confirmar compra · / });
+  await expect(confirmar).toBeEnabled();
+  await page.getByRole("radio", { name: /Mercado Pago/ }).check();
+  const pagar = page.getByRole("button", { name: /^Ir a pagar/ });
+  await expect(pagar).toBeDisabled();
+  await expect(pagar).toHaveText("Ir a pagar");
+  soltar();
+  await expect(pagar).toBeEnabled();
+  await expect(pagar).toHaveText(/^Ir a pagar · \$/);
+});
