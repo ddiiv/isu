@@ -190,6 +190,28 @@ describe("feed de Google Shopping", () => {
     const api = itemsFeedMayorista([{ ...a!, image_link: "https://api.test/fotos/p/1/azul1-1200.webp", additional_image_link: ["https://api.test/fotos/p/1/azul2-1200.webp?v=1", "https://cdn.test/p/1/x-1200.webp"] }], precios, "https://m/");
     expect(api[0]).toMatchObject({ image_link: "https://api.test/fotos/p/1/azul1-1200.jpg", additional_image_link: ["https://api.test/fotos/p/1/azul2-1200.webp?v=1", "https://cdn.test/p/1/x-1200.webp"] });
   });
+  it("WhatsApp: cada color con sus fotos; sin propias, las generales; nunca las de otro color", () => {
+    const conGeneral = producto({
+      colores: [
+        { clave: "negro", nombre: "Negro", hex: "#000", fotos: [foto("p/1/negro1")] },
+        { clave: "azul", nombre: "Azul", hex: "#00f", fotos: [] },
+      ],
+      exhibicion: [{ ...foto("p/1/principal"), color: "negro" }, { ...foto("p/1/general"), color: null }],
+    });
+    const fotos = (items: ReturnType<typeof itemsFeed>, color: string) => {
+      const i = items.find((x) => x.color === color)!;
+      return [i.image_link, ...i.additional_image_link].map((u) => u.split("/").pop());
+    };
+    const wa = itemsFeed(conGeneral, ctx, "d", { soloFotosDelColor: true });
+    expect(fotos(wa, "Negro")).toEqual(["principal-1200.webp", "negro1-1200.webp"]);
+    expect(fotos(wa, "Azul")).toEqual(["general-1200.webp"]);
+    // Google sigue mostrando las generales también en el color que tiene propias.
+    expect(fotos(itemsFeed(conGeneral, ctx, "d"), "Negro")).toContain("general-1200.webp");
+    // Sin propias ni generales, el color no sale (antes mostraba las de otro color).
+    const sinNada = producto({ colores: [{ clave: "negro", nombre: "Negro", hex: "#000", fotos: [foto("p/1/negro1")] }, { clave: "azul", nombre: "Azul", hex: "#00f", fotos: [] }], exhibicion: [] });
+    expect(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }).map((i) => i.color)).toEqual(["Negro", "Negro"]);
+    expect(itemsFeed(sinNada, ctx, "d").map((i) => i.color)).toContain("Azul");
+  });
   it("escapa caracteres de control que romperían el XML", () => {
     const items = itemsFeed(producto({ nombre: "Remera\u0001 «Box»" }), ctx, "d");
     expect(feedXml(items, ctx).includes("\u0001")).toBe(false);

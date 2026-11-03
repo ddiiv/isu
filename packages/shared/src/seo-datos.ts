@@ -77,6 +77,18 @@ function fotosDe(p: ProductoDetalle, color: string | null): FotoPublica[] {
 }
 
 /**
+ * Para el catálogo de WhatsApp: las fotos de ese color y nada más; si el color
+ * no tiene, las generales (sin color). Nunca las de otro color: sin ninguna,
+ * esa variante no sale (Meta pide foto).
+ */
+function fotosDelColor(p: ProductoDetalle, color: string | null): FotoPublica[] {
+  if (color === null) return fotosDe(p, null);
+  const propias = [...p.exhibicion.filter((f) => f.color === color), ...(p.colores.find((c) => c.clave === color)?.fotos ?? [])];
+  const elegidas = propias.length ? propias : p.exhibicion.filter((f) => !f.color);
+  return elegidas.filter((f, i) => elegidas.findIndex((g) => g.clave === f.clave) === i);
+}
+
+/**
  * Ficha → ProductGroup con una variante por talle y color (precio, stock,
  * foto y dirección de cada una): Google puede mostrar "en 4 colores" y el
  * precio del talle que se buscó. Un producto de una sola variante va como
@@ -317,13 +329,13 @@ export interface ItemFeed {
 }
 
 /** Una fila por variante (talle × color), agrupadas por producto. Sin foto no se publica: Google la rechaza. */
-export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string): ItemFeed[] {
+export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string, opciones: { soloFotosDelColor?: boolean } = {}): ItemFeed[] {
   const nombreColor = new Map(p.colores.map((c) => [c.clave, sinUnico(c.nombre)]));
   const publico = publicoDe(p.migas.map((m) => m.ruta));
   const pesos = (c: number) => `${precio(c)} ARS`;
   const items: ItemFeed[] = [];
   for (const v of p.variantes) {
-    const fotos = fotosDe(p, v.color);
+    const fotos = opciones.soloFotosDelColor ? fotosDelColor(p, v.color) : fotosDe(p, v.color);
     if (!fotos.length) continue;
     const color = v.color ? nombreColor.get(v.color) ?? null : null;
     const talle = sinUnico(v.talle);

@@ -8,7 +8,8 @@ import { contextoSeo } from "@/lib/seo";
  * "Lista de datos programada" con https://<tienda>/feed/whatsapp.xml, una vez
  * por día). Fotos y textos de la tienda, pero con los PRECIOS MAYORISTAS del
  * portal (/api/catalogo): ese WhatsApp vende por mayor. Sólo salen las
- * variantes que el portal vende con precio; el link lleva al portal. La
+ * variantes que el portal vende con precio y que tienen foto de su color (o
+ * generales): nunca la de otro color. El link lleva al portal. La
  * descripción es la de la ficha, sin la frase de precios y cuotas minoristas
  * que arma descripcionProducto para Google.
  *
@@ -53,7 +54,7 @@ export async function GET() {
     // De a 8, para no pedirle a la API cientos de fichas a la vez. Una ficha que falla tira todo (ver arriba); un 404 es un producto que se despublicó.
     for (let i = 0; i < slugs.length; i += 8) {
       const fichas = await Promise.all(slugs.slice(i, i + 8).map((s) => obtenerProducto(s.slug)));
-      for (const p of fichas) if (p) items.push(...itemsFeedMayorista(itemsFeed(p, ctx, p.descripcion?.trim() || descripcionAutomatica(p, ctx.marca)), precios, portal));
+      for (const p of fichas) if (p) items.push(...itemsFeedMayorista(itemsFeed(p, ctx, p.descripcion?.trim() || descripcionAutomatica(p, ctx.marca), { soloFotosDelColor: true }), precios, portal));
     }
     if (!items.length) return noDisponible();
     return new Response(feedXml(items, ctx, { disponibilidadConEspacio: true }), {
