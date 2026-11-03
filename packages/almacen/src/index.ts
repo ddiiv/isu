@@ -79,6 +79,8 @@ export function almacenR2(o: { cuenta: string; bucket: string; id: string; secre
     validar(patron, archivo);
     return cliente.fetch(`${base}/${archivo}`, {
       method: metodo,
+      // Con tope (cubre también los reintentos de aws4fetch): si R2 se cuelga, el pedido o el trabajo de la cola fallan en vez de quedar esperando.
+      signal: AbortSignal.timeout(metodo === "PUT" ? 30_000 : 10_000),
       body: cuerpo ? new Uint8Array(cuerpo) : undefined,
       headers: cuerpo ? { "content-type": tipo ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable" } : {},
     });

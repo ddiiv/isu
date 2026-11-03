@@ -14,7 +14,8 @@ const Trabajo = z.object({
 });
 
 export function crearCorreo(o: { smtp?: string; de: string; responder?: string }) {
-  const t = o.smtp ? nodemailer.createTransport(o.smtp) : null;
+  // Topes propios: los de nodemailer (2 min para conectar, 10 de inactividad) dejan colgado el trabajo de la cola.
+  const t = o.smtp ? nodemailer.createTransport({ url: o.smtp, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000 }) : null;
   return async (datos: unknown) => {
     const j = Trabajo.parse(datos);
     const m = armar(j.plantilla as Plantilla, j.datos);

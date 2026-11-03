@@ -120,6 +120,8 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
   const [avisoStock, setAvisoStock] = useState<AvisoStock | null>(null);
   // Con qué se cotizó la última vez (el checkout manda entrega y pago): al cambiar el cupón se repite igual.
   const ultimas = useRef<OpcionesCotizar>({});
+  // Número del último pedido de cotización: con +/- seguidos las respuestas pueden llegar en otro orden, y gana la última pedida.
+  const ultimaCotizacion = useRef(0);
   // Nada se guarda hasta haber leído lo guardado: si no, el carrito vacío del
   // primer dibujo pisa el de verdad (React en desarrollo corre los efectos dos veces).
   const [cargado, setCargado] = useState(false);
@@ -148,10 +150,12 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
 
   const cotizar = useCallback(async (opciones: OpcionesCotizar = {}) => {
     ultimas.current = opciones;
-    if (!lineas.length) { setCotizacion(null); return null; }
+    const n = ++ultimaCotizacion.current;
+    if (!lineas.length) { setCotizacion(null); setCotizando(false); return null; }
     setCotizando(true);
     try {
       const c = await api<Cotizacion>("carrito", { cuerpo: { items: lineas.map(itemDe), ...opciones, ...(cupon ? { cupon } : {}) } });
+      if (n !== ultimaCotizacion.current) return null;
       setCotizacion(c);
       if (cupon) {
         // No se aplicó: se dice por qué y se deja de mandar.
@@ -167,7 +171,8 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     } catch {
       return null;
     } finally {
-      setCotizando(false);
+      // Mientras haya uno más nuevo en camino sigue "cotizando" (el botón de pagar sigue bloqueado).
+      if (n === ultimaCotizacion.current) setCotizando(false);
     }
   }, [lineas, cupon]);
   // Cupón nuevo (o quitado): se vuelve a cotizar con lo mismo de la última vez.
