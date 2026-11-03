@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
-import { normalizarTalle, recomendarTalle, type GuiaPublica, type MedidasCliente } from "@isu/shared";
+import { normalizarTalle, recomendarTalle, type GuiaPublica, type MedidasCliente } from "@isu/shared/puro";
 import { useMedidas } from "@/lib/medidas";
 import { IconoCerrar } from "./iconos";
 

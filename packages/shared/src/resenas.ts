@@ -1,16 +1,15 @@
 import { z } from "zod";
 import { slug } from "./esquemas.js";
 import { FotoPublica, ResumenResenas } from "./catalogo.js";
+import { CALCES } from "./constantes.js";
 
 /*
  * Reseñas. Sólo de compras entregadas (ver la migración 0013): una por
  * prenda y una general sobre la compra. Lo que se publica pasa por el
  * backoffice, salvo que esté prendido "publicar solas".
  */
-export const CALCES = ["chico", "justo", "grande"] as const;
 export const Calce = z.enum(CALCES);
 export type Calce = z.infer<typeof Calce>;
-export const TEXTO_CALCE: Record<Calce, string> = { chico: "Le quedó chico", justo: "Talle justo", grande: "Le quedó grande" };
 
 export const ResenaPublica = z.object({
   id: z.number().int(),

@@ -1,13 +1,11 @@
 import { z } from "zod";
+import { ENLACE_TIENDA } from "./constantes.js";
 
 /*
  * Asistente de la tienda (etapa 5). El navegador manda el mensaje y, si el
  * asistente estaba esperando un dato (el código postal), qué esperaba. Todo
  * lo demás lo decide la API: el navegador nunca manda "respuestas".
  */
-/* Enlace a la tienda: "/algo", nunca "//otro.sitio" ni "/\\otro". */
-// eslint-disable-next-line security/detect-unsafe-regex -- anclada, sin alternativas que se solapen y con largo máximo
-export const ENLACE_TIENDA = /^\/([A-Za-z0-9_#?=&.-][A-Za-z0-9/_#?=&.-]{0,198})?$/;
 
 export const TEMAS_CHAT = ["envios", "pagos", "talles", "cambios", "pedidos", "locales", "mayorista", "general"] as const;
 export type TemaChat = (typeof TEMAS_CHAT)[number];

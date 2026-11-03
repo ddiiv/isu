@@ -1,4 +1,4 @@
-import { NOMBRE_ESTADO_ENVIO, type EnvioPublico, type EstadoEnvioTienda } from "@isu/shared";
+import { NOMBRE_ESTADO_ENVIO, type EnvioPublico, type EstadoEnvioTienda } from "@isu/shared/puro";
 
 /*
  * Cómo viene el envío: con qué transporte, el número y el enlace del

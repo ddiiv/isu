@@ -1,4 +1,4 @@
-import { conDescuento, centavos, formatearPesos } from "@isu/shared";
+import { conDescuento, centavos, formatearPesos } from "@isu/shared/puro";
 
 /*
  * Precio como lo muestran las tiendas que mejor venden: el de lista arriba

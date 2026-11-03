@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { formatearPesos, type ItemCarrito, type OpcionEnvio, type SucursalEnvio } from "@isu/shared";
+import { formatearPesos, type ItemCarrito, type OpcionEnvio, type SucursalEnvio } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
 
 /*

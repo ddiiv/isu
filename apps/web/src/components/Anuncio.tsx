@@ -1,5 +1,5 @@
 "use client";
-import { formatearPesos } from "@isu/shared";
+import { formatearPesos } from "@isu/shared/puro";
 import { useCarrito } from "./carrito/Carrito";
 
 /*

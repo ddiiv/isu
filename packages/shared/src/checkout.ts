@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EnvioPublico, ID_OPCION, ID_SUCURSAL, OpcionEnvio } from "./envios.js";
+import { MAX_LINEAS_CARRITO, MAX_PACKS_POR_LINEA, MAX_UNIDADES_POR_ARTICULO } from "./constantes.js";
 
 /*
  * Carrito, checkout, cuenta y pedido: lo que viaja entre la tienda y la API.
@@ -16,12 +17,6 @@ export const Dni = z.string().trim().regex(/^\d{7,8}$|^\d{11}$/, "DNI (7 u 8 nú
 export const MEDIOS_PAGO = ["mercadopago", "pagofacil", "transferencia", "local"] as const;
 export const MedioPago = z.enum(MEDIOS_PAGO);
 export type MedioPago = z.infer<typeof MedioPago>;
-
-export const MAX_UNIDADES_POR_ARTICULO = 20;
-export const MAX_LINEAS_CARRITO = 30;
-
-/** Hasta cuántos packs iguales en una línea. */
-export const MAX_PACKS_POR_LINEA = 10;
 
 export const ItemSuelto = z.object({
   sku: texto(1, 100),

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { NOMBRE_ESTADO_ENVIO, type EnvioPublico } from "@isu/shared";
+import { NOMBRE_ESTADO_ENVIO, type EnvioPublico } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
 import { SeguimientoEnvio } from "./SeguimientoEnvio";
 

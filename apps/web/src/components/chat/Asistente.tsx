@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { ENLACE_TIENDA, formatearPesos, type RespuestaChat } from "@isu/shared";
+import { ENLACE_TIENDA, formatearPesos, type RespuestaChat } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
 import { src } from "@/lib/fotos";
 import { IconoCerrar, IconoChat, IconoEnviar, IconoWhatsapp } from "../iconos";

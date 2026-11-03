@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared";
+import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared/puro";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ResumenEstrellas } from "./Estrellas";

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CALCES, type Calce, type PedidoParaOpinar } from "@isu/shared";
+import { CALCES, type Calce, type PedidoParaOpinar } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
 import { Foto } from "../Foto";
 

@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { clavePack, MAX_LINEAS_CARRITO, MAX_PACKS_POR_LINEA, MAX_UNIDADES_POR_ARTICULO, STOCK_VISIBLE_MAX, type Cotizacion, type ItemCarrito } from "@isu/shared";
+import { clavePack, MAX_LINEAS_CARRITO, MAX_PACKS_POR_LINEA, MAX_UNIDADES_POR_ARTICULO, STOCK_VISIBLE_MAX, type Cotizacion, type ItemCarrito } from "@isu/shared/puro";
 import { api } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 import { AvisoYaEnCarrito } from "./AvisoYaEnCarrito";

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ESTADOS_ENVIO } from "./constantes.js";
 
 /*
  * Envíos (etapa 4): lo que viaja entre la tienda, la API y el backoffice.
@@ -12,13 +13,6 @@ export type ServicioEnvio = (typeof SERVICIOS_ENVIO)[number];
 
 export const NOMBRE_TRANSPORTE: Record<TransporteTienda | "estandar", string> = {
   correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío a domicilio",
-};
-
-export const ESTADOS_ENVIO = ["creado", "en_camino", "en_sucursal", "en_reparto", "entregado", "no_entregado", "devuelto", "cancelado"] as const;
-export type EstadoEnvioTienda = (typeof ESTADOS_ENVIO)[number];
-export const NOMBRE_ESTADO_ENVIO: Record<EstadoEnvioTienda, string> = {
-  creado: "Preparando el envío", en_camino: "En camino", en_sucursal: "Listo para retirar en la sucursal", en_reparto: "Llega hoy",
-  entregado: "Entregado", no_entregado: "No se pudo entregar", devuelto: "Devuelto", cancelado: "Envío cancelado",
 };
 
 export const ID_OPCION = /^(correo_argentino|andreani|oca|mercado_envios|cabify|estandar):(domicilio|sucursal|en_el_dia)$/;

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   cantidadesPack, centavos, compararTalles, conDescuento, esClaro, formatearPesos, PACK_TOPE, porcentajePack, rutaPack,
   type ConfigPublica, type ProductoDetalle, type VariantePublica,
-} from "@isu/shared";
+} from "@isu/shared/puro";
 import { Foto, SinFoto } from "./Foto";
 import { useCarrito } from "./carrito/Carrito";
 import { ResumenEstrellas } from "./Estrellas";

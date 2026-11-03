@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useId, useState } from "react";
-import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion } from "@isu/shared";
+import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion } from "@isu/shared/puro";
 import { Foto } from "../Foto";
 import { useCarrito, usoDe, type AvisoStock, type LineaCarrito } from "./Carrito";
 
