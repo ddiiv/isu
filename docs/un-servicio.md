@@ -28,6 +28,8 @@ Entre ellas se hablan dentro de la misma máquina, así que **`API_URL` y `WEB_I
 
 Si una parte se cae, se levanta sola y las demás siguen andando. En el log de Railway cada línea dice de qué parte es: `[api]`, `[worker]`, `[web]`, `[admin]`.
 
+Para ahorrar RAM, cada parte arranca con su tope de heap (flag `--max-old-space-size` del proceso hijo, no `NODE_OPTIONS`: Railway también usa las variables en el build). El build ignora `NODE_OPTIONS` (`unset` en `buildCommand`) y el arranque avisa en el log si la variable trae un tope. El backoffice **se levanta con el primer pedido y se apaga tras 15 minutos sin uso** (`scripts/admin-perezoso.mjs`): el primer ingreso del día tarda unos segundos más. Escucha en el puerto 3001 como siempre; el Next real queda en `ADMIN_PUERTO_INTERNO` (3101).
+
 ## Paso a paso
 
 ### 1. Redis (el servicio libre)
