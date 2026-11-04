@@ -45,6 +45,8 @@ const config: NextConfig = {
   outputFileTracingRoot: path.join(import.meta.dirname, "../.."),
   transpilePackages: ["@isu/ui", "@isu/shared"],
   poweredByHeader: false,
+  // Caché en memoria de las páginas y fetch (por defecto 50 MB): el resto sigue en disco, sólo se relee más seguido.
+  cacheMaxMemorySize: 20 * 1024 * 1024,
   reactStrictMode: true,
   images: {
     formats: ["image/avif", "image/webp"],

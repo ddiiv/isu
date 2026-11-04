@@ -11,7 +11,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
-    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test": "node --test scripts/*.test.mjs && pnpm -r --workspace-concurrency=1 test",
     "db:migrar": "pnpm paquetes && pnpm --filter @isu/db migrar",
     "e2e": "pnpm --filter @isu/api exec node --env-file-if-exists=../../.env scripts/limpiar-frenos.mjs && playwright test -c tests/e2e/playwright.config.ts",
     "seguridad": "node --env-file-if-exists=.env tests/seguridad/auditoria.mjs",

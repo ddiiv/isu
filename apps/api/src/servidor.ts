@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import sharp from "sharp";
 import { crearPool, migrar } from "@isu/db";
 import { leerEntorno } from "./entorno.js";
 import { construirApp } from "./app.js";
@@ -9,6 +10,11 @@ import { construirApp } from "./app.js";
  * Las migraciones corren acá, con candado: si hay varias réplicas, una migra
  * y las demás esperan. Sólo tocan el esquema `tienda` de la base de Stocker.
  */
+// sharp (fotos .jpg para el catálogo de WhatsApp, comprobantes, almacén): caché de libvips chica y un solo hilo.
+// Sólo cambia cuánto tarda y cuánta RAM retiene entre pedidos, no la imagen que sale.
+sharp.cache({ memory: 16, files: 0, items: 16 });
+sharp.concurrency(1);
+
 const env = leerEntorno();
 const pool = crearPool({ url: env.DATABASE_URL, ssl: env.DB_SSL, max: env.DB_POOL_MAX });
 const redis = new Redis(env.REDIS_URL, {
