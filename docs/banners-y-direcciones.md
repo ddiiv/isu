@@ -9,7 +9,12 @@ Dos cosas de la etapa 12:
 
 ## 1. Banners del inicio
 
-Se editan en **Backoffice → Portada**. Se ven en el carrusel de arriba del inicio:
+Se editan en **Backoffice → Portada**. Hay dos tipos (se elige arriba del editor):
+
+- **Interactivo:** título, texto, botones y la tarjeta de un producto, sobre una foto o un color (lo de abajo).
+- **Imagen con link:** sólo la foto, que lleva a una página de la tienda o a otro sitio, con etiquetas de los productos que se ven en la foto. Ver [Banner de imagen](#banner-de-imagen).
+
+Se ven en el carrusel de arriba del inicio:
 
 - pasa solo cada 6 segundos (no si la persona pidió menos animaciones);
 - se ven los primeros **8** en el orden de la lista.
@@ -26,7 +31,7 @@ Se editan en **Backoffice → Portada**. Se ven en el carrusel de arriba del ini
 | **Color de fondo** | Para los banners sin foto: azul, negro, verde, rojo, crema, rosa o arena. | — |
 | **Texto a la izquierda o centrado** | Con producto, el texto va siempre a la izquierda y la tarjeta a la derecha. | — |
 | **Fotos** | Una apaisada para la compu (ej. 1920 × 800) y, si se quiere, una vertical para el celular (ej. 1080 × 1350). Con título, el texto va sobre la foto, con un velo oscuro para que se lea. | — |
-| **Link del banner entero** | Sólo si no tiene botones ni producto: tocar cualquier parte lleva ahí. | — |
+| **Link del banner entero** | Sólo si no tiene botones ni producto: tocar cualquier parte lleva ahí. Puede ser otro sitio (`https://…`). | — |
 | **Desde / hasta** | Para una promo con fecha. | — |
 
 ### Los botones llevan a páginas de la tienda
@@ -39,7 +44,7 @@ El selector «Lleva a» trae:
 - **«Un producto…»**: se busca por el nombre y el botón lleva a su ficha;
 - **«Otra dirección de la tienda…»**: cualquier dirección que empiece con `/`, por ejemplo `/buscar?q=lino`.
 
-Nunca a otro sitio: la API rechaza `https://…`, `//…` y `javascript:`, y la tienda vuelve a revisarlo antes de dibujar el link.
+Los botones nunca llevan a otro sitio: la API rechaza `https://…`, `//…` y `javascript:`, y la tienda vuelve a revisarlo antes de dibujar el link. El que sí puede llevar a otro sitio es el **link del banner entero** (abajo).
 
 ### Datos que salen de Ajustes
 
@@ -75,6 +80,43 @@ Los textos pueden llevar estos datos entre llaves. Toman el valor de Ajustes cad
   - «Ya terminó»;
   - «No sale: …» con el motivo;
   - «No entra: se ven los primeros 8».
+
+### Banner de imagen
+
+Para una campaña que ya viene armada como foto (o un banner de otra marca, un sorteo en Instagram…).
+
+**Cómo se arma:**
+
+1. **Nuevo banner → Imagen con link.**
+2. Escribir **qué se ve en el banner** (lo leen quienes no ven la imagen, y Google).
+3. **Al tocar el banner, lleva a:** una página de la tienda, un producto, o **«Otro sitio (https://…)»**.
+4. Elegir la **foto para compu** (apaisada, ej. 1920 × 800) y **Crear banner**: la foto se sube en el acto.
+5. Si se quiere, subir la **foto de celular** (vertical) y poner **etiquetas de productos**.
+
+**El link a otro sitio:**
+
+- Sólo `https://` y con un dominio de verdad (`https://www.instagram.com/isuwaya`). No acepta `http://`, ni `usuario@sitio` en la dirección (un truco para disfrazar el sitio).
+- Se abre en otra pestaña: la tienda queda abierta.
+- Los botones de los banners interactivos siguen yendo sólo a la tienda.
+
+**Etiquetas de productos:**
+
+- Hasta **8** por banner.
+- **Cómo se ponen:**
+  - tocar la foto donde está la prenda y elegir el producto;
+  - **para mover una:** tocar su número y después el lugar nuevo, o correrla con las flechas del teclado (con Mayúscula, de a 5 %).
+- **Con foto de celular:** con **Compu / Celular** se ubica cada etiqueta también en la foto vertical. La que no se ubique ahí no se ve en el celular. Sin foto de celular, el celular usa la de compu con los mismos lugares.
+- **En la tienda:**
+  - se ve un punto, sin el nombre del producto;
+  - al tocarlo aparece una tarjeta con la foto, el nombre y el precio (con su descuento);
+  - la tarjeta lleva a la ficha del producto.
+  - Se cierra tocando afuera, con Escape o tocando el punto de nuevo. Tocar la foto con una tarjeta abierta sólo la cierra: no sigue el link del banner.
+  - El carrusel se frena mientras se mira una tarjeta.
+- **Productos que no salen:** sin stock, sin foto o que ya no se ven en la tienda. Su etiqueta vuelve sola cuando el producto vuelve.
+- **Con etiquetas, la foto se ve entera** (sin recortar de arriba o de abajo), para que los puntos queden donde se pusieron. Si se cambia la foto, conviene revisar dónde quedaron.
+- **Pasar un banner de un tipo al otro** borra lo del otro tipo al guardar: a uno de imagen se le borran el título, los textos, los botones y el producto; a uno interactivo, las etiquetas. El editor lo avisa antes.
+
+La migración **0022** agrega las etiquetas y deja que el link del banner entero sea de otro sitio.
 
 ### Banners sugeridos
 

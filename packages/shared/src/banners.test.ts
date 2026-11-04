@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANNERS_SUGERIDOS, BannerPublico, BotonBanner, conVariables, RutaTienda, VARIABLES_BANNER } from "./index.js";
+import { BANNERS_SUGERIDOS, BannerPublico, BotonBanner, conVariables, EnlaceBanner, esEnlaceExterno, RutaTienda, VARIABLES_BANNER } from "./index.js";
 
 /* Etapa 12: banners interactivos. */
 describe("variables de los textos", () => {
@@ -50,5 +50,25 @@ describe("banners sugeridos", () => {
   it("un banner viejo (etapa 8, sólo foto) sigue leyéndose", () => {
     const b = BannerPublico.parse({ id: 1, alt: "Packs", enlace: "/packs", foto: { clave: "b/1/abcdef0123456789", ancho: 1800, alto: 700 }, fotoMovil: null });
     expect(b).toMatchObject({ titulo: null, botones: [], fondo: "marca", alineacion: "izquierda", producto: null });
+  });
+});
+
+describe("link del banner entero: la tienda u otro sitio con https", () => {
+  it("acepta páginas de la tienda y otros sitios con https", () => {
+    for (const r of ["/packs", "/buscar?q=lino", "https://www.instagram.com/isuwaya", "https://www.tiktok.com/@isuwaya", "https://isuwaya.com/a?utm_source=x#y"]) {
+      expect(EnlaceBanner.safeParse(r).success, r).toBe(true);
+    }
+    expect(esEnlaceExterno("https://www.instagram.com/isuwaya")).toBe(true);
+    expect(esEnlaceExterno("/packs")).toBe(false);
+  });
+  it("rechaza http, usuario@, sin dominio y trucos", () => {
+    for (const r of ["http://evil.com", "//evil.com", "javascript:alert(1)", "https://isuwaya.com@evil.com", "https://user:pw@evil.com", "https://localhost",
+      "https://evil.com/con espacio", "https://evil.com\\x", "https:///evil.com", "https:////evil.com/x", "data:text/html,hola", `https://a.com/${"a".repeat(500)}`]) {
+      expect(EnlaceBanner.safeParse(r).success, r).toBe(false);
+    }
+  });
+  it("las etiquetas sólo van en la forma pública con su producto", () => {
+    const p = BannerPublico.parse({ id: 1, alt: "x", enlace: null, foto: null, fotoMovil: null });
+    expect(p.etiquetas).toEqual([]);
   });
 });
