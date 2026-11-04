@@ -2,7 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Banner as DibujoBanner, type BannerVista } from "@isu/ui/banner";
 import {
-  conVariables, FONDOS_BANNER, formatearPesos, NOMBRE_FONDO, NOMBRE_PRODUCTO_AUTO, PRODUCTO_AUTO, VARIABLES_BANNER,
+  conVariables, esEnlaceExterno, FONDOS_BANNER, formatearPesos, MAX_ETIQUETAS, NOMBRE_FONDO, NOMBRE_PRODUCTO_AUTO, PRODUCTO_AUTO, VARIABLES_BANNER,
   type BannerPublico, type FondoBanner, type ProductoAuto, type ProductoBanner, type VariablesBanner,
 } from "@isu/shared";
 import { api, fotoUrl, useDatos } from "@/lib/api";
@@ -18,14 +18,20 @@ import { puede, useYo } from "@/components/Marco";
  *
  * Al editar se ve cómo queda, en compu y en celular, con el mismo dibujo que
  * usa la tienda (@isu/ui/banner) y las variables ({descuento}…) ya puestas.
+ *
+ * Banner de imagen: sólo la foto, que lleva a una página de la tienda o a otro
+ * sitio, con etiquetas de producto que se ubican tocando la foto.
  */
 interface BotonB { texto: string; enlace: string; estilo: "lleno" | "borde" }
+/** Una etiqueta de producto sobre la foto: lugares en % (compu y, si hay, la foto de celular). */
+interface EtiquetaB { producto: string; productoNombre: string; x: number; y: number; xMovil: number | null; yMovil: number | null }
 type Alineacion = "izquierda" | "centro";
 interface Fila {
   id: number; alt: string; enlace: string | null; foto: string | null; fotoAncho: number | null; fotoAlto: number | null;
   fotoMovil: string | null; movilAncho: number | null; movilAlto: number | null; orden: number; activo: boolean; desde: string | null; hasta: string | null;
   titulo: string | null; texto: string | null; etiqueta: string | null; botones: BotonB[]; fondo: FondoBanner; alineacion: Alineacion;
   producto: string | null; productoNombre: string | null; productoAuto: ProductoAuto | null; ocultarSinProducto: boolean; sugerido: string | null;
+  etiquetas: EtiquetaB[];
 }
 interface Vista { banner: BannerPublico | null; motivo: string | null }
 interface Datos { banners: Fila[]; vistas: Record<number, Vista>; variables: VariablesBanner }
@@ -99,7 +105,8 @@ export default function Portada() {
       )}>Portada</Titulo>
       <p className="-mt-2 mb-5 max-w-3xl text-sm text-tinta-suave">
         El carrusel de arriba del inicio (pasa solo cada 6 segundos; se ven los primeros {MAX_VISIBLES}). Un banner puede ser una foto, un texto sobre
-        un color o las dos cosas, con botones que llevan a una página de la tienda y la tarjeta de un producto. Si no hay ninguno activo, el inicio
+        un color o las dos cosas, con botones que llevan a una página de la tienda y la tarjeta de un producto. También puede ser sólo una imagen que
+        lleva a una página de la tienda o a otro sitio, con etiquetas de los productos que se ven en la foto. Si no hay ninguno activo, el inicio
         muestra el título grande.
       </p>
       <div className="mb-4"><aviso.Aviso /></div>
@@ -150,9 +157,10 @@ export default function Portada() {
                     {/* Con los datos de Ajustes ya puestos, si sale («20% OFF…» en vez de «{descuento}% OFF…»). */}
                     <p className="truncate text-lg font-bold">{v?.banner?.titulo ?? b.titulo ?? b.alt}</p>
                     <p className="line-clamp-2 text-sm text-tinta-suave">
-                      {[b.foto ? "Con foto" : `Fondo ${NOMBRE_FONDO[b.fondo].toLowerCase()}`,
+                      {[!b.titulo ? "Imagen" : b.foto ? "Con foto" : `Fondo ${NOMBRE_FONDO[b.fondo].toLowerCase()}`,
                         b.botones.length ? `${b.botones.length === 1 ? "1 botón" : "2 botones"} (${b.botones.map((x) => x.enlace).join(", ")})` : b.enlace ? `lleva a ${b.enlace}` : null,
                         b.productoNombre ? `producto: ${b.productoNombre}` : b.productoAuto ? `producto: ${NOMBRE_PRODUCTO_AUTO[b.productoAuto].toLowerCase()}` : null,
+                        !b.titulo && b.etiquetas.length ? `${b.etiquetas.length === 1 ? "1 etiqueta" : `${b.etiquetas.length} etiquetas`} de productos` : null,
                       ].filter(Boolean).join(" · ")}
                     </p>
                     <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -185,7 +193,7 @@ export default function Portada() {
 /** El banner que manda la API, en la forma del dibujo. */
 const vistaDe = (b: BannerPublico): BannerVista => ({
   alt: b.alt, enlace: b.enlace, foto: b.foto, fotoMovil: b.fotoMovil, titulo: b.titulo, texto: b.texto, etiqueta: b.etiqueta,
-  botones: b.botones, fondo: b.fondo, alineacion: b.alineacion, producto: b.producto,
+  botones: b.botones, fondo: b.fondo, alineacion: b.alineacion, producto: b.producto, etiquetas: b.etiquetas,
 });
 
 /** Dibuja algo a un ancho fijo (el de una compu o un celular) y lo achica para que entre. */
@@ -213,12 +221,19 @@ function Escalado({ ancho, children }: { ancho: number; children: React.ReactNod
 }
 
 /* ── Editor ─────────────────────────────────────────────────────── */
+/** `clave`: sólo para la lista mientras se edita (no se guarda). */
+interface EtiquetaForm { clave: number; producto: { slug: string; nombre: string } | null; x: number; y: number; xMovil: number | null; yMovil: number | null }
+let claveEtiqueta = 0;
 interface Form {
+  tipo: "interactivo" | "imagen"; etiquetas: EtiquetaForm[];
   titulo: string; texto: string; etiqueta: string; botones: BotonB[]; fondo: FondoBanner; alineacion: Alineacion;
   modo: "ninguno" | "elegido" | "auto"; producto: { slug: string; nombre: string } | null; productoAuto: ProductoAuto; ocultarSinProducto: boolean;
   alt: string; enlace: string; desde: string; hasta: string; activo: boolean;
 }
 const formDe = (b: Fila | null): Form => ({
+  // Sin título, el banner es una imagen (como antes «sólo foto»).
+  tipo: b && !b.titulo ? "imagen" : "interactivo",
+  etiquetas: (b?.etiquetas ?? []).map((e) => ({ clave: ++claveEtiqueta, producto: { slug: e.producto, nombre: e.productoNombre }, x: e.x, y: e.y, xMovil: e.xMovil, yMovil: e.yMovil })),
   titulo: b?.titulo ?? "", texto: b?.texto ?? "", etiqueta: b?.etiqueta ?? "", botones: b?.botones ?? [],
   fondo: b?.fondo ?? "marca", alineacion: b?.alineacion ?? "izquierda",
   modo: b?.producto ? "elegido" : b?.productoAuto ? "auto" : "ninguno",
@@ -237,6 +252,7 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
   const [enCelular, setEnCelular] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState<string | null>(null);
+  const [fotoNueva, setFotoNueva] = useState<File | null>(null);
   const [prod, setProd] = useState<{ cargando: boolean; producto: ProductoBanner | null }>({ cargando: false, producto: null });
   const foco = useRef<{ campo: CampoTexto; el: HTMLInputElement | HTMLTextAreaElement } | null>(null);
   const caja = useRef<HTMLDivElement>(null);
@@ -265,8 +281,19 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
   const sinValor = [...new Set(textos.flatMap(usadas).filter((k) => k in VARIABLES_BANNER && !variables[k as keyof VariablesBanner]))];
   const con = (t: string) => { const v = conVariables(t.trim() || null, variables); return v === undefined ? t.trim() : v; };
 
-  const tieneProducto = f.modo !== "ninguno";
-  const vista: BannerVista = {
+  const imagen = f.tipo === "imagen";
+  const tieneProducto = !imagen && f.modo !== "ninguno";
+  const vista: BannerVista = imagen ? {
+    alt: con(f.alt) ?? "", enlace: f.enlace || null,
+    foto: fila?.foto ? { clave: fila.foto, ancho: fila.fotoAncho, alto: fila.fotoAlto } : null,
+    fotoMovil: fila?.fotoMovil ? { clave: fila.fotoMovil, ancho: fila.movilAncho, alto: fila.movilAlto } : null,
+    titulo: null, texto: null, etiqueta: null, botones: [], fondo: f.fondo, alineacion: f.alineacion, producto: null,
+    // En la vista previa sólo se dibujan los puntos (la tarjeta no se abre).
+    etiquetas: f.etiquetas.flatMap((e) => (e.producto ? [{
+      x: e.x, y: e.y, xMovil: fila?.fotoMovil ? e.xMovil : null, yMovil: fila?.fotoMovil ? e.yMovil : null,
+      producto: { slug: e.producto.slug, nombre: e.producto.nombre, precio: 0, precioLista: null, foto: null },
+    }] : [])),
+  } : {
     alt: con(f.alt) ?? "", enlace: f.botones.length || tieneProducto ? null : f.enlace || null,
     foto: fila?.foto ? { clave: fila.foto, ancho: fila.fotoAncho, alto: fila.fotoAlto } : null,
     fotoMovil: fila?.fotoMovil ? { clave: fila.fotoMovil, ancho: fila.movilAncho, alto: fila.movilAlto } : null,
@@ -275,6 +302,7 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
     fondo: f.fondo, alineacion: f.alineacion, producto: tieneProducto ? prod.producto : null,
   };
   const sinNada = !vista.foto && !vista.titulo;
+  const enlaceMalo = !!f.enlace && f.enlace.startsWith("http") && !esEnlaceExterno(f.enlace);
 
   /** Pone {variable} donde está el cursor del último texto tocado (o al final del título). */
   function insertar(k: string) {
@@ -294,17 +322,23 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
   const alFoco = (campo: CampoTexto) => (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => { foco.current = { campo, el: e.currentTarget }; };
 
   async function guardar() {
-    const alt = f.alt.trim() || f.titulo.trim();
-    if (!fila?.foto && !f.titulo.trim()) { onError(new Error("Escribí un título (o guardalo y subile una foto).")); return; }
+    const alt = f.alt.trim() || (imagen ? "" : f.titulo.trim());
+    if (!imagen && !f.titulo.trim()) { onError(new Error("Escribí un título (o elegí «Imagen con link» para un banner que es sólo la foto).")); return; }
     if (alt.length < 2) { onError(new Error("Escribí qué se ve en el banner (lo leen quienes no ven la imagen, y Google).")); return; }
-    if (f.botones.some((b) => !b.texto.trim() || !b.enlace)) { onError(new Error("Cada botón necesita un texto y a dónde lleva.")); return; }
-    if (f.modo === "elegido" && !f.producto) { onError(new Error("Elegí el producto (o poné «Ninguno»).")); return; }
-    const cuerpo = {
-      alt, enlace: f.enlace.trim() || null, titulo: f.titulo.trim() || null, texto: f.texto.trim() || null, etiqueta: f.etiqueta.trim() || null,
+    if (enlaceMalo) { onError(new Error("El link a otro sitio tiene que empezar con https:// (por ejemplo https://www.instagram.com/isuwaya).")); return; }
+    if (!imagen && f.botones.some((b) => !b.texto.trim() || !b.enlace)) { onError(new Error("Cada botón necesita un texto y a dónde lleva.")); return; }
+    if (!imagen && f.modo === "elegido" && !f.producto) { onError(new Error("Elegí el producto (o poné «Ninguno»).")); return; }
+    if (imagen && f.etiquetas.some((e) => !e.producto)) { onError(new Error("Elegí el producto de cada etiqueta (o quitala).")); return; }
+    const comun = { alt, enlace: f.enlace.trim() || null, desde: deLocal(f.desde), hasta: deLocal(f.hasta), activo: f.activo };
+    // Al pasar de un tipo al otro, lo del otro tipo se borra (un banner de imagen no lleva textos ni botones).
+    const cuerpo = imagen ? {
+      ...comun, titulo: null, texto: null, etiqueta: null, botones: [], producto: null, productoAuto: null, ocultarSinProducto: false,
+      etiquetas: f.etiquetas.map((e) => ({ producto: e.producto!.slug, x: e.x, y: e.y, xMovil: e.xMovil, yMovil: e.yMovil })),
+    } : {
+      ...comun, titulo: f.titulo.trim() || null, texto: f.texto.trim() || null, etiqueta: f.etiqueta.trim() || null,
       botones: f.botones.map((b) => ({ ...b, texto: b.texto.trim() })), fondo: f.fondo, alineacion: f.alineacion,
       producto: f.modo === "elegido" ? f.producto?.slug ?? null : null, productoAuto: f.modo === "auto" ? f.productoAuto : null,
-      ocultarSinProducto: f.modo === "ninguno" ? false : f.ocultarSinProducto,
-      desde: deLocal(f.desde), hasta: deLocal(f.hasta), activo: f.activo,
+      ocultarSinProducto: f.modo === "ninguno" ? false : f.ocultarSinProducto, etiquetas: [],
     };
     setGuardando(true);
     try {
@@ -313,7 +347,13 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
         await onListo(fila.id, "Banner guardado.");
       } else {
         const r = await api<{ banner: Fila }>("banners", { cuerpo: { ...cuerpo, orden: ordenNuevo } });
-        await onListo(r.banner.id, "Banner creado. Si querés, ahora subile una foto.");
+        let texto = imagen ? "Banner creado. Ahora subile la foto." : "Banner creado. Si querés, ahora subile una foto.";
+        // Banner de imagen nuevo: la foto elegida antes de crearlo se sube en el acto (el banner ya existe aunque falle).
+        if (imagen && fotoNueva) {
+          try { await api(`banners/${r.banner.id}/foto?tipo=escritorio`, { archivo: fotoNueva }); texto = "Banner creado. Ahora podés ponerle etiquetas de productos."; }
+          catch { texto = "Banner creado, pero la foto no se pudo subir: probá de nuevo desde Fotos."; }
+        }
+        await onListo(r.banner.id, texto);
       }
     } catch (e) { onError(e); } finally { setGuardando(false); }
   }
@@ -347,7 +387,7 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
               </div>
               {sinNada ? (
                 <div className="grid aspect-[12/5] place-items-center rounded-xl border border-dashed border-linea p-4 text-center text-sm text-tinta-tenue">
-                  Escribí un título o subile una foto para ver el banner.
+                  {imagen ? "Subile la foto para ver el banner." : "Escribí un título o subile una foto para ver el banner."}
                 </div>
               ) : (
                 <div className={enCelular ? "mx-auto max-w-[390px]" : ""}>
@@ -370,10 +410,32 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
 
           {/* Formulario */}
           <fieldset disabled={!operador} className="min-w-0 space-y-6 lg:order-1">
+            <fieldset>
+              <legend className={leyenda}>Tipo de banner</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {([["interactivo", "Interactivo", "Título, texto, botones y la tarjeta de un producto, sobre una foto o un color."],
+                  ["imagen", "Imagen con link", "Sólo la foto: lleva a una página de la tienda o a otro sitio, con etiquetas de los productos que se ven."]] as const).map(([v, t, d]) => (
+                  <label key={v} className="cursor-pointer">
+                    <input type="radio" name={`${id}-tipo`} className="peer sr-only" checked={f.tipo === v} onChange={() => pon({ tipo: v })} />
+                    <span className="block h-full rounded-xl border border-linea bg-white p-3 text-sm peer-checked:border-tinta peer-checked:ring-2 peer-checked:ring-tinta peer-focus-visible:outline-2 peer-focus-visible:outline-marca">
+                      <b className="block text-[15px]">{t}</b>
+                      <span className="text-tinta-suave">{d}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {fila && f.tipo !== formDe(fila).tipo && (
+                <p className="mt-2 text-sm text-tinta-suave">
+                  {imagen ? "Al guardar se borran el título, los textos, los botones y el producto." : "Al guardar se borran las etiquetas de productos."}
+                </p>
+              )}
+            </fieldset>
+
+            {!imagen && (<>
             <section>
               <p className={leyenda}>Textos</p>
               <div className="space-y-3">
-                <Campo etiqueta="Título" ayuda={fila?.foto ? "Opcional: sin título se ve sólo la foto." : "Lo grande del banner."}>
+                <Campo etiqueta="Título" ayuda="Lo grande del banner.">
                   <input className={claseEntrada} maxLength={90} value={f.titulo} onFocus={alFoco("titulo")} onChange={(e) => pon({ titulo: e.target.value })} placeholder="Ej.: {descuento}% OFF pagando con transferencia" />
                 </Campo>
                 <Campo etiqueta="Texto (opcional)">
@@ -488,11 +550,16 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
                 </fieldset>
               </div>
             </section>
+            </>)}
 
             <section>
-              <p className={leyenda}>Fotos (opcional)</p>
+              <p className={leyenda}>{imagen ? "Fotos" : "Fotos (opcional)"}</p>
               {!fila ? (
-                <p className="text-sm text-tinta-tenue">Creá el banner y después le podés subir una foto.</p>
+                imagen ? (
+                  <Campo etiqueta="Foto para compu" ayuda="Apaisada, ej. 1920 × 800. Se sube al crear el banner; la de celular, después.">
+                    <input type="file" accept={TIPOS_FOTO} className={claseEntrada} onChange={(e) => setFotoNueva(e.target.files?.[0] ?? null)} />
+                  </Campo>
+                ) : <p className="text-sm text-tinta-tenue">Creá el banner y después le podés subir una foto.</p>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                   <div>
@@ -505,9 +572,10 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
                           {subiendo === "escritorio" ? "Subiendo…" : fila.foto ? "Cambiar foto" : "Subir foto"}
                           <input type="file" accept={TIPOS_FOTO} className="sr-only" onChange={(e) => void subir("escritorio", e.target.files?.[0])} />
                         </label>
-                        {fila.foto && fila.titulo && <button type="button" className="text-tinta-tenue hover:underline" onClick={() => void sacar("escritorio")}>Sacar foto</button>}
+                        {fila.foto && fila.titulo && !imagen && <button type="button" className="text-tinta-tenue hover:underline" onClick={() => void sacar("escritorio")}>Sacar foto</button>}
                       </div>
                     )}
+                    {imagen && fila.foto && f.etiquetas.length > 0 && <p className="mt-1 text-xs text-tinta-tenue">Si cambiás la foto, revisá dónde quedaron las etiquetas.</p>}
                   </div>
                   <div>
                     <p className="mb-1 text-sm font-bold">Celular <span className="font-normal text-tinta-tenue">(vertical)</span></p>
@@ -527,16 +595,27 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
               )}
             </section>
 
+            {imagen && (
+              <section>
+                <p className={leyenda}>Etiquetas de productos (opcional)</p>
+                {fila?.foto ? (
+                  <UbicarEtiquetas fila={fila} etiquetas={f.etiquetas} enCelular={enCelular} setEnCelular={setEnCelular} onChange={(etiquetas) => pon({ etiquetas })} />
+                ) : (
+                  <p className="text-sm text-tinta-tenue">Con la foto subida, tocás la foto donde está cada prenda y elegís el producto. En la tienda se ve un punto; al tocarlo, la tarjeta del producto.</p>
+                )}
+              </section>
+            )}
+
             <section>
               <p className={leyenda}>Más</p>
               <div className="space-y-3">
                 <Campo etiqueta="Qué se ve en el banner" ayuda={`Lo leen quienes no ven la imagen, y Google.${f.titulo.trim() ? " Si lo dejás vacío, se usa el título." : ""}`}>
                   <input className={claseEntrada} maxLength={160} value={f.alt} onChange={(e) => pon({ alt: e.target.value })} placeholder={f.titulo || "Ej.: Packs de remeras básicas, hasta 20% OFF"} />
                 </Campo>
-                {f.botones.length || tieneProducto ? (
+                {!imagen && (f.botones.length || tieneProducto) ? (
                   <p className="text-sm text-tinta-tenue">Con botones o producto, se toca el botón o la tarjeta (el banner entero no lleva a otro lado).</p>
                 ) : (
-                  <Destino etiqueta="Al tocar el banner, lleva a" valor={f.enlace} cats={cats} opcional onChange={(enlace) => pon({ enlace })} />
+                  <Destino etiqueta="Al tocar el banner, lleva a" valor={f.enlace} cats={cats} opcional externo onChange={(enlace) => pon({ enlace })} />
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <Campo etiqueta="Desde (opcional)"><input type="datetime-local" className={claseEntrada} value={f.desde} onChange={(e) => pon({ desde: e.target.value })} /></Campo>
@@ -560,15 +639,17 @@ function Editor({ fila, variables, cats, operador, ordenNuevo, onListo, onError,
 }
 
 /* ── A dónde lleva un botón (o el banner): páginas, categorías, un producto u otra dirección de la tienda ── */
-function Destino({ etiqueta, valor, cats, onChange, opcional = false }: {
+function Destino({ etiqueta, valor, cats, onChange, opcional = false, externo = false }: {
   etiqueta: string; valor: string; cats: Categoria[]; onChange: (v: string) => void; opcional?: boolean;
+  /** también otro sitio (https://…): sólo el link del banner entero, no los botones */
+  externo?: boolean;
 }) {
   const id = useId();
   const padres = cats.filter((c) => !c.padreId && c.visible).sort((a, b) => a.orden - b.orden);
   const hijas = (p: Categoria) => cats.filter((c) => c.padreId === p.id && c.visible).sort((a, b) => a.orden - b.orden);
   const conocidas = new Set<string>([...PAGINAS.map(([r]) => r), ...padres.map((p) => `/packs/${p.slug}`),
     ...padres.flatMap((p) => [`/${p.slug}`, ...hijas(p).map((h) => `/${p.slug}/${h.slug}`)])]);
-  const modoDe = (v: string) => (!v ? "" : conocidas.has(v) ? v : v.startsWith("/producto/") ? "__producto" : "__otra");
+  const modoDe = (v: string) => (!v ? "" : conocidas.has(v) ? v : v.startsWith("/producto/") ? "__producto" : externo && !v.startsWith("/") ? "__externo" : "__otra");
   const [modo, setModo] = useState(() => modoDe(valor));
   // Las categorías llegan después: si el valor es una de ellas, se ve elegida.
   useEffect(() => { if (modo === "__otra" && conocidas.has(valor)) setModo(valor); }, [cats.length]);
@@ -581,7 +662,8 @@ function Destino({ etiqueta, valor, cats, onChange, opcional = false }: {
           const v = e.target.value;
           setModo(v);
           if (v === "__producto") onChange("");
-          else if (v === "__otra") onChange(valor && !conocidas.has(valor) ? valor : "/");
+          else if (v === "__otra") onChange(valor && !conocidas.has(valor) && valor.startsWith("/") ? valor : "/");
+          else if (v === "__externo") onChange(valor.startsWith("https://") ? valor : "https://");
           else onChange(v);
         }}>
           {opcional && <option value="">A ningún lado</option>}
@@ -599,6 +681,7 @@ function Destino({ etiqueta, valor, cats, onChange, opcional = false }: {
           <optgroup label="Otro">
             <option value="__producto">Un producto…</option>
             <option value="__otra">Otra dirección de la tienda…</option>
+            {externo && <option value="__externo">Otro sitio (https://…)</option>}
           </optgroup>
         </select>
       </label>
@@ -612,6 +695,106 @@ function Destino({ etiqueta, valor, cats, onChange, opcional = false }: {
           <input className={claseEntrada} maxLength={300} value={valor} onChange={(e) => onChange(e.target.value.trim())} />
         </Campo>
       )}
+      {modo === "__externo" && (
+        <Campo etiqueta="Dirección del otro sitio" ayuda="Empieza con https://. Se abre en otra pestaña, así la tienda queda abierta."
+          error={valor && valor !== "https://" && !esEnlaceExterno(valor) ? "Revisá la dirección: tiene que ser https://algo.com/…" : null}>
+          <input type="url" inputMode="url" className={claseEntrada} maxLength={500} value={valor} placeholder="https://www.instagram.com/isuwaya"
+            onChange={(e) => onChange(e.target.value.trim())} aria-invalid={!!valor && valor !== "https://" && !esEnlaceExterno(valor)} />
+        </Campo>
+      )}
+    </div>
+  );
+}
+
+/* ── Etiquetas de productos: se ubican tocando la foto ── */
+function UbicarEtiquetas({ fila, etiquetas, enCelular, setEnCelular, onChange }: {
+  fila: Fila; etiquetas: EtiquetaForm[]; enCelular: boolean; setEnCelular: (v: boolean) => void; onChange: (e: EtiquetaForm[]) => void;
+}) {
+  const [elegida, setElegida] = useState<number | null>(null);
+  // En el celular se ubican sobre la foto vertical, si hay; si no, el celular usa la de compu con los mismos lugares.
+  const enVertical = enCelular && !!fila.fotoMovil;
+  const clave = (enVertical ? fila.fotoMovil : fila.foto)!;
+  const lugar = (e: EtiquetaForm) => (enVertical ? (e.xMovil === null || e.yMovil === null ? null : { x: e.xMovil, y: e.yMovil }) : { x: e.x, y: e.y });
+  const cambiar = (i: number, c: Partial<EtiquetaForm>) => onChange(etiquetas.map((e, j) => (j === i ? { ...e, ...c } : e)));
+  const mover = (i: number, x: number, y: number) => cambiar(i, enVertical ? { xMovil: x, yMovil: y } : { x, y });
+  const redondear = (v: number) => Math.round(Math.min(100, Math.max(0, v)) * 10) / 10;
+  const sinVertical = etiquetas.findIndex((e) => e.xMovil === null);
+
+  function tocar(ev: React.MouseEvent<HTMLImageElement>) {
+    const r = ev.currentTarget.getBoundingClientRect();
+    poner(redondear(((ev.clientX - r.left) / r.width) * 100), redondear(((ev.clientY - r.top) / r.height) * 100));
+  }
+  function poner(x: number, y: number) {
+    if (elegida !== null) { mover(elegida, x, y); setElegida(null); return; }
+    // En la foto de celular no se agregan: se ubican las que ya están en la de compu.
+    if (enVertical) { if (sinVertical >= 0) mover(sinVertical, x, y); return; }
+    if (etiquetas.length >= MAX_ETIQUETAS) return;
+    onChange([...etiquetas, { clave: ++claveEtiqueta, producto: null, x, y, xMovil: null, yMovil: null }]);
+  }
+  /** Con el foco en un número: las flechas la corren (1 %, o 5 % con Mayúscula). */
+  function teclas(i: number, ev: React.KeyboardEvent) {
+    const paso = ev.shiftKey ? 5 : 1;
+    const d = ({ ArrowLeft: [-paso, 0], ArrowRight: [paso, 0], ArrowUp: [0, -paso], ArrowDown: [0, paso] } as Record<string, [number, number]>)[ev.key];
+    const l = lugar(etiquetas[i]!);
+    if (!d || !l) return;
+    ev.preventDefault();
+    mover(i, redondear(l.x + d[0]), redondear(l.y + d[1]));
+  }
+
+  return (
+    <div className="space-y-3">
+      {fila.fotoMovil && (
+        <div className="inline-flex rounded-xl border border-linea bg-white p-0.5 text-sm" role="group" aria-label="Ubicar en la foto de">
+          {(["Compu", "Celular"] as const).map((x) => (
+            <button key={x} type="button" aria-pressed={(x === "Celular") === enCelular} onClick={() => { setEnCelular(x === "Celular"); setElegida(null); }}
+              className={`rounded-lg px-3 py-1.5 font-bold ${(x === "Celular") === enCelular ? "bg-tinta text-white" : "text-tinta-suave"}`}>{x}</button>
+          ))}
+        </div>
+      )}
+      <p className="text-sm text-tinta-suave" aria-live="polite">
+        {elegida !== null ? `Tocá el lugar nuevo de la etiqueta ${elegida + 1}.`
+          : enVertical ? (sinVertical >= 0 ? `Tocá la foto de celular donde está la prenda de la etiqueta ${sinVertical + 1}.` : "Para mover una, tocá su número y después el lugar nuevo.")
+          : etiquetas.length >= MAX_ETIQUETAS ? `Llegaste a ${MAX_ETIQUETAS} etiquetas. Para mover una, tocá su número y después el lugar nuevo.`
+          : "Tocá la foto donde está la prenda para poner una etiqueta. Para moverla, tocá su número y después el lugar nuevo (o usá las flechas)."}
+      </p>
+      {/* Sin mouse: la pone en el medio y se corre con las flechas. */}
+      {(enVertical ? sinVertical >= 0 : etiquetas.length < MAX_ETIQUETAS) && elegida === null && (
+        <Boton variante="borde" onClick={() => poner(50, 50)}>{enVertical ? `Ubicar la etiqueta ${sinVertical + 1} en el medio` : "+ Agregar etiqueta en el medio"}</Boton>
+      )}
+      <div className={`relative overflow-hidden rounded-xl ring-1 ring-linea ${enVertical ? "mx-auto max-w-[320px]" : ""}`}>
+        <img src={fotoUrl(clave, 1600)} alt="" draggable={false} onClick={tocar} className="block w-full cursor-crosshair select-none" />
+        {etiquetas.map((e, i) => {
+          const l = lugar(e);
+          if (!l) return null;
+          return (
+            <button key={e.clave} type="button" aria-pressed={elegida === i} onClick={() => setElegida(elegida === i ? null : i)} onKeyDown={(ev) => teclas(i, ev)}
+              aria-label={`Etiqueta ${i + 1}${e.producto ? `: ${e.producto.nombre}` : ""}. Tocala y después el lugar nuevo, o correla con las flechas.`}
+              className={`absolute grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-sm font-bold shadow-lg ring-2 ${elegida === i ? "bg-marca text-white ring-white" : "bg-white text-tinta ring-tinta"}`}
+              style={{ left: `${l.x}%`, top: `${l.y}%` }}>{i + 1}</button>
+          );
+        })}
+      </div>
+      {etiquetas.length > 0 && (
+        <ol className="space-y-2">
+          {etiquetas.map((e, i) => (
+            <li key={e.clave} className="rounded-xl border border-linea p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span aria-hidden="true" className="grid size-7 place-items-center rounded-full bg-tinta text-xs font-bold text-white">{i + 1}</span>
+                {e.producto ? (
+                  <>
+                    <b className="min-w-0 flex-1 truncate">{e.producto.nombre}</b>
+                    <Boton variante="texto" onClick={() => cambiar(i, { producto: null })}>Cambiar</Boton>
+                  </>
+                ) : <span className="flex-1 text-tinta-suave">Etiqueta {i + 1}: elegí el producto</span>}
+                <button type="button" className="text-oferta hover:underline" onClick={() => { onChange(etiquetas.filter((_, j) => j !== i)); setElegida(null); }}>Quitar</button>
+              </div>
+              {!e.producto && <div className="mt-2"><BuscarProducto etiqueta={`Producto de la etiqueta ${i + 1}`} onElegir={(p) => cambiar(i, { producto: p })} /></div>}
+              {fila.fotoMovil && <p className="mt-1 text-xs text-tinta-tenue">{e.xMovil === null ? "Falta ubicarla en la foto de celular: en el celular no se ve." : "Ubicada también en la foto de celular."}</p>}
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="text-xs text-tinta-tenue">En la tienda se ve un punto, sin el nombre. Al tocarlo aparece la tarjeta del producto con su foto y su precio, que lleva a su ficha. Las de productos sin stock no salen.</p>
     </div>
   );
 }

@@ -66,6 +66,8 @@
   /* El puntito del banner que se ve se va llenando hasta el próximo. */
   .progreso-banner { transform-origin: left; animation: llenar var(--duracion-banner, 6s) linear both; }
   [data-pausado="true"] .progreso-banner { animation-play-state: paused; }
+  /* La tarjeta de una etiqueta de producto (banners de imagen) aparece subiendo. */
+  .etiqueta-tarjeta { animation: var(--animate-sube); }
 }
 @keyframes llenar { from { transform: scaleX(0); } }
 

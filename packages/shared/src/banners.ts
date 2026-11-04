@@ -11,6 +11,9 @@ import { z } from "zod";
  * página de la tienda, y un producto destacado (uno elegido o uno automático)
  * que se ve como una tarjeta con su foto y su precio.
  *
+ * Banner de imagen (sólo foto): el banner entero puede llevar a una página de
+ * la tienda o a otro sitio, y la foto puede tener etiquetas de producto.
+ *
  * Los textos admiten variables que salen de Ajustes ({descuento}, {cuotas}…):
  * si cambia el % de la transferencia, el banner cambia solo.
  */
@@ -33,6 +36,22 @@ export const NOMBRE_PRODUCTO_AUTO: Record<ProductoAuto, string> = {
 /** Una dirección de esta tienda (/mujer, /producto/remera…): nunca otro sitio. */
 export const RutaTienda = z.string().trim().max(300)
   .regex(/^\/([^/\\\s]|$)[^\s\\]*$/, "Una dirección de esta tienda, que empiece con / (por ejemplo /mujer o /packs)");
+
+// El paquete no carga los tipos del navegador ni de Node: sólo lo que se usa de URL (como en seo.ts).
+declare const URL: new (url: string) => { protocol: string; username: string; password: string; hostname: string };
+
+/** Otro sitio (https://…, sin usuario@ y con un dominio con punto): sólo para el link del banner entero, que se abre en otra pestaña. */
+export function esEnlaceExterno(e: string | null | undefined): e is string {
+  // Justo después de https:// va el dominio (https:///x lo «arregla» URL, pero la base lo rechaza).
+  if (!e || e.length > 500 || !/^https:\/\/[^\s/\\][^\s\\]*$/.test(e)) return false;
+  try {
+    const u = new URL(e);
+    return u.protocol === "https:" && !u.username && !u.password && u.hostname.includes(".") && !u.hostname.startsWith(".") && !u.hostname.endsWith(".");
+  } catch { return false; }
+}
+/** A dónde lleva el banner entero: una página de la tienda o otro sitio (los botones, sólo de la tienda). */
+export const EnlaceBanner = z.string().trim().max(500).refine((v) => RutaTienda.safeParse(v).success || esEnlaceExterno(v),
+  "Una página de la tienda que empiece con / (por ejemplo /mujer) o de otro sitio que empiece con https://");
 
 export const BotonBanner = z.object({
   texto: z.string().trim().min(1, "El botón necesita un texto").max(30),
@@ -81,11 +100,23 @@ export const ProductoBanner = z.object({
 });
 export type ProductoBanner = z.infer<typeof ProductoBanner>;
 
+/** Hasta cuántas etiquetas de producto puede tener la foto de un banner. */
+export const MAX_ETIQUETAS = 8;
+/**
+ * Una etiqueta sobre la foto de un banner de imagen: un punto que al tocarlo
+ * muestra la tarjeta del producto. x/y en % de la foto de compu; xMovil/yMovil
+ * en % de la de celular (null: en el celular no se ve si hay foto de celular).
+ */
+export const EtiquetaPublica = z.object({
+  x: z.number(), y: z.number(), xMovil: z.number().nullable(), yMovil: z.number().nullable(), producto: ProductoBanner,
+});
+export type EtiquetaPublica = z.infer<typeof EtiquetaPublica>;
+
 /** Banner del carrusel del inicio, como lo recibe la tienda (variables ya reemplazadas). */
 export const BannerPublico = z.object({
   id: z.number().int(),
   alt: z.string(),
-  /** a dónde lleva el banner entero (sólo si no tiene botones ni producto) */
+  /** a dónde lleva el banner entero (sólo si no tiene botones ni producto): una página de la tienda o https://… */
   enlace: z.string().nullable(),
   foto: FotoBanner.nullable(),
   fotoMovil: FotoBanner.nullable(),
@@ -96,6 +127,8 @@ export const BannerPublico = z.object({
   fondo: z.enum(FONDOS_BANNER).default("marca"),
   alineacion: z.enum(ALINEACIONES_BANNER).default("izquierda"),
   producto: ProductoBanner.nullable().default(null),
+  /** sólo en los banners de imagen (sin título) */
+  etiquetas: z.array(EtiquetaPublica).default([]),
 });
 export type BannerPublico = z.infer<typeof BannerPublico>;
 

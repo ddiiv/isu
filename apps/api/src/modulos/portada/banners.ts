@@ -1,6 +1,7 @@
 import type pg from "pg";
 import {
-  conVariables, formatearPesos, leerPacks, maxPorcentajePack, type BannerPublico, type BotonBanner, type ProductoAuto, type ProductoBanner, type VariablesBanner,
+  conVariables, formatearPesos, leerPacks, maxPorcentajePack, type BannerPublico, type BotonBanner, type EtiquetaPublica, type ProductoAuto, type ProductoBanner,
+  type VariablesBanner,
 } from "@isu/shared";
 import type { Descuentos } from "../../lib/descuentos.js";
 import { coleccion, tarjetas } from "../productos/consultas.js";
@@ -14,14 +15,18 @@ import { coleccion, tarjetas } from "../productos/consultas.js";
  *     liquidación, uno destacado), con stock, foto y el precio de la grilla;
  *     si no hay y el banner lo pide, no sale;
  *   · el link del banner entero sólo cuando no tiene botones ni producto
- *     (no se anidan links).
+ *     (no se anidan links);
+ *   · las etiquetas de producto, sólo en los banners de imagen (sin título):
+ *     las de productos sin stock, sin foto o que ya no se ven no salen.
  */
+/** Una etiqueta como se guarda: el producto por su id (nunca sale de la base). */
+export interface EtiquetaGuardada { producto: number; x: number; y: number; xMovil: number | null; yMovil: number | null }
 export interface FilaBanner {
   id: number; alt: string; enlace: string | null; foto: string | null; foto_ancho: number | null; foto_alto: number | null;
   foto_movil: string | null; movil_ancho: number | null; movil_alto: number | null;
   titulo: string | null; texto: string | null; etiqueta: string | null; botones: BotonBanner[];
   fondo: BannerPublico["fondo"]; alineacion: BannerPublico["alineacion"];
-  producto_id: number | null; producto_auto: ProductoAuto | null; ocultar_sin_producto: boolean;
+  producto_id: number | null; producto_auto: ProductoAuto | null; ocultar_sin_producto: boolean; etiquetas: EtiquetaGuardada[];
 }
 
 export async function variablesDeBanners(pool: pg.Pool): Promise<VariablesBanner> {
@@ -53,6 +58,23 @@ export async function productoDeBanner(pool: pg.Pool, desc: Descuentos, b: { pro
   return t ? { slug: t.slug, nombre: t.nombre, precio: t.precio, precioLista: t.precioLista, foto: t.foto } : null;
 }
 
+/** Las etiquetas de la foto, con la tarjeta de cada producto (con stock y con foto, al precio de la grilla). */
+async function etiquetasDeBanner(pool: pg.Pool, desc: Descuentos, b: FilaBanner): Promise<EtiquetaPublica[]> {
+  if (!b.etiquetas.length) return [];
+  const { rows } = await pool.query<{ id: number; slug: string; nombre: string; creado_en: Date; nuevo: boolean }>(
+    "SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p WHERE p.id = ANY($1::int[]) AND p.visible AND p.en_stocker",
+    [[...new Set(b.etiquetas.map((e) => e.producto))]]);
+  const porSlug = new Map((await tarjetas(pool, rows, false, desc)).filter((t) => !t.agotado && t.foto).map((t) => [t.slug, t]));
+  const porId = new Map(rows.map((r) => [r.id, porSlug.get(r.slug)]));
+  return b.etiquetas.flatMap((e) => {
+    const t = porId.get(e.producto);
+    if (!t) return [];
+    // Sin foto de celular, el celular usa la de compu y los mismos lugares.
+    const movil = b.foto_movil ? { xMovil: e.xMovil, yMovil: e.yMovil } : { xMovil: null, yMovil: null };
+    return [{ x: e.x, y: e.y, ...movil, producto: { slug: t.slug, nombre: t.nombre, precio: t.precio, precioLista: t.precioLista, foto: t.foto } }];
+  });
+}
+
 /**
  * Un banner como lo ve la tienda, o por qué no sale (para la vista previa del
  * backoffice: «Usa {envioGratis} y no hay envío gratis», «No hay ningún producto en liquidación»).
@@ -77,6 +99,7 @@ export async function armarBanner(pool: pg.Pool, desc: Descuentos, b: FilaBanner
       titulo: titulo ?? null, texto: texto ?? null, etiqueta: etiqueta ?? null,
       botones: b.botones.map((x, i) => ({ ...x, texto: botones[i]! })),
       fondo: b.fondo, alineacion: b.alineacion, producto,
+      etiquetas: !b.titulo && b.foto ? await etiquetasDeBanner(pool, desc, b) : [],
       // El banner entero lleva a un lado sólo si no tiene botones ni producto (no se anidan links).
       enlace: b.botones.length || producto ? null : b.enlace,
     },
@@ -84,7 +107,7 @@ export async function armarBanner(pool: pg.Pool, desc: Descuentos, b: FilaBanner
 }
 
 export const COLUMNAS_BANNER = `id, alt, enlace, foto, foto_ancho, foto_alto, foto_movil, movil_ancho, movil_alto,
-  titulo, texto, etiqueta, botones, fondo, alineacion, producto_id, producto_auto, ocultar_sin_producto`;
+  titulo, texto, etiqueta, botones, fondo, alineacion, producto_id, producto_auto, ocultar_sin_producto, etiquetas`;
 
 export async function bannersPublicos(pool: pg.Pool, desc: Descuentos): Promise<BannerPublico[]> {
   const { rows } = await pool.query<FilaBanner>(

@@ -4,7 +4,7 @@ import type pg from "pg";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import {
-  ALINEACIONES_BANNER, BANNERS_SUGERIDOS, BotonBanner, FONDOS_BANNER, PRODUCTO_AUTO, VARIABLES_BANNER, type BannerPublico,
+  ALINEACIONES_BANNER, BANNERS_SUGERIDOS, BotonBanner, EnlaceBanner, FONDOS_BANNER, MAX_ETIQUETAS, PRODUCTO_AUTO, VARIABLES_BANNER, type BannerPublico,
 } from "@isu/shared";
 import { claveNueva, FotoInvalida, procesarBanner, type Almacen } from "@isu/almacen";
 import type { Entorno } from "../../entorno.js";
@@ -26,7 +26,6 @@ import { auditar, exigir } from "./sesion.js";
  */
 const Id = z.coerce.number().int().positive().max(2_147_483_647);
 const POR_PAGINA = 30;
-const Ruta = z.string().trim().max(300).regex(/^\/([^/\\\s]|$)[^\s\\]*$/, "Una dirección de esta tienda, que empiece con / (por ejemplo /mujer o /packs)");
 
 export async function rutasResenasAdmin(app: FastifyInstance, deps: {
   pool: pg.Pool; redis: Redis; env: Entorno; cache: CacheCorta; colas: Colas; canalInvalidar: string; banners: Almacen | null; descuentos: Descuentos;
@@ -133,17 +132,23 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
   const COLS = `b.id, b.alt, b.enlace, b.foto, b.foto_ancho AS "fotoAncho", b.foto_alto AS "fotoAlto", b.foto_movil AS "fotoMovil", b.movil_ancho AS "movilAncho",
     b.movil_alto AS "movilAlto", b.orden, b.activo, b.desde, b.hasta, b.creado_en AS "creadoEn",
     b.titulo, b.texto, b.etiqueta, b.botones, b.fondo, b.alineacion, p.slug AS producto, p.nombre AS "productoNombre", b.producto_auto AS "productoAuto",
-    b.ocultar_sin_producto AS "ocultarSinProducto", b.sugerido`;
+    b.ocultar_sin_producto AS "ocultarSinProducto", b.sugerido,
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('producto', ep.slug, 'productoNombre', ep.nombre, 'x', e->'x', 'y', e->'y', 'xMovil', e->'xMovil', 'yMovil', e->'yMovil') ORDER BY o), '[]')
+       FROM jsonb_array_elements(b.etiquetas) WITH ORDINALITY AS t(e, o) JOIN tienda.productos ep ON ep.id = (e->>'producto')::int) AS etiquetas`;
   const DESDE = "FROM tienda.banners b LEFT JOIN tienda.productos p ON p.id = b.producto_id";
   const leerBanner = async (id: number) => (await pool.query(`SELECT ${COLS} ${DESDE} WHERE b.id = $1`, [id])).rows[0];
   const textoOpcional = (max: number) => z.string().trim().max(max).nullable().transform((v) => v || null);
   const SlugProducto = z.string().regex(/^[a-z0-9][a-z0-9-]*$/).max(160);
+  // Un lugar de la foto, en %: con un decimal alcanza.
+  const Lugar = z.number().min(0).max(100).transform((v) => Math.round(v * 10) / 10);
+  const Etiqueta = z.object({ producto: SlugProducto, x: Lugar, y: Lugar, xMovil: Lugar.nullable().default(null), yMovil: Lugar.nullable().default(null) }).strict()
+    .refine((e) => (e.xMovil === null) === (e.yMovil === null), { message: "El lugar en el celular necesita los dos valores", path: ["xMovil"] });
   // Las variables que se pueden usar en los textos ({descuento}…): una desconocida es un error de tipeo.
   const variablesConocidas = (t: string | null | undefined) => !t || [...t.matchAll(/\{(\w+)\}/g)].every((m) => m[1]! in VARIABLES_BANNER);
   const MENSAJE_VARIABLES = `Variable desconocida. Las que hay: ${Object.keys(VARIABLES_BANNER).map((k) => `{${k}}`).join(", ")}.`;
   const CamposBanner = {
     alt: z.string().trim().min(2, "Describí qué se ve en el banner").max(160),
-    enlace: Ruta.nullable(),
+    enlace: EnlaceBanner.nullable(),
     orden: z.number().int().min(-1000).max(1000),
     activo: z.boolean(),
     desde: z.iso.datetime({ offset: true }).nullable(),
@@ -157,12 +162,14 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
     producto: SlugProducto.nullable(),
     productoAuto: z.enum(PRODUCTO_AUTO).nullable(),
     ocultarSinProducto: z.boolean(),
+    etiquetas: z.array(Etiqueta).max(MAX_ETIQUETAS, `Hasta ${MAX_ETIQUETAS} etiquetas`),
   };
   type Campos = { [K in keyof typeof CamposBanner]?: z.infer<(typeof CamposBanner)[K]> };
   const revisar = (b: Campos, ctx: z.RefinementCtx) => {
     for (const k of ["alt", "titulo", "texto", "etiqueta"] as const) if (!variablesConocidas(b[k])) ctx.addIssue({ code: "custom", path: [k], message: MENSAJE_VARIABLES });
     (b.botones ?? []).forEach((x, i) => { if (!variablesConocidas(x.texto)) ctx.addIssue({ code: "custom", path: ["botones", i, "texto"], message: MENSAJE_VARIABLES }); });
     if (b.producto && b.productoAuto) ctx.addIssue({ code: "custom", path: ["producto"], message: "Elegí un producto o uno automático, no los dos." });
+    if (b.etiquetas?.length && b.titulo) ctx.addIssue({ code: "custom", path: ["etiquetas"], message: "Las etiquetas de productos van en los banners de imagen, sin título." });
     if (b.desde && b.hasta && new Date(b.hasta) <= new Date(b.desde)) ctx.addIssue({ code: "custom", path: ["hasta"], message: "La fecha de fin tiene que ser posterior al inicio" });
   };
   const Banner = z.object({
@@ -173,6 +180,7 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
     titulo: CamposBanner.titulo.default(null), texto: CamposBanner.texto.default(null), etiqueta: CamposBanner.etiqueta.default(null),
     botones: CamposBanner.botones.default([]), fondo: CamposBanner.fondo.default("marca"), alineacion: CamposBanner.alineacion.default("izquierda"),
     producto: CamposBanner.producto.default(null), productoAuto: CamposBanner.productoAuto.default(null), ocultarSinProducto: CamposBanner.ocultarSinProducto.default(false),
+    etiquetas: CamposBanner.etiquetas.default([]),
   }).strict().superRefine(revisar);
   // Para editar: todo opcional y SIN valores por defecto (un cambio de orden no tiene que apagar el banner).
   const CambiosBanner = z.object(Object.fromEntries(Object.entries(CamposBanner).map(([k, v]) => [k, v.optional()])) as { [K in keyof typeof CamposBanner]: z.ZodOptional<(typeof CamposBanner)[K]> })
@@ -180,6 +188,7 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
   const COLUMNA: Record<string, string> = {
     alt: "alt", enlace: "enlace", orden: "orden", activo: "activo", desde: "desde", hasta: "hasta", titulo: "titulo", texto: "texto", etiqueta: "etiqueta",
     botones: "botones", fondo: "fondo", alineacion: "alineacion", producto: "producto_id", productoAuto: "producto_auto", ocultarSinProducto: "ocultar_sin_producto",
+    etiquetas: "etiquetas",
   };
   /** El producto elegido por su slug → su id (sólo adentro de la base). */
   const idDeProducto = async (slug: string | null | undefined) => {
@@ -188,7 +197,11 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
     if (!r.rows[0]) throw new ErrorHttp(400, "producto", "No existe ese producto.");
     return r.rows[0].id;
   };
-  const valorDe = async (k: string, v: unknown) => (k === "botones" ? JSON.stringify(v) : k === "producto" ? idDeProducto(v as string | null) : k === "enlace" ? v || null : v);
+  /** Las etiquetas con el id de cada producto en vez del slug (como se guardan). */
+  const etiquetasGuardadas = async (es: Array<z.infer<typeof Etiqueta>>) =>
+    JSON.stringify(await Promise.all(es.map(async ({ producto, ...lugar }) => ({ producto: await idDeProducto(producto), ...lugar }))));
+  const valorDe = async (k: string, v: unknown) => (k === "botones" ? JSON.stringify(v) : k === "producto" ? idDeProducto(v as string | null)
+    : k === "etiquetas" ? etiquetasGuardadas(v as Array<z.infer<typeof Etiqueta>>) : k === "enlace" ? v || null : v);
 
   /** La vista previa: el banner como lo ve la tienda (aunque esté apagado), o por qué no sale. */
   const vistas = async (ids: number[]) => {
@@ -220,10 +233,10 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
     const n = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM tienda.banners");
     if (n.rows[0]!.n >= 30) throw new ErrorHttp(409, "tope", "Hay 30 banners: borrá alguno viejo antes de crear otro.");
     const { rows } = await pool.query<{ id: number }>(
-      `INSERT INTO tienda.banners (alt, enlace, orden, activo, desde, hasta, titulo, texto, etiqueta, botones, fondo, alineacion, producto_id, producto_auto, ocultar_sin_producto)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+      `INSERT INTO tienda.banners (alt, enlace, orden, activo, desde, hasta, titulo, texto, etiqueta, botones, fondo, alineacion, producto_id, producto_auto, ocultar_sin_producto, etiquetas)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id`,
       [b.alt, b.enlace, b.orden, b.activo, b.desde, b.hasta, b.titulo, b.texto, b.etiqueta, JSON.stringify(b.botones), b.fondo, b.alineacion,
-        await idDeProducto(b.producto), b.productoAuto, b.ocultarSinProducto],
+        await idDeProducto(b.producto), b.productoAuto, b.ocultarSinProducto, await etiquetasGuardadas(b.etiquetas)],
     );
     await auditar(pool, a, "crear_banner", "banner", rows[0]!.id, b, ip(req));
     await invalidar([]);
@@ -263,6 +276,7 @@ export async function rutasResenasAdmin(app: FastifyInstance, deps: {
       return { banner: await leerBanner(req.params.id), ...(await vistas([req.params.id])) };
     } catch (e) {
       const c = (e as { code?: string; constraint?: string });
+      if (c.code === "23514" && c.constraint === "banners_enlace_check") throw new ErrorHttp(400, "enlace", "Revisá el link del banner.");
       if (c.code === "23514" && c.constraint === "banners_un_producto") throw new ErrorHttp(400, "producto", "Elegí un producto o uno automático, no los dos.");
       if (c.code === "23514") throw new ErrorHttp(400, "fechas", "Revisá las fechas: el fin tiene que ser posterior al inicio.");
       throw e;

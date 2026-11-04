@@ -1029,8 +1029,8 @@ describe("portada (banners del inicio)", () => {
   const subir = async (id: number, tipo: string, cuerpo: Buffer) =>
     app.inject({ method: "POST", url: `/v1/admin/banners/${id}/foto?tipo=${tipo}`, headers: { ...IP, "x-isu-admin": operador, "content-type": "image/jpeg" }, payload: cuerpo });
 
-  it("sólo enlaces de esta tienda", async () => {
-    for (const enlace of ["//evil.com", "https://evil.com/x", "javascript:alert(1)", "/\\evil.com", "/ espacio", "packs"]) {
+  it("el link del banner: una página de esta tienda o otro sitio con https", async () => {
+    for (const enlace of ["//evil.com", "http://evil.com/x", "https://isuwaya.com@evil.com", "https:///evil.com", "javascript:alert(1)", "/\\evil.com", "/ espacio", "packs"]) {
       expect((await req("POST", "/v1/admin/banners", operador, { alt: "QA adm malo", enlace })).statusCode, enlace).toBe(400);
     }
     expect((await req("POST", "/v1/admin/banners", lectura2, { alt: "QA adm sin permiso" })).json().error).toBe("sin_permiso");
@@ -1063,6 +1063,41 @@ describe("portada (banners del inicio)", () => {
     expect((await app.inject("/v1/portada")).json().banners.some((x: { id: number }) => x.id === b.id)).toBe(false);
     expect((await req("DELETE", `/v1/admin/banners/${b.id}`, operador)).statusCode).toBe(200);
     for (const c of carpetas) expect(await readdir(c)).toEqual([]);
+  });
+
+  it("banner de imagen: link a otro sitio y etiquetas de productos por su slug", async () => {
+    const r = await req("POST", "/v1/admin/banners", operador, {
+      alt: "QA adm imagen con etiquetas", enlace: "https://www.instagram.com/isuwaya", orden: -950,
+      etiquetas: [{ producto: "qa-adm-3", x: 30.04, y: 40 }, { producto: "qa-adm-4", x: 70, y: 60, xMovil: 50, yMovil: 20 }],
+    });
+    expect(r.statusCode, r.body).toBe(200);
+    const b = r.json().banner;
+    expect(b.etiquetas).toEqual([
+      { producto: "qa-adm-3", productoNombre: "Campera qa adm puffer", x: 30, y: 40, xMovil: null, yMovil: null },
+      { producto: "qa-adm-4", productoNombre: expect.any(String), x: 70, y: 60, xMovil: 50, yMovil: 20 },
+    ]);
+    // En la base va el id del producto, pero no sale (el toEqual de arriba): va por su slug.
+    expect((await pool.query("SELECT etiquetas FROM tienda.banners WHERE id = $1", [b.id])).rows[0].etiquetas[0].producto).toBe(ids["qa-adm-3"]);
+    // Sin foto no sale; con foto sale con su link y sólo las etiquetas de productos con stock y foto (la remera de nena no tiene fotos).
+    expect(await enPortada(b.id)).toBeUndefined();
+    expect((await subir(b.id, "escritorio", await foto(1800, 700))).statusCode).toBe(200);
+    const p = await enPortada(b.id);
+    expect(p).toMatchObject({ titulo: null, enlace: "https://www.instagram.com/isuwaya", etiquetas: [{ x: 30, y: 40, xMovil: null, yMovil: null, producto: { slug: "qa-adm-3", precio: 5_000_000 } }] });
+    expect(p.etiquetas).toHaveLength(1);
+
+    const estado = async (cuerpo: Record<string, unknown>) => (await req("PATCH", `/v1/admin/banners/${b.id}`, operador, cuerpo)).statusCode;
+    expect(await estado({ etiquetas: [{ producto: "qa-adm-3", x: 101, y: 0 }] })).toBe(400);
+    expect(await estado({ etiquetas: [{ producto: "qa-adm-3", x: 1, y: 1, xMovil: 3 }] })).toBe(400);
+    expect(await estado({ etiquetas: [{ producto: "qa-adm-3", x: 1, y: 1, otro: 1 }] })).toBe(400);
+    expect(await estado({ etiquetas: Array.from({ length: 9 }, () => ({ producto: "qa-adm-3", x: 1, y: 1 })) })).toBe(400);
+    expect(await estado({ titulo: "QA adm con título", etiquetas: [{ producto: "qa-adm-3", x: 1, y: 1 }] })).toBe(400);
+    expect((await req("PATCH", `/v1/admin/banners/${b.id}`, operador, { etiquetas: [{ producto: "no-existe-qa", x: 1, y: 1 }] })).json().error).toBe("producto");
+    // Los botones siguen siendo sólo de la tienda.
+    expect(await estado({ botones: [{ texto: "Ir", enlace: "https://www.instagram.com/isuwaya" }] })).toBe(400);
+    // Con título, las etiquetas no salen (son de los banners de imagen); el link a otro sitio, sí.
+    expect(await estado({ titulo: "QA adm ahora con título" })).toBe(200);
+    expect(await enPortada(b.id)).toMatchObject({ titulo: "QA adm ahora con título", enlace: "https://www.instagram.com/isuwaya", etiquetas: [] });
+    expect((await req("DELETE", `/v1/admin/banners/${b.id}`, operador)).statusCode).toBe(200);
   });
 
   /* ── Etapa 12: banners interactivos ── */
@@ -1133,7 +1168,7 @@ describe("portada (banners del inicio)", () => {
     const fila = {
       id: 0, alt: "QA adm envío", enlace: "/packs", foto: null, foto_ancho: null, foto_alto: null, foto_movil: null, movil_ancho: null, movil_alto: null,
       titulo: "Envío gratis desde {envioGratis}", texto: null, etiqueta: null, botones: [], fondo: "tinta" as const, alineacion: "centro" as const,
-      producto_id: null, producto_auto: null, ocultar_sin_producto: false,
+      producto_id: null, producto_auto: null, ocultar_sin_producto: false, etiquetas: [],
     };
     // (sin producto, armarBanner no usa los descuentos)
     expect(await armarBanner(pool, null as never, fila, {})).toEqual({ banner: null, motivo: "Usa {envioGratis} y hoy no tiene valor en Ajustes." });

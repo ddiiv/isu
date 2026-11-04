@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { Etiquetas, type EtiquetaVista } from "./Etiquetas";
 
 /*
  * Un banner del inicio (etapa 12). Lo usan la tienda (el carrusel) y el
  * backoffice (la vista previa de Portada): el mismo dibujo en los dos.
  *
- *   · Sólo foto: la foto entera, con link si tiene.
+ *   · Sólo foto: la foto entera, con link si tiene (a la tienda o a otro sitio,
+ *     en otra pestaña) y, si tiene, etiquetas de producto sobre la foto.
  *   · Con título: el texto sobre la foto (con un velo para que se lea) o sobre
  *     un fondo de color; etiqueta, hasta 2 botones y, si hay, la tarjeta de un
  *     producto con su foto y su precio.
@@ -13,8 +15,9 @@ import Link from "next/link";
  * pantalla: así la vista previa del backoffice puede mostrar cómo queda en un
  * celular aunque se esté en la compu.
  *
- * Los links son sólo de la tienda (la API ya lo exige): se dibujan con
- * next/link. En la vista previa (`vista`) no llevan a ningún lado.
+ * Los botones y la tarjeta llevan sólo a la tienda (la API ya lo exige): se
+ * dibujan con next/link. El banner entero puede llevar a otro sitio (https).
+ * En la vista previa (`vista`) no llevan a ningún lado.
  */
 /** Lo que va adentro de un link (sin depender de los tipos de React desde este paquete). */
 type Hijos = Parameters<typeof Link>[0]["children"];
@@ -26,6 +29,8 @@ export interface BannerVista {
   botones: Array<{ texto: string; enlace: string; estilo: "lleno" | "borde" }>;
   fondo: "marca" | "tinta" | "ahorro" | "oferta" | "crema" | "rosa" | "arena"; alineacion: "izquierda" | "centro";
   producto: { slug: string; nombre: string; precio: number; precioLista: number | null; foto: { clave: string; alt: string | null } | null } | null;
+  /** sólo en los banners de imagen (sin título) */
+  etiquetas?: EtiquetaVista[];
 }
 
 const FONDO: Record<BannerVista["fondo"], string> = {
@@ -35,6 +40,11 @@ const FONDO: Record<BannerVista["fondo"], string> = {
 const OSCURO: Record<BannerVista["fondo"], boolean> = { marca: true, tinta: true, ahorro: true, oferta: true, crema: false, rosa: false, arena: false };
 /** Sólo una ruta de esta tienda (tercera llave: la base y la API ya lo exigen). */
 const propio = (e: string | null | undefined) => (e && /^\/(?![/\\])\S*$/.test(e) ? e : null);
+/** Otro sitio: sólo https y sin usuario@ (la API ya lo exige; tercera llave, como `propio`). */
+const externo = (e: string | null | undefined) => {
+  if (!e || !/^https:\/\/[^\s/\\][^\s\\]*$/.test(e)) return null;
+  try { const u = new URL(e); return u.protocol === "https:" && !u.username && !u.password ? e : null; } catch { return null; }
+};
 
 export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista = false, movil = false, prioridad = false }: {
   b: BannerVista;
@@ -53,6 +63,23 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
     if (!destino || vista) return <span className={clase} aria-label={etiqueta}>{hijos}</span>;
     return <Link href={destino} className={clase} aria-label={etiqueta}>{hijos}</Link>;
   };
+  /**
+   * El banner entero: a una página de la tienda o a otro sitio (en otra pestaña).
+   * Sólo foto: el nombre del link es el `alt`. Con título, el texto que se ve.
+   */
+  const irBanner = (clase: string, hijos: Hijos) => {
+    const afuera = externo(b.enlace);
+    const nombre = b.titulo ? undefined : b.alt;
+    if (afuera && !vista) {
+      return (
+        <a href={afuera} target="_blank" rel="noopener noreferrer" className={clase} aria-label={nombre && `${nombre} (se abre en otra pestaña)`}>
+          {hijos}{!nombre && <span className="sr-only"> (se abre en otra pestaña)</span>}
+        </a>
+      );
+    }
+    return ir(b.enlace, clase, hijos, nombre);
+  };
+  const etiquetas = !b.titulo ? b.etiquetas ?? [] : [];
   const fotoDe = b.foto && (movil && b.fotoMovil ? b.fotoMovil : b.foto);
   // El <picture> es el marco que recorta la foto: al entrar se acomoda con un zoom suave y no tiene
   // que asomar (ni hacer que el banner «desborde») mientras está agrandada.
@@ -62,12 +89,17 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
       <img src={srcBanner(fotoDe.clave)} srcSet={srcSetBanner(fotoDe.clave)} sizes="100vw" alt={b.titulo ? "" : b.alt}
         width={fotoDe.ancho ?? 2400} height={fotoDe.alto ?? 900}
         loading={prioridad ? "eager" : "lazy"} fetchPriority={prioridad ? "high" : "auto"} decoding="async"
-        className={`banner-foto ${b.titulo ? "block size-full object-cover" : "block h-auto max-h-[78vh] w-full object-cover"}`} />
+        // Con etiquetas, la foto entera y sin recortar: los puntos van en % de la foto.
+        className={`banner-foto ${b.titulo ? "block size-full object-cover" : etiquetas.length ? "block h-auto w-full" : "block h-auto max-h-[78vh] w-full object-cover"}`} />
     </picture>
   );
 
-  // Sólo foto: como siempre.
-  if (!b.titulo) return b.enlace && !vista ? ir(b.enlace, "block", foto, b.alt) : <>{foto}</>;
+  // Sólo foto: con su link y sus etiquetas, si tiene. Las etiquetas van al lado del link, no adentro (no se anidan).
+  if (!b.titulo) {
+    const conLink = b.enlace && !vista ? irBanner("block", foto) : <>{foto}</>;
+    if (!etiquetas.length) return conLink;
+    return <Etiquetas etiquetas={etiquetas} fotoMovil={!!b.fotoMovil} vista={vista} movil={movil} srcProducto={srcProducto} pesos={pesos}>{conLink}</Etiquetas>;
+  }
 
   const sobreFoto = !!b.foto;
   const claro = sobreFoto || OSCURO[b.fondo];
@@ -79,7 +111,7 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
         : claro ? "border-2 border-white text-white hover:bg-white/10" : "border-2 border-tinta text-tinta hover:bg-tinta/5"
     }`;
 
-  return (
+  const contenido = (
     <div className={`@container relative isolate flex h-full min-h-[460px] items-center overflow-hidden ${sobreFoto ? "bg-tinta text-white" : FONDO[b.fondo]}`}>
       {sobreFoto ? (
         <>
@@ -131,4 +163,6 @@ export function Banner({ b, srcBanner, srcSetBanner, srcProducto, pesos, vista =
       </div>
     </div>
   );
+  // Sin botones ni producto, tocar cualquier parte lleva al link del banner (la API sólo lo manda en ese caso).
+  return b.enlace && !b.botones.length && !b.producto && !vista ? irBanner("block h-full", contenido) : contenido;
 }
