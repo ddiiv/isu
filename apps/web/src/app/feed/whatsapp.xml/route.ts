@@ -1,5 +1,5 @@
 import {
-  descripcionAutomatica, detalleWhatsapp, feedXml, itemWhatsapp, itemsFeed, itemsFeedMayorista, publicoDePortal, tipoDesdePortal, variantesWhatsapp,
+  descripcionAutomatica, feedXml, guiaEnTexto, itemWhatsapp, itemsFeed, itemsFeedMayorista, publicoDePortal, tipoDesdePortal, variantesWhatsapp,
   type ItemFeed, type ProductoDetalle,
 } from "@isu/shared";
 import { obtenerConfig, obtenerProducto, obtenerSlugs } from "@/lib/api";
@@ -15,7 +15,10 @@ import { contextoSeo } from "@/lib/seo";
  * talle) con las fotos de cada color (sin propias, las generales; sin ninguna, la
  * imagen de la marca) y una marcada "principal" para los conjuntos (ver
  * variantesWhatsapp). Si no, un solo artículo con lo del portal (itemWhatsapp).
- * Sin stock sale igual, avisando. El link lleva al portal.
+ * Sin stock sale igual, avisando; el stock es el de Stocker en todos los locales
+ * que venden (no sólo los que abastecen lo online), y si Stocker no contesta, el
+ * de la tienda. La guía de talles de la tienda va en la descripción. El link
+ * lleva al portal.
  *
  * Meta reemplaza el catálogo con cada carga: lo que no viene se borra. Por eso,
  * si el portal o la API fallan (aunque sea en una sola ficha) o el resultado
@@ -42,6 +45,28 @@ async function catalogoDelPortal(portal: string): Promise<CatalogoPortal | null>
   }
 }
 
+/**
+ * SKU (mayúsculas) → unidades en todos los locales de Stocker que venden, para avisar "poco stock".
+ * null si no se puede: el aviso usa el stock de la tienda y el catálogo sale igual.
+ */
+async function stockDeStocker(): Promise<Map<string, number> | null> {
+  const [url, token] = [process.env.STOCKER_API_URL, process.env.STOCKER_TOKEN];
+  if (!url || !token) return null;
+  try {
+    const r = await fetch(`${url.replace(/\/+$/, "")}/api/integraciones/tienda/catalogo?locales=todos`, {
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(60_000),
+    });
+    if (!r.ok) return null;
+    const stock = new Map<string, number>();
+    for (const p of ((await r.json()) as { productos?: { variantes?: { sku?: unknown; publicable?: unknown }[] }[] }).productos ?? []) {
+      for (const v of p.variantes ?? []) if (typeof v.sku === "string") stock.set(v.sku.trim().toUpperCase(), Math.max(0, Number(v.publicable) || 0));
+    }
+    return stock;
+  } catch {
+    return null;
+  }
+}
+
 const noDisponible = () => new Response("Catálogo mayorista no disponible", { status: 503, headers: { "cache-control": "no-store", "retry-after": "900" } });
 
 export async function GET() {
@@ -56,7 +81,8 @@ export async function GET() {
   const categorias = new Map((catalogo.categorias ?? []).map((c) => [c.id, texto(c.nombre)]));
   const items: ItemFeed[] = [];
   try {
-    const [slugs, config] = await Promise.all([obtenerSlugs(), obtenerConfig()]);
+    const [slugs, config, stock] = await Promise.all([obtenerSlugs(), obtenerConfig(), stockDeStocker()]);
+    if (!stock) console.warn("[feed whatsapp] Stocker no dio el stock de todos los locales: el aviso de poco stock usa el de la tienda");
     const ctx = contextoSeo(config);
     // De a 8, para no pedirle a la API cientos de fichas a la vez. Una ficha que falla tira todo (ver arriba); un 404 es un producto que se despublicó.
     const tienda = new Map<string, ProductoDetalle>();
@@ -71,12 +97,13 @@ export async function GET() {
       vistos.add(sku.toUpperCase());
       const genero = texto(pp.genero);
       const tipoPortal = tipoDesdePortal(genero, categorias.get(pp.categoriaId) ?? "");
-      const combinaciones = (pp.combinaciones ?? []).map((c) => ({ color: texto(c.color), talle: texto(c.talle), precio: Number(c.precio) }));
+      const combinaciones = (pp.combinaciones ?? []).map((c) => ({ sku: texto(c.sku).toUpperCase(), color: texto(c.color), talle: texto(c.talle), precio: Number(c.precio) }));
       const p = tienda.get(sku.toUpperCase());
       if (p) {
-        const detalle = detalleWhatsapp(combinaciones, Number(pp.precio));
-        const descripcion = [p.descripcion?.trim() || descripcionAutomatica(p, ctx.marca), detalle?.texto].filter(Boolean).join("\n\n");
-        const variantes = itemsFeedMayorista(itemsFeed(p, ctx, descripcion, { soloFotosDelColor: true, sinFoto: `${ctx.sitio}/icon.png` }), precios, portal);
+        const descripcion = [p.descripcion?.trim() || descripcionAutomatica(p, ctx.marca), guiaEnTexto(p.guiaTalles)].filter(Boolean).join("\n\n");
+        const variantes = itemsFeedMayorista(itemsFeed(p, ctx, descripcion, { soloFotosDelColor: true, sinFoto: `${ctx.sitio}/icon.png` }), precios, portal)
+          // El stock de Stocker manda; un SKU que no vino (catálogo cortado) queda con el de la tienda.
+          .map((v) => { const n = stock?.get(v.id.trim().toUpperCase()); return n === undefined ? v : { ...v, availability: n > 0 ? "in_stock" as const : "out_of_stock" as const }; });
         // Si en la tienda sólo dice "Mujer", la categoría del portal completa el tipo para que caiga en su conjunto.
         const tipo = p.migas.length > 1 ? p.migas.map((m) => m.nombre).join(" > ") : tipoPortal;
         if (variantes.length) {
@@ -88,8 +115,8 @@ export async function GET() {
         sku, titulo: p?.nombre ?? (texto(pp.titulo) || sku), descripcion: texto(pp.descripcion), combinaciones, precio: Number(pp.precio),
         fotos: [pp.foto, ...(pp.fotos ?? []).map((f) => f.ruta)].map(texto).filter(Boolean).map((r) => new URL(r, portal).href),
         tipo: tipoPortal, ...publicoDePortal(genero),
-        // Sin variantes en la tienda no se sabe el stock: que lo confirme el asistente.
-        sinStock: false,
+        // Con el stock de Stocker se sabe; sin él, que lo confirme el asistente.
+        sinStock: !!stock && combinaciones.every((c) => !(Number(stock.get(c.sku)) > 0)),
       }, ctx, portal);
       if (item) items.push(item);
     }

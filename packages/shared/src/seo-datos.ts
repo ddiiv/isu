@@ -2,6 +2,7 @@ import type { FotoPublica, ProductoDetalle, ProductoTarjeta } from "./catalogo.j
 import { compararTalles } from "./talles.js";
 import { formatearPesos } from "./plata.js";
 import type { ResenaPublica } from "./resenas.js";
+import type { GuiaPublica } from "./guias.js";
 
 /*
  * Lo que la tienda le dice a Google de cada página: datos estructurados
@@ -411,17 +412,29 @@ export interface ProductoWhatsapp {
  * sin stock, la descripción lo avisa (el asistente confirma en la charla). Colores, talles y el rango
  * de precio van en la descripción; el precio es el más bajo. Sin ningún precio no se puede publicar.
  */
+// Sin repetir por mayúsculas ("3XL" y "3Xl" en Stocker): queda la primera forma que aparece.
+function unicos(xs: (string | null | undefined)[]): string[] {
+  const vistos = new Map<string, string>();
+  for (const x of xs.map((y) => y?.trim())) if (x && !vistos.has(x.toLowerCase())) vistos.set(x.toLowerCase(), x);
+  return [...vistos.values()];
+}
+
+/** La guía de talles de la tienda en texto, para la descripción del catálogo de WhatsApp ("M: Pecho 50–52 · Largo 70"). */
+export function guiaEnTexto(g: GuiaPublica | null | undefined): string | null {
+  if (!g?.filas.length) return null;
+  const cm = (r: readonly [number, number] | null | undefined) => (r ? (r[0] === r[1] ? `${r[0]}` : `${r[0]}–${r[1]}`) : null);
+  const filas = g.filas.map((f) => {
+    const medidas = g.medidas.map((m, i) => { const v = cm(f.valores[i]); return v && `${m.nombre} ${v}`; }).filter(Boolean);
+    return medidas.length ? `${f.talle}: ${medidas.join(" · ")}` : null;
+  }).filter(Boolean);
+  return filas.length ? ["Guía de talles (en cm):", ...filas, g.nota?.trim()].filter(Boolean).join("\n") : null;
+}
+
 export function detalleWhatsapp(combinaciones: ProductoWhatsapp["combinaciones"], precio?: number | null): { desde: number; texto: string } | null {
   const pesos = combinaciones.map((c) => Number(c.precio)).filter((n) => n > 0);
   if (!pesos.length && Number(precio) > 0) pesos.push(Number(precio));
   if (!pesos.length) return null;
   const [desde, hasta] = [Math.min(...pesos), Math.max(...pesos)];
-  // Sin repetir por mayúsculas ("3XL" y "3Xl" en Stocker): queda la primera forma que aparece.
-  const unicos = (xs: (string | null | undefined)[]) => {
-    const vistos = new Map<string, string>();
-    for (const x of xs.map((y) => y?.trim())) if (x && !vistos.has(x.toLowerCase())) vistos.set(x.toLowerCase(), x);
-    return [...vistos.values()];
-  };
   const colores = unicos(combinaciones.map((c) => c.color));
   const talles = unicos(combinaciones.map((c) => c.talle)).sort(compararTalles);
   const texto = [
@@ -468,28 +481,44 @@ export function itemWhatsapp(p: ProductoWhatsapp, ctx: Pick<ContextoSeo, "marca"
 
 /**
  * Las variantes de un producto de la tienda para WhatsApp. WhatsApp las agrupa en la ficha (elegís color
- * y talle), pero en la lista y en los conjuntos muestra cada una suelta: todas llevan el título del
- * producto y UNA queda como "principal" (custom_label_0) para que los conjuntos filtren un producto por
- * modelo. La principal: con stock, la de la foto principal y la más barata. Todas salen "disponibles";
- * la que no tiene stock lo avisa en la descripción.
+ * y talle), pero separa el producto si sus variantes no tienen el mismo precio o la misma descripción: se
+ * veía dos o tres veces. Por eso:
+ *  · un grupo por precio: los talles más caros van como otro producto, "· Talles especiales 3XL a 5XL";
+ *  · la misma descripción en todo el grupo, con lo que no tiene stock en una línea ("Poco stock en: …");
+ *  · todo el título del producto, y UNA variante "principal" por grupo (custom_label_0) para que los
+ *    conjuntos muestren un producto por modelo: con stock, la de la foto principal.
+ * Todas salen "disponibles": el asistente confirma el stock en la charla.
  */
 export function variantesWhatsapp(p: ProductoDetalle, ctx: Pick<ContextoSeo, "foto">, variantes: ItemFeed[], tipo: string): ItemFeed[] {
-  if (!variantes.length) return [];
   const portada = fotosDe(p, null)[0];
   const fotoPrincipal = portada ? aJpg(ctx.foto(portada, 1200)) : null;
-  const puntaje = (v: ItemFeed) => [v.availability === "in_stock" ? 0 : 1, v.image_link === fotoPrincipal ? 0 : 1, Number.parseFloat(v.price)];
-  const principal = [...variantes].sort((a, b) => {
-    const [x, y] = [puntaje(a), puntaje(b)];
-    return x[0]! - y[0]! || x[1]! - y[1]! || x[2]! - y[2]!;
-  })[0];
-  return variantes.map((v) => ({
-    ...v,
-    title: p.nombre.slice(0, 150),
-    description: [v.availability === "out_of_stock" && POCO_STOCK, v.description].filter(Boolean).join("\n\n").slice(0, 5000),
-    availability: "in_stock" as const,
-    product_type: tipo || v.product_type,
-    custom_label_0: v === principal ? "principal" : "",
-  }));
+  const porPrecio = new Map<string, ItemFeed[]>();
+  for (const v of variantes) porPrecio.set(v.price, [...(porPrecio.get(v.price) ?? []), v]);
+  const grupos = [...porPrecio.values()].sort((a, b) => Number.parseFloat(a[0]!.price) - Number.parseFloat(b[0]!.price));
+  return grupos.flatMap((grupo, n) => {
+    const talles = unicos(grupo.map((v) => v.size)).sort(compararTalles);
+    const titulo = n === 0 ? p.nombre : `${p.nombre} · Talles especiales ${talles.length > 1 ? `${talles[0]} a ${talles.at(-1)}` : talles[0] ?? ""}`.trim();
+    const sinStock = grupo.filter((v) => v.availability === "out_of_stock");
+    const porColor = new Map<string, string[]>();
+    for (const v of sinStock) porColor.set(v.color ?? "", [...(porColor.get(v.color ?? "") ?? []), v.size ?? ""]);
+    const aviso = !sinStock.length ? null
+      : sinStock.length === grupo.length ? POCO_STOCK
+        : `Poco stock en: ${[...porColor].map(([c, ts]) => `${c || "único color"} (${unicos(ts).sort(compararTalles).join(", ")})`).join(", ")}. Consultanos antes de pedir.`;
+    const colores = unicos(grupo.map((v) => v.color));
+    const descripcion = [aviso, grupo[0]!.description, [colores.length && `Colores: ${colores.join(", ")}.`, talles.length && `Talles: ${talles.join(", ")}.`].filter(Boolean).join("\n")]
+      .filter(Boolean).join("\n\n").slice(0, 5000);
+    const puntaje = (v: ItemFeed) => (v.availability === "in_stock" ? 0 : 2) + (v.image_link === fotoPrincipal ? 0 : 1);
+    const principal = [...grupo].sort((a, b) => puntaje(a) - puntaje(b))[0];
+    return grupo.map((v) => ({
+      ...v,
+      item_group_id: n === 0 ? p.sku : `${p.sku}-${n + 1}`,
+      title: titulo.slice(0, 150),
+      description: descripcion,
+      availability: "in_stock" as const,
+      product_type: tipo || v.product_type,
+      custom_label_0: v === principal ? "principal" : "",
+    }));
+  });
 }
 
 /**
