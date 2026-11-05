@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, feedXml, horarioSchema, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, feedXml, horarioSchema, itemPadreMayorista, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -211,6 +211,25 @@ describe("feed de Google Shopping", () => {
     const sinNada = producto({ colores: [{ clave: "negro", nombre: "Negro", hex: "#000", fotos: [foto("p/1/negro1")] }, { clave: "azul", nombre: "Azul", hex: "#00f", fotos: [] }], exhibicion: [] });
     expect(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }).map((i) => i.color)).toEqual(["Negro", "Negro"]);
     expect(itemsFeed(sinNada, ctx, "d").map((i) => i.color)).toContain("Azul");
+  });
+  it("WhatsApp: un artículo por producto, con el precio más bajo, stock si algún talle tiene y colores y talles en la descripción", () => {
+    const items = itemsFeed(producto(), ctx, "Descripción");
+    const precios = new Map(items.map((i, n) => [i.id.toUpperCase(), 10000 + n * 5000]));
+    const variantes = itemsFeedMayorista(items, precios, "https://m/");
+    const padre = itemPadreMayorista(producto(), ctx, variantes)!;
+    expect(padre).toMatchObject({ id: "ISUABEPAN", item_group_id: "", title: producto().nombre, price: "10000.00 ARS", availability: "in_stock", color: null, size: null, link: "https://m/" });
+    expect(padre.description).toContain("Descripción");
+    expect(padre.description).toMatch(/Colores: .*Azul/);
+    expect(padre.description).toMatch(/Talles: .*S/);
+    expect(padre.description).toContain("según talle y color");
+    // La foto principal primero, y sin repetidas.
+    expect(new Set([padre.image_link, ...padre.additional_image_link]).size).toBe(1 + padre.additional_image_link.length);
+    const xml = feedXml([padre], ctx, { disponibilidadConEspacio: true });
+    expect(xml.match(/<item>/g)).toHaveLength(1);
+    expect(xml).not.toContain("item_group_id");
+    // Todo agotado: el producto sale agotado; sin variantes vendibles, no sale.
+    expect(itemPadreMayorista(producto(), ctx, variantes.map((v) => ({ ...v, availability: "out_of_stock" as const })))!.availability).toBe("out_of_stock");
+    expect(itemPadreMayorista(producto(), ctx, [])).toBeNull();
   });
   it("escapa caracteres de control que romperían el XML", () => {
     const items = itemsFeed(producto({ nombre: "Remera\u0001 «Box»" }), ctx, "d");
