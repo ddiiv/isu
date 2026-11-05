@@ -373,15 +373,54 @@ export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: str
  * en pesos. Sólo quedan las variantes con precio mayorista > 0; sin oferta, sin
  * envío y con el link del portal (la tienda minorista tiene otros precios).
  */
+// Meta no documenta WebP: la API sirve la misma foto en .jpg.
+// shortcut: con CDN (R2) la foto no es de /fotos/ y queda en .webp, porque la .jpg no existe ahí; subir también las .jpg antes de usar CDN en este feed.
+const aJpg = (u: string) => u.replace(/(\/fotos\/p\/[^?#]*)\.webp$/, "$1.jpg");
+
 export function itemsFeedMayorista(items: ItemFeed[], precios: ReadonlyMap<string, number>, link: string): ItemFeed[] {
-  // Meta no documenta WebP: la API sirve la misma foto en .jpg.
-  // shortcut: con CDN (R2) la foto no es de /fotos/ y queda en .webp, porque la .jpg no existe ahí; subir también las .jpg antes de usar CDN en este feed.
-  const aJpg = (u: string) => u.replace(/(\/fotos\/p\/[^?#]*)\.webp$/, "$1.jpg");
   return items.flatMap((i) => {
     const mayorista = precios.get(i.id.trim().toUpperCase());
     if (!mayorista || !(mayorista > 0)) return [];
     return [{ ...i, link, price: `${mayorista.toFixed(2)} ARS`, sale_price: null, shipping_price: null, image_link: aJpg(i.image_link), additional_image_link: i.additional_image_link.map(aJpg) }];
   });
+}
+
+/**
+ * Las variantes mayoristas de un producto (itemsFeedMayorista) como UN artículo: el catálogo de
+ * WhatsApp mostraba cada variante suelta ("Cairo Remera - Blanco - Talle L") y el dueño quiere ver
+ * los productos. SKU padre, el título del producto, el precio más bajo, disponible si algún color o
+ * talle tiene stock, la foto principal y después las de cada color; colores, talles y el rango de
+ * precio van en la descripción. Sin variantes vendibles, null.
+ */
+export function itemPadreMayorista(p: ProductoDetalle, ctx: ContextoSeo, items: ItemFeed[]): ItemFeed | null {
+  const [primera] = items;
+  if (!primera) return null;
+  const principal = fotosDe(p, null)[0];
+  const fotos = [...new Set([...(principal ? [aJpg(ctx.foto(principal, 1200))] : []), ...items.flatMap((i) => [i.image_link, ...i.additional_image_link])])];
+  const pesos = items.map((i) => Number.parseFloat(i.price));
+  const [desde, hasta] = [Math.min(...pesos), Math.max(...pesos)];
+  // Sin repetir por mayúsculas ("3XL" y "3Xl" en Stocker): queda la primera forma que aparece.
+  const unicos = (xs: (string | null)[]) => [...new Map(xs.filter((x): x is string => !!x).map((x) => [x.toLowerCase(), x])).values()];
+  const colores = unicos(items.map((i) => i.color));
+  const talles = unicos(items.map((i) => i.size)).sort(compararTalles);
+  const detalle = [
+    colores.length && `Colores: ${colores.join(", ")}.`,
+    talles.length && `Talles: ${talles.join(", ")}.`,
+    desde !== hasta && `Precio por mayor de ${formatearPesos(desde * 100)} a ${formatearPesos(hasta * 100)} según talle y color.`,
+  ].filter(Boolean).join("\n");
+  return {
+    ...primera,
+    id: p.sku,
+    item_group_id: "",
+    title: p.nombre.slice(0, 150),
+    description: [primera.description, detalle].filter(Boolean).join("\n\n").slice(0, 5000),
+    image_link: fotos[0]!,
+    additional_image_link: fotos.slice(1, 10),
+    availability: items.some((i) => i.availability === "in_stock") ? "in_stock" : "out_of_stock",
+    price: `${desde.toFixed(2)} ARS`,
+    color: null,
+    size: null,
+  };
 }
 
 const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!)

@@ -55,10 +55,10 @@ hacer una vez (cuentas de Google, día del cambio de dominio).
 
 ## Catálogo de WhatsApp (precios mayoristas)
 
-`https://<dominio>/feed/whatsapp.xml` es el mismo feed con las fotos y los textos de la tienda, pero con los **precios del portal mayorista**: sólo salen las variantes (por SKU) que el portal vende con precio mayor a 0, sin oferta ni envío, y el link lleva al portal (`MAYORISTA_URL`). Las fotos van en `.jpg` (Meta no documenta WebP). Si el portal no responde, el feed contesta **503** y Meta conserva el catálogo anterior: una fuente programada reemplaza el catálogo, así que un feed vacío lo borraría entero.
+`https://<dominio>/feed/whatsapp.xml` es el mismo feed con las fotos y los textos de la tienda, pero con los **precios del portal mayorista** y **un artículo por producto** (SKU padre: WhatsApp mostraba cada variante suelta). Se arma con las variantes que el portal vende con precio mayor a 0: el precio más bajo, disponible si algún color o talle tiene stock, y colores, talles y rango de precio en la descripción. Sin oferta ni envío, y el link lleva al portal (`MAYORISTA_URL`). El cliente elige color y talle en la charla con el asistente. Las fotos van en `.jpg` (Meta no documenta WebP). Si el portal no responde, el feed contesta **503** y Meta conserva el catálogo anterior: una fuente programada reemplaza el catálogo, así que un feed vacío lo borraría entero.
 
 1. **Meta Commerce Manager** (business.facebook.com/commerce): elegí el catálogo (o creá uno) → *Fuentes de datos → Agregar artículos → Lista de datos programada*.
-2. URL `https://<dominio>/feed/whatsapp.xml`, moneda ARS, frecuencia **diaria**. Revisá en *Diagnóstico* que no haya artículos rechazados.
+2. URL `https://<dominio>/feed/whatsapp.xml`, moneda ARS, frecuencia **cada hora** (así el stock queda como mucho una hora atrás). Revisá en *Diagnóstico* que no haya artículos rechazados.
 3. **WhatsApp Manager** → el número mayorista → *Catálogo*: conectá ese catálogo y dejá visible el ícono de carrito.
 
 ## El día del cambio de dominio (Jumpseller → tienda nueva)
