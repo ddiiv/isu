@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, detalleWhatsapp, feedXml, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -212,21 +212,45 @@ describe("feed de Google Shopping", () => {
     expect(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }).map((i) => i.color)).toEqual(["Negro", "Negro"]);
     expect(itemsFeed(sinNada, ctx, "d").map((i) => i.color)).toContain("Azul");
   });
-  it("WhatsApp: variantes con el título del producto, todas disponibles, y una sola principal para los conjuntos", () => {
-    const precios = new Map([["ISUABEPANNEGS", 12000], ["ISUABEPANNEGM", 10000], ["ISUABEPANAZUS", 9000]]);
+  it("WhatsApp: variantes con el título del producto, la misma descripción, todas disponibles y una sola principal", () => {
+    const precios = new Map([["ISUABEPANNEGS", 10000], ["ISUABEPANNEGM", 10000], ["ISUABEPANAZUS", 10000]]);
     const variantes = itemsFeedMayorista(itemsFeed(producto(), ctx, "Descripción", { soloFotosDelColor: true }), precios, "https://m/");
     const wa = variantesWhatsapp(producto(), ctx, variantes, "Hombre > Pantalones");
     expect(wa.map((v) => v.item_group_id)).toEqual(["ISUABEPAN", "ISUABEPAN", "ISUABEPAN"]);
     expect(new Set(wa.map((v) => v.title))).toEqual(new Set(["Abel Pantalón Hombre"]));
     expect(wa.every((v) => v.availability === "in_stock")).toBe(true);
-    // La principal: con stock y con la foto principal; entre esas, la más barata (la azul es más barata pero no tiene stock).
-    expect(wa.filter((v) => v.custom_label_0 === "principal").map((v) => v.id)).toEqual(["ISUABEPANNEGM"]);
-    // La que no tiene stock sale igual, avisando.
-    expect(wa.find((v) => v.id === "ISUABEPANAZUS")!.description).toMatch(/^Poco stock/);
-    expect(wa.find((v) => v.id === "ISUABEPANNEGS")!.description).toBe("Descripción");
+    // WhatsApp separaba el producto si las descripciones no eran iguales: una sola, con lo que no tiene stock en una línea.
+    expect(new Set(wa.map((v) => v.description)).size).toBe(1);
+    expect(wa[0]!.description).toMatch(/^Poco stock en: Azul \(S\)\. Consultanos antes de pedir\.\n\nDescripción\n\nColores: Negro, Azul\.\nTalles: S, M\.$/);
+    // La principal: con stock y con la foto principal (la azul no tiene stock).
+    expect(wa.filter((v) => v.custom_label_0 === "principal").map((v) => v.id)).toEqual(["ISUABEPANNEGS"]);
     expect(feedXml(wa, ctx)).toContain("<g:custom_label_0>principal</g:custom_label_0>");
     // La de Google no la lleva.
     expect(feedXml(itemsFeed(producto(), ctx, "d"), ctx)).not.toContain("custom_label_0");
+  });
+  it("WhatsApp: los talles más caros van como otro producto que lo aclara, con su propia principal", () => {
+    const precios = new Map([["ISUABEPANNEGS", 10000], ["ISUABEPANNEGM", 12000], ["ISUABEPANAZUS", 10000]]);
+    const variantes = itemsFeedMayorista(itemsFeed(producto(), ctx, "d", { soloFotosDelColor: true }), precios, "https://m/");
+    const wa = variantesWhatsapp(producto(), ctx, variantes, "Hombre > Pantalones");
+    const grupo = (id: string) => wa.find((v) => v.id === id)!;
+    expect([grupo("ISUABEPANNEGS").item_group_id, grupo("ISUABEPANAZUS").item_group_id, grupo("ISUABEPANNEGM").item_group_id]).toEqual(["ISUABEPAN", "ISUABEPAN", "ISUABEPAN-2"]);
+    expect(grupo("ISUABEPANNEGM").title).toBe("Abel Pantalón Hombre · Talles especiales M");
+    expect(grupo("ISUABEPANNEGS").title).toBe("Abel Pantalón Hombre");
+    // Cada grupo con un solo precio y una principal.
+    for (const g of ["ISUABEPAN", "ISUABEPAN-2"]) {
+      const del = wa.filter((v) => v.item_group_id === g);
+      expect(new Set(del.map((v) => v.price)).size).toBe(1);
+      expect(del.filter((v) => v.custom_label_0 === "principal")).toHaveLength(1);
+    }
+  });
+  it("la guía de talles de la tienda en texto, para la descripción", () => {
+    const guia = {
+      nombre: "Remeras", tipo: "adulto" as const, nota: "Medidas de la prenda.",
+      medidas: [{ clave: "pecho", nombre: "Pecho", tipo: "prenda" as const, ayuda: "" }, { clave: "largo", nombre: "Largo", tipo: "prenda" as const, ayuda: "" }],
+      filas: [{ talle: "S", valores: [[48, 50], [68, 68]] as [number, number][] }, { talle: "M", valores: [[50, 52], null] }],
+    };
+    expect(guiaEnTexto(guia)).toBe("Guía de talles (en cm):\nS: Pecho 48–50 · Largo 68\nM: Pecho 50–52\nMedidas de la prenda.");
+    expect(guiaEnTexto(null)).toBeNull();
   });
   it("WhatsApp: una variante sin fotos sale con la imagen de la marca en vez de quedar afuera", () => {
     const sinFotos = producto({ colores: [{ clave: "negro", nombre: "Negro", hex: "#000", fotos: [] }, { clave: "azul", nombre: "Azul", hex: "#00f", fotos: [] }], exhibicion: [] });
