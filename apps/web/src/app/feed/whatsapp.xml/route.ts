@@ -1,18 +1,21 @@
-import { descripcionAutomatica, feedXml, itemPadreMayorista, itemsFeed, itemsFeedMayorista, type ItemFeed } from "@isu/shared";
+import {
+  descripcionAutomatica, detalleWhatsapp, feedXml, itemWhatsapp, itemsFeed, itemsFeedMayorista, publicoDePortal, tipoDesdePortal, variantesWhatsapp,
+  type ItemFeed, type ProductoDetalle,
+} from "@isu/shared";
 import { obtenerConfig, obtenerProducto, obtenerSlugs } from "@/lib/api";
 import { destinoMayorista } from "@/lib/mayorista";
 import { contextoSeo } from "@/lib/seo";
 
 /*
  * Feed para el catálogo de WhatsApp (Meta Commerce Manager → Fuente de datos →
- * "Lista de datos programada" con https://<tienda>/feed/whatsapp.xml, una vez
- * por día). Fotos y textos de la tienda, pero con los PRECIOS MAYORISTAS del
- * portal (/api/catalogo): ese WhatsApp vende por mayor. Un artículo por
- * producto (WhatsApp mostraba cada variante suelta), armado con las variantes
- * que el portal vende con precio y que tienen foto de su color (o generales):
- * nunca la de otro color. El link lleva al portal. La
- * descripción es la de la ficha, sin la frase de precios y cuotas minoristas
- * que arma descripcionProducto para Google.
+ * "Lista de datos programada" con https://<tienda>/feed/whatsapp.xml, cada hora).
+ * Ese WhatsApp vende por mayor: la lista es la del portal (/api/catalogo), TODOS
+ * sus productos, con sus precios mayoristas. Si el producto está publicado en la
+ * tienda, van sus variantes (WhatsApp las agrupa en la ficha para elegir color y
+ * talle) con las fotos de cada color (sin propias, las generales; sin ninguna, la
+ * imagen de la marca) y una marcada "principal" para los conjuntos (ver
+ * variantesWhatsapp). Si no, un solo artículo con lo del portal (itemWhatsapp).
+ * Sin stock sale igual, avisando. El link lleva al portal.
  *
  * Meta reemplaza el catálogo con cada carga: lo que no viene se borra. Por eso,
  * si el portal o la API fallan (aunque sea en una sola ficha) o el resultado
@@ -21,22 +24,19 @@ import { contextoSeo } from "@/lib/seo";
  */
 export const dynamic = "force-dynamic";
 
-type CatalogoPortal = { productos?: { combinaciones?: { sku?: unknown; precio?: unknown }[] }[] };
+type ProductoPortal = {
+  sku?: unknown; titulo?: unknown; descripcion?: unknown; precio?: unknown; genero?: unknown; categoriaId?: unknown;
+  foto?: unknown; fotos?: { ruta?: unknown }[]; combinaciones?: { sku?: unknown; color?: unknown; talle?: unknown; precio?: unknown }[];
+};
+type CatalogoPortal = { productos?: ProductoPortal[]; categorias?: { id?: unknown; nombre?: unknown }[] };
 
-/** SKU de variante en mayúsculas → precio mayorista en pesos; null si el portal no contesta. */
-async function preciosDelPortal(portal: string): Promise<Map<string, number> | null> {
+const texto = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+/** El catálogo del portal; null si no contesta. */
+async function catalogoDelPortal(portal: string): Promise<CatalogoPortal | null> {
   try {
     const r = await fetch(new URL("/api/catalogo", portal), { cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000) });
-    if (!r.ok) return null;
-    // Combinación por combinación: una rara se saltea, no deja sin catálogo a todas.
-    const precios = new Map<string, number>();
-    for (const p of ((await r.json()) as CatalogoPortal).productos ?? []) {
-      for (const c of p.combinaciones ?? []) {
-        const precio = Number(c.precio);
-        if (typeof c.sku === "string" && precio > 0) precios.set(c.sku.trim().toUpperCase(), precio);
-      }
-    }
-    return precios;
+    return r.ok ? ((await r.json()) as CatalogoPortal) : null;
   } catch {
     return null;
   }
@@ -46,21 +46,52 @@ const noDisponible = () => new Response("Catálogo mayorista no disponible", { s
 
 export async function GET() {
   const portal = destinoMayorista();
-  const precios = await preciosDelPortal(portal);
-  if (!precios?.size) return noDisponible();
+  const catalogo = await catalogoDelPortal(portal);
+  if (!catalogo?.productos?.length) return noDisponible();
+  // SKU de variante en mayúsculas → precio mayorista en pesos (combinación por combinación: una rara se saltea).
+  const precios = new Map<string, number>();
+  for (const p of catalogo.productos) {
+    for (const c of p.combinaciones ?? []) if (texto(c.sku) && Number(c.precio) > 0) precios.set(texto(c.sku).toUpperCase(), Number(c.precio));
+  }
+  const categorias = new Map((catalogo.categorias ?? []).map((c) => [c.id, texto(c.nombre)]));
   const items: ItemFeed[] = [];
   try {
     const [slugs, config] = await Promise.all([obtenerSlugs(), obtenerConfig()]);
     const ctx = contextoSeo(config);
     // De a 8, para no pedirle a la API cientos de fichas a la vez. Una ficha que falla tira todo (ver arriba); un 404 es un producto que se despublicó.
+    const tienda = new Map<string, ProductoDetalle>();
     for (let i = 0; i < slugs.length; i += 8) {
-      const fichas = await Promise.all(slugs.slice(i, i + 8).map((s) => obtenerProducto(s.slug)));
-      for (const p of fichas) {
-        if (!p) continue;
-        const variantes = itemsFeedMayorista(itemsFeed(p, ctx, p.descripcion?.trim() || descripcionAutomatica(p, ctx.marca), { soloFotosDelColor: true }), precios, portal);
-        const padre = itemPadreMayorista(p, ctx, variantes);
-        if (padre) items.push(padre);
+      for (const p of await Promise.all(slugs.slice(i, i + 8).map((s) => obtenerProducto(s.slug)))) if (p) tienda.set(p.sku.trim().toUpperCase(), p);
+    }
+    const vistos = new Set<string>();
+    for (const pp of catalogo.productos) {
+      const sku = texto(pp.sku);
+      // En el portal hay SKUs repetidos con otras mayúsculas ("ISUFluSHO"): uno solo.
+      if (!sku || vistos.has(sku.toUpperCase())) continue;
+      vistos.add(sku.toUpperCase());
+      const genero = texto(pp.genero);
+      const tipoPortal = tipoDesdePortal(genero, categorias.get(pp.categoriaId) ?? "");
+      const combinaciones = (pp.combinaciones ?? []).map((c) => ({ color: texto(c.color), talle: texto(c.talle), precio: Number(c.precio) }));
+      const p = tienda.get(sku.toUpperCase());
+      if (p) {
+        const detalle = detalleWhatsapp(combinaciones, Number(pp.precio));
+        const descripcion = [p.descripcion?.trim() || descripcionAutomatica(p, ctx.marca), detalle?.texto].filter(Boolean).join("\n\n");
+        const variantes = itemsFeedMayorista(itemsFeed(p, ctx, descripcion, { soloFotosDelColor: true, sinFoto: `${ctx.sitio}/icon.png` }), precios, portal);
+        // Si en la tienda sólo dice "Mujer", la categoría del portal completa el tipo para que caiga en su conjunto.
+        const tipo = p.migas.length > 1 ? p.migas.map((m) => m.nombre).join(" > ") : tipoPortal;
+        if (variantes.length) {
+          items.push(...variantesWhatsapp(p, ctx, variantes, tipo));
+          continue;
+        }
       }
+      const item = itemWhatsapp({
+        sku, titulo: p?.nombre ?? (texto(pp.titulo) || sku), descripcion: texto(pp.descripcion), combinaciones, precio: Number(pp.precio),
+        fotos: [pp.foto, ...(pp.fotos ?? []).map((f) => f.ruta)].map(texto).filter(Boolean).map((r) => new URL(r, portal).href),
+        tipo: tipoPortal, ...publicoDePortal(genero),
+        // Sin variantes en la tienda no se sabe el stock: que lo confirme el asistente.
+        sinStock: false,
+      }, ctx, portal);
+      if (item) items.push(item);
     }
     if (!items.length) return noDisponible();
     return new Response(feedXml(items, ctx, { disponibilidadConEspacio: true }), {

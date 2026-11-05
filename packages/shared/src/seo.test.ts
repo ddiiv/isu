@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, feedXml, horarioSchema, itemPadreMayorista, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, detalleWhatsapp, feedXml, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -212,24 +212,45 @@ describe("feed de Google Shopping", () => {
     expect(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }).map((i) => i.color)).toEqual(["Negro", "Negro"]);
     expect(itemsFeed(sinNada, ctx, "d").map((i) => i.color)).toContain("Azul");
   });
-  it("WhatsApp: un artículo por producto, con el precio más bajo, stock si algún talle tiene y colores y talles en la descripción", () => {
-    const items = itemsFeed(producto(), ctx, "Descripción");
-    const precios = new Map(items.map((i, n) => [i.id.toUpperCase(), 10000 + n * 5000]));
-    const variantes = itemsFeedMayorista(items, precios, "https://m/");
-    const padre = itemPadreMayorista(producto(), ctx, variantes)!;
-    expect(padre).toMatchObject({ id: "ISUABEPAN", item_group_id: "", title: producto().nombre, price: "10000.00 ARS", availability: "in_stock", color: null, size: null, link: "https://m/" });
-    expect(padre.description).toContain("Descripción");
-    expect(padre.description).toMatch(/Colores: .*Azul/);
-    expect(padre.description).toMatch(/Talles: .*S/);
-    expect(padre.description).toContain("según talle y color");
-    // La foto principal primero, y sin repetidas.
-    expect(new Set([padre.image_link, ...padre.additional_image_link]).size).toBe(1 + padre.additional_image_link.length);
-    const xml = feedXml([padre], ctx, { disponibilidadConEspacio: true });
-    expect(xml.match(/<item>/g)).toHaveLength(1);
-    expect(xml).not.toContain("item_group_id");
-    // Todo agotado: el producto sale agotado; sin variantes vendibles, no sale.
-    expect(itemPadreMayorista(producto(), ctx, variantes.map((v) => ({ ...v, availability: "out_of_stock" as const })))!.availability).toBe("out_of_stock");
-    expect(itemPadreMayorista(producto(), ctx, [])).toBeNull();
+  it("WhatsApp: variantes con el título del producto, todas disponibles, y una sola principal para los conjuntos", () => {
+    const precios = new Map([["ISUABEPANNEGS", 12000], ["ISUABEPANNEGM", 10000], ["ISUABEPANAZUS", 9000]]);
+    const variantes = itemsFeedMayorista(itemsFeed(producto(), ctx, "Descripción", { soloFotosDelColor: true }), precios, "https://m/");
+    const wa = variantesWhatsapp(producto(), ctx, variantes, "Hombre > Pantalones");
+    expect(wa.map((v) => v.item_group_id)).toEqual(["ISUABEPAN", "ISUABEPAN", "ISUABEPAN"]);
+    expect(new Set(wa.map((v) => v.title))).toEqual(new Set(["Abel Pantalón Hombre"]));
+    expect(wa.every((v) => v.availability === "in_stock")).toBe(true);
+    // La principal: con stock y con la foto principal; entre esas, la más barata (la azul es más barata pero no tiene stock).
+    expect(wa.filter((v) => v.custom_label_0 === "principal").map((v) => v.id)).toEqual(["ISUABEPANNEGM"]);
+    // La que no tiene stock sale igual, avisando.
+    expect(wa.find((v) => v.id === "ISUABEPANAZUS")!.description).toMatch(/^Poco stock/);
+    expect(wa.find((v) => v.id === "ISUABEPANNEGS")!.description).toBe("Descripción");
+    expect(feedXml(wa, ctx)).toContain("<g:custom_label_0>principal</g:custom_label_0>");
+    // La de Google no la lleva.
+    expect(feedXml(itemsFeed(producto(), ctx, "d"), ctx)).not.toContain("custom_label_0");
+  });
+  it("WhatsApp: una variante sin fotos sale con la imagen de la marca en vez de quedar afuera", () => {
+    const sinFotos = producto({ colores: [{ clave: "negro", nombre: "Negro", hex: "#000", fotos: [] }, { clave: "azul", nombre: "Azul", hex: "#00f", fotos: [] }], exhibicion: [] });
+    expect(itemsFeed(sinFotos, ctx, "d", { soloFotosDelColor: true })).toEqual([]);
+    const conRelleno = itemsFeed(sinFotos, ctx, "d", { soloFotosDelColor: true, sinFoto: "https://t/icon.png" });
+    expect(conRelleno.map((i) => i.image_link)).toEqual(["https://t/icon.png", "https://t/icon.png", "https://t/icon.png"]);
+  });
+  it("WhatsApp: un producto que sólo está en el portal sale como un artículo, con colores, talles y el precio más bajo", () => {
+    const combinaciones = [{ color: "Negro", talle: "XL", precio: 21000 }, { color: "Negro", talle: "S", precio: 17000 }, { color: "Blanco", talle: "s", precio: 17000 }];
+    // El formato de pesos pone un espacio duro después del "$".
+    expect(detalleWhatsapp(combinaciones)!.texto).toMatch(/^Colores: Negro, Blanco\.\nTalles: S, XL\.\nPrecio por mayor de \$\s17\.000 a \$\s21\.000 según talle y color\.$/);
+    const item = itemWhatsapp({ sku: "ISUSOFREM", titulo: "Soft Remera", descripcion: "", combinaciones, fotos: [], tipo: "Mujer > Remeras y tops", genero: "female", edad: "adult", sinStock: true }, ctx, "https://m/")!;
+    expect(item).toMatchObject({ id: "ISUSOFREM", item_group_id: "", price: "17000.00 ARS", availability: "in_stock", image_link: "https://www.isuwaya.com/icon.png", custom_label_0: "principal" });
+    expect(item.description).toMatch(/^Poco stock.*\n\nSoft Remera\n\nColores/s);
+    expect(itemWhatsapp({ sku: "X", titulo: "X", descripcion: "", combinaciones: [], fotos: [], tipo: "", genero: "unisex", edad: "adult", sinStock: false }, ctx, "https://m/")).toBeNull();
+  });
+  it("las categorías del portal caen en las de la tienda, que filtran los conjuntos", () => {
+    expect(tipoDesdePortal("Mujer", "Top")).toBe("Mujer > Remeras y tops");
+    expect(tipoDesdePortal("Mujer", "Musculosa")).toBe("Mujer > Remeras y tops");
+    expect(tipoDesdePortal("Hombre", "Remeras")).toBe("Hombre > Remeras");
+    expect(tipoDesdePortal("Hombre", "Buzos")).toBe("Hombre > Buzos y camperas");
+    expect(tipoDesdePortal("Niños", "Camperas")).toBe("Niños > Camperas");
+    expect(tipoDesdePortal("Niños", "Shorts")).toBe("Niños > Shorts y bermudas");
+    expect(tipoDesdePortal("Mujer", "Calzas")).toBe("Mujer > Pantalones y calzas");
   });
   it("escapa caracteres de control que romperían el XML", () => {
     const items = itemsFeed(producto({ nombre: "Remera\u0001 «Box»" }), ctx, "d");

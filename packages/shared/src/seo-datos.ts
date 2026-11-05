@@ -326,17 +326,19 @@ export interface ItemFeed {
   additional_image_link: string[]; availability: "in_stock" | "out_of_stock"; price: string; sale_price: string | null;
   brand: string; condition: "new"; color: string | null; size: string | null; gender: string; age_group: string;
   google_product_category: string; product_type: string; identifier_exists: "no"; shipping_price: string | null;
+  /** WhatsApp: "principal" en una variante por producto (los conjuntos filtran por esto). */
+  custom_label_0?: string;
 }
 
 /** Una fila por variante (talle × color), agrupadas por producto. Sin foto no se publica: Google la rechaza. */
-export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string, opciones: { soloFotosDelColor?: boolean } = {}): ItemFeed[] {
+export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string, opciones: { soloFotosDelColor?: boolean; sinFoto?: string } = {}): ItemFeed[] {
   const nombreColor = new Map(p.colores.map((c) => [c.clave, sinUnico(c.nombre)]));
   const publico = publicoDe(p.migas.map((m) => m.ruta));
   const pesos = (c: number) => `${precio(c)} ARS`;
   const items: ItemFeed[] = [];
   for (const v of p.variantes) {
     const fotos = opciones.soloFotosDelColor ? fotosDelColor(p, v.color) : fotosDe(p, v.color);
-    if (!fotos.length) continue;
+    if (!fotos.length && !opciones.sinFoto) continue;
     const color = v.color ? nombreColor.get(v.color) ?? null : null;
     const talle = sinUnico(v.talle);
     const rebajado = !!v.precioLista && v.precioLista > v.precio;
@@ -346,7 +348,7 @@ export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: str
       title: [p.nombre, color, talle && `Talle ${talle}`].filter(Boolean).join(" - ").slice(0, 150),
       description: descripcion.slice(0, 5000),
       link: v.color && p.colores.length > 1 ? `${ctx.sitio}/producto/${p.slug}?color=${v.color}` : `${ctx.sitio}/producto/${p.slug}`,
-      image_link: ctx.foto(fotos[0]!, 1200),
+      image_link: fotos[0] ? ctx.foto(fotos[0], 1200) : opciones.sinFoto!,
       additional_image_link: fotos.slice(1, 10).map((f) => ctx.foto(f, 1200)),
       availability: v.stock > 0 ? "in_stock" : "out_of_stock",
       price: pesos(rebajado ? v.precioLista! : v.precio),
@@ -385,42 +387,130 @@ export function itemsFeedMayorista(items: ItemFeed[], precios: ReadonlyMap<strin
   });
 }
 
+/** Un producto del portal mayorista, con lo que se sepa de él, para el catálogo de WhatsApp. */
+export interface ProductoWhatsapp {
+  sku: string;
+  titulo: string;
+  descripcion: string;
+  /** Lo que vende el portal, con el precio mayorista en pesos. */
+  combinaciones: { color?: string | null; talle?: string | null; precio?: number | null }[];
+  /** Precio del producto en pesos, si ninguna combinación trae el suyo. */
+  precio?: number | null;
+  /** Direcciones absolutas, la principal primero. Sin ninguna va la imagen de la marca. */
+  fotos: string[];
+  tipo: string;
+  genero: string;
+  edad: string;
+  /** Ningún color ni talle con stock: sale igual, avisando. */
+  sinStock: boolean;
+}
+
 /**
- * Las variantes mayoristas de un producto (itemsFeedMayorista) como UN artículo: el catálogo de
- * WhatsApp mostraba cada variante suelta ("Cairo Remera - Blanco - Talle L") y el dueño quiere ver
- * los productos. SKU padre, el título del producto, el precio más bajo, disponible si algún color o
- * talle tiene stock, la foto principal y después las de cada color; colores, talles y el rango de
- * precio van en la descripción. Sin variantes vendibles, null.
+ * Un artículo por producto: WhatsApp mostraba cada variante suelta ("Cairo Remera - Blanco - Talle L")
+ * y el dueño quiere ver los productos, TODOS, aunque no tengan stock o fotos. Siempre "disponible":
+ * sin stock, la descripción lo avisa (el asistente confirma en la charla). Colores, talles y el rango
+ * de precio van en la descripción; el precio es el más bajo. Sin ningún precio no se puede publicar.
  */
-export function itemPadreMayorista(p: ProductoDetalle, ctx: ContextoSeo, items: ItemFeed[]): ItemFeed | null {
-  const [primera] = items;
-  if (!primera) return null;
-  const principal = fotosDe(p, null)[0];
-  const fotos = [...new Set([...(principal ? [aJpg(ctx.foto(principal, 1200))] : []), ...items.flatMap((i) => [i.image_link, ...i.additional_image_link])])];
-  const pesos = items.map((i) => Number.parseFloat(i.price));
+export function detalleWhatsapp(combinaciones: ProductoWhatsapp["combinaciones"], precio?: number | null): { desde: number; texto: string } | null {
+  const pesos = combinaciones.map((c) => Number(c.precio)).filter((n) => n > 0);
+  if (!pesos.length && Number(precio) > 0) pesos.push(Number(precio));
+  if (!pesos.length) return null;
   const [desde, hasta] = [Math.min(...pesos), Math.max(...pesos)];
   // Sin repetir por mayúsculas ("3XL" y "3Xl" en Stocker): queda la primera forma que aparece.
-  const unicos = (xs: (string | null)[]) => [...new Map(xs.filter((x): x is string => !!x).map((x) => [x.toLowerCase(), x])).values()];
-  const colores = unicos(items.map((i) => i.color));
-  const talles = unicos(items.map((i) => i.size)).sort(compararTalles);
-  const detalle = [
+  const unicos = (xs: (string | null | undefined)[]) => {
+    const vistos = new Map<string, string>();
+    for (const x of xs.map((y) => y?.trim())) if (x && !vistos.has(x.toLowerCase())) vistos.set(x.toLowerCase(), x);
+    return [...vistos.values()];
+  };
+  const colores = unicos(combinaciones.map((c) => c.color));
+  const talles = unicos(combinaciones.map((c) => c.talle)).sort(compararTalles);
+  const texto = [
     colores.length && `Colores: ${colores.join(", ")}.`,
     talles.length && `Talles: ${talles.join(", ")}.`,
     desde !== hasta && `Precio por mayor de ${formatearPesos(desde * 100)} a ${formatearPesos(hasta * 100)} según talle y color.`,
   ].filter(Boolean).join("\n");
+  return { desde, texto };
+}
+
+const POCO_STOCK = "Poco stock: consultanos disponibilidad antes de pedir.";
+
+export function itemWhatsapp(p: ProductoWhatsapp, ctx: Pick<ContextoSeo, "marca" | "sitio">, link: string): ItemFeed | null {
+  const d = detalleWhatsapp(p.combinaciones, p.precio);
+  if (!d) return null;
+  const fotos = [...new Set(p.fotos.map(aJpg))];
+  // shortcut: sin fotos va el ícono de la tienda (512 px, el mínimo de Meta es 500); cargarle fotos en isu lo reemplaza solo.
+  if (!fotos.length) fotos.push(`${ctx.sitio}/icon.png`);
   return {
-    ...primera,
     id: p.sku,
     item_group_id: "",
-    title: p.nombre.slice(0, 150),
-    description: [primera.description, detalle].filter(Boolean).join("\n\n").slice(0, 5000),
+    title: p.titulo.slice(0, 150),
+    description: [p.sinStock && POCO_STOCK, p.descripcion.trim() || p.titulo, d.texto]
+      .filter(Boolean).join("\n\n").slice(0, 5000),
+    link,
     image_link: fotos[0]!,
     additional_image_link: fotos.slice(1, 10),
-    availability: items.some((i) => i.availability === "in_stock") ? "in_stock" : "out_of_stock",
-    price: `${desde.toFixed(2)} ARS`,
+    availability: "in_stock",
+    price: `${d.desde.toFixed(2)} ARS`,
+    sale_price: null,
+    brand: ctx.marca,
+    condition: "new",
     color: null,
     size: null,
+    gender: p.genero,
+    age_group: p.edad,
+    google_product_category: "1604",
+    product_type: p.tipo || "Ropa",
+    identifier_exists: "no",
+    shipping_price: null,
+    custom_label_0: "principal",
   };
+}
+
+/**
+ * Las variantes de un producto de la tienda para WhatsApp. WhatsApp las agrupa en la ficha (elegís color
+ * y talle), pero en la lista y en los conjuntos muestra cada una suelta: todas llevan el título del
+ * producto y UNA queda como "principal" (custom_label_0) para que los conjuntos filtren un producto por
+ * modelo. La principal: con stock, la de la foto principal y la más barata. Todas salen "disponibles";
+ * la que no tiene stock lo avisa en la descripción.
+ */
+export function variantesWhatsapp(p: ProductoDetalle, ctx: Pick<ContextoSeo, "foto">, variantes: ItemFeed[], tipo: string): ItemFeed[] {
+  if (!variantes.length) return [];
+  const portada = fotosDe(p, null)[0];
+  const fotoPrincipal = portada ? aJpg(ctx.foto(portada, 1200)) : null;
+  const puntaje = (v: ItemFeed) => [v.availability === "in_stock" ? 0 : 1, v.image_link === fotoPrincipal ? 0 : 1, Number.parseFloat(v.price)];
+  const principal = [...variantes].sort((a, b) => {
+    const [x, y] = [puntaje(a), puntaje(b)];
+    return x[0]! - y[0]! || x[1]! - y[1]! || x[2]! - y[2]!;
+  })[0];
+  return variantes.map((v) => ({
+    ...v,
+    title: p.nombre.slice(0, 150),
+    description: [v.availability === "out_of_stock" && POCO_STOCK, v.description].filter(Boolean).join("\n\n").slice(0, 5000),
+    availability: "in_stock" as const,
+    product_type: tipo || v.product_type,
+    custom_label_0: v === principal ? "principal" : "",
+  }));
+}
+
+/**
+ * Las categorías del portal ("Remeras", "Top", "Musculosa") en las de la tienda ("Mujer > Remeras y tops"),
+ * que son las que filtran los conjuntos del catálogo de WhatsApp.
+ */
+export function tipoDesdePortal(genero: string, categoria: string): string {
+  const c = categoria.toLowerCase();
+  const mujer = genero === "Mujer";
+  const grupo = /buzo|campera/.test(c) ? (genero === "Niños" ? "Camperas" : "Buzos y camperas")
+    : /short|bermuda/.test(c) ? "Shorts y bermudas"
+      : /pantal|calza|jogger/.test(c) ? (mujer ? "Pantalones y calzas" : "Pantalones")
+        : /remera|top|musculosa/.test(c) ? (mujer ? "Remeras y tops" : "Remeras")
+          : categoria.trim();
+  return [genero.trim(), grupo].filter(Boolean).join(" > ");
+}
+
+/** El público de un producto del portal ("Hombre", "Mujer", "Niños"), como lo pide Meta. */
+export function publicoDePortal(genero: string): { genero: "male" | "female" | "unisex"; edad: "adult" | "kids" } {
+  if (genero === "Niños") return { genero: "unisex", edad: "kids" };
+  return { genero: genero === "Hombre" ? "male" : genero === "Mujer" ? "female" : "unisex", edad: "adult" };
 }
 
 const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!)
@@ -443,7 +533,7 @@ export function feedXml(items: ItemFeed[], ctx: Pick<ContextoSeo, "sitio" | "mar
     campo("availability", opciones.disponibilidadConEspacio ? i.availability.replaceAll("_", " ") : i.availability), campo("price", i.price), campo("sale_price", i.sale_price),
     campo("brand", i.brand), campo("condition", i.condition), campo("color", i.color), campo("size", i.size),
     campo("gender", i.gender), campo("age_group", i.age_group), campo("google_product_category", i.google_product_category),
-    campo("product_type", i.product_type), campo("identifier_exists", i.identifier_exists),
+    campo("product_type", i.product_type), campo("identifier_exists", i.identifier_exists), campo("custom_label_0", i.custom_label_0 ?? null),
     i.shipping_price ? `<g:shipping><g:country>AR</g:country><g:price>${xml(i.shipping_price)}</g:price></g:shipping>` : "",
     "</item>",
   ].join(""));
