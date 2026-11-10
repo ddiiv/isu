@@ -11,18 +11,19 @@ export type TransporteTienda = (typeof TRANSPORTES)[number];
 export const SERVICIOS_ENVIO = ["domicilio", "sucursal", "en_el_dia"] as const;
 export type ServicioEnvio = (typeof SERVICIOS_ENVIO)[number];
 
-export const NOMBRE_TRANSPORTE: Record<TransporteTienda | "estandar", string> = {
-  correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío a domicilio",
+/** "estandar" y "moto" no tienen adaptador: se despachan a mano desde el backoffice. */
+export const NOMBRE_TRANSPORTE: Record<TransporteTienda | "estandar" | "moto", string> = {
+  correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío a domicilio", moto: "Envío en moto",
 };
 
-export const ID_OPCION = /^(correo_argentino|andreani|oca|mercado_envios|cabify|estandar):(domicilio|sucursal|en_el_dia)$/;
+export const ID_OPCION = /^(correo_argentino|andreani|oca|mercado_envios|cabify|estandar|moto):(domicilio|sucursal|en_el_dia)$/;
 export const CP = z.string().trim().regex(/^([A-Za-z]\d{4}[A-Za-z]{3}|\d{4})$/, "Código postal inválido")
   // CPA ("C1406ABC") → los 4 números, que es lo que cotizan los transportes.
   .transform((v) => (/^\d{4}$/.test(v) ? v : v.slice(1, 5)));
 
 export const OpcionEnvio = z.object({
   id: z.string().regex(ID_OPCION),
-  transporte: z.enum([...TRANSPORTES, "estandar"]),
+  transporte: z.enum([...TRANSPORTES, "estandar", "moto"]),
   servicio: z.enum(SERVICIOS_ENVIO),
   nombre: z.string(),
   /** Lo que ve el cliente debajo del nombre: "Llega en 3 a 6 días hábiles". */
@@ -59,7 +60,7 @@ export const ID_SUCURSAL = z.string().trim().regex(/^[A-Za-z0-9_-]{1,40}$/, "Suc
 
 export const EventoEnvioPublico = z.object({ fecha: z.string(), estado: z.enum(ESTADOS_ENVIO), descripcion: z.string(), ubicacion: z.string().nullable() });
 export const EnvioPublico = z.object({
-  transporte: z.enum([...TRANSPORTES, "estandar"]),
+  transporte: z.enum([...TRANSPORTES, "estandar", "moto"]),
   nombreTransporte: z.string(),
   servicio: z.enum(SERVICIOS_ENVIO),
   sucursal: z.object({ nombre: z.string(), direccion: z.string() }).nullable(),
@@ -193,6 +194,35 @@ export const EnviosEnElDia = z.object({
   horaCorte: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Hora como 14:00"),
 }).strict();
 export type EnviosEnElDia = z.infer<typeof EnviosEnElDia>;
+
+/*
+ * Envío en moto (logística propia, como el Flex): sólo las zonas que se cargan,
+ * a precio fijo. Llega en el día si se paga antes de la hora de corte; si no,
+ * el próximo día de reparto. Se despacha a mano, sin transporte integrado.
+ */
+export const ZonaMoto = z.object({
+  nombre: z.string().trim().min(1).max(60),
+  precio: z.number().int().min(0).max(100_000_000), // centavos (el mismo tope que costoEnvio)
+  cps: EnviosEnElDia.shape.cps,
+}).strict();
+export const EnvioMoto = z.object({
+  activo: z.boolean(),
+  dias: EnviosEnElDia.shape.dias,
+  horaCorte: EnviosEnElDia.shape.horaCorte,
+  zonas: z.array(ZonaMoto).max(10),
+}).strict();
+export type EnvioMoto = z.infer<typeof EnvioMoto>;
+// Los mismos valores que siembra la migración 0023.
+export const ENVIO_MOTO_DE_FABRICA: EnvioMoto = {
+  activo: false, dias: [1, 2, 3, 4, 5], horaCorte: "14:00",
+  zonas: [
+    { nombre: "CABA", precio: 450_000, cps: "1000-1499" },
+    { nombre: "Primer cordón", precio: 750_000, cps: "1602-1607,1609,1636-1638,1640-1643,1650-1657,1672-1678,1682-1685,1687,1702-1708,1753-1754,1766,1768,1770,1778" },
+    { nombre: "Segundo cordón", precio: 1_000_000, cps: "1608,1610-1618,1621,1624,1644-1648,1659,1661-1663,1665,1670,1686,1688,1712-1716,1718,1721-1723,1742-1746,1761,1773,1802-1807,1812-1813,1822-1836,1838-1843,1846-1856,1868-1891" },
+    { nombre: "Tercer cordón", precio: 1_200_000, cps: "1619,1623,1625,1627,1727,1748,1862,1864-1865" },
+    { nombre: "Pilar, Luján y La Plata", precio: 2_590_000, cps: "1620,1629-1635,1664,1667,1669,1893-1910,6700-6708,6712" },
+  ],
+};
 
 /** ¿El CP está en los rangos? ("1000-1499,1600-1899") */
 export function cpEnRangos(cp: string, rangos: string): boolean {

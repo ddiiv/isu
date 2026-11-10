@@ -5,6 +5,7 @@
  *   POST /v1/places:autocomplete           (Google) sugerencias; pide la clave en x-goog-api-key
  *   GET  /v1/places/:id                    (Google) los datos; pide la clave y x-goog-fieldmask
  *   GET  /georef/v2.0/direcciones          (Georef) ?direccion=calle altura&provincia=<código>
+ *   GET  /georef/v2.0/localidades          (Georef) ?nombre=…&provincia=<código>
  *   GET  /estado                           cuántos pedidos llegaron (para las pruebas)
  *
  * Uso: GOOGLE_MAPS_API_KEY=… node scripts/demo/direcciones-simulado.mjs
@@ -120,6 +121,13 @@ http.createServer(async (req, res) => {
         };
       });
       return json(res, 200, { cantidad: direcciones.length, direcciones, inicio: 0, parametros: Object.fromEntries(u.searchParams), total: direcciones.length });
+    }
+    if (u.pathname === "/georef/v2.0/localidades" && req.method === "GET") {
+      estado.georef++;
+      const { nombre } = partir(u.searchParams.get("nombre") ?? "");
+      const prov = u.searchParams.get("provincia");
+      const nombres = [...new Set(CALLES.filter((c) => (!prov || c.prov === prov) && parecida(nombre, c.localidad)).map((c) => c.localidad))];
+      return json(res, 200, { cantidad: nombres.length, localidades: nombres.map((n) => ({ nombre: n })), inicio: 0, total: nombres.length });
     }
     json(res, 404, { error: "no existe" });
   } catch (e) {

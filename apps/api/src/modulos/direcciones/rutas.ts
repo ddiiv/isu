@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
 import type { Redis } from "ioredis";
 import {
-  AjusteDirecciones, DIRECCIONES_POR_DEFECTO, LugarDireccion, PedidoLugar, PedidoRevisar, PedidoSugerencias, RespuestaSugerencias, RevisionDireccion,
+  AjusteDirecciones, DIRECCIONES_POR_DEFECTO, LugarDireccion, PedidoLocalidades, PedidoLugar, PedidoRevisar, PedidoSugerencias, RespuestaLocalidades, RespuestaSugerencias, RevisionDireccion,
   sinTildes, type AjusteDirecciones as Ajuste,
 } from "@isu/shared";
 import type { Entorno } from "../../entorno.js";
@@ -20,6 +20,7 @@ import { exigir } from "../admin/sesion.js";
  *   POST /v1/direcciones/sugerencias   mientras se escribe la calle (Google)
  *   POST /v1/direcciones/lugar         los datos de la sugerencia elegida (Google)
  *   POST /v1/direcciones/revisar       ¿existe esa calle y altura? (Georef, gratis)
+ *   POST /v1/direcciones/localidades   localidades parecidas a lo escrito, en la provincia (Georef)
  *   GET  /v1/admin/direcciones         (backoffice) qué está configurado y cuánto se usó hoy
  *
  * Google cobra pasado el uso gratis: además del freno por IP hay un tope
@@ -44,6 +45,7 @@ export async function rutasDirecciones(app: FastifyInstance, deps: {
   const ajuste = () => deps.cache.obtener("ajuste:direcciones", () => leerAjusteDirecciones(deps.pool));
   // Georef con caché propia: la misma dirección revisada dos veces no sale dos veces.
   const revisadas = new CacheCorta(600, 2000);
+  const localidades = new CacheCorta(600, 2000);
   const ip = (req: Parameters<typeof ipDe>[0]) => ipDe(req, deps.env.INTERNO_TOKEN);
 
   /** ¿Queda tope hoy? Sin Redis no se cuenta, así que no se usa Google (mejor sin ayuda que una factura). */
@@ -96,5 +98,16 @@ export async function rutasDirecciones(app: FastifyInstance, deps: {
     const clave = sinTildes(`${d.calle}|${d.numero}|${d.localidad}|${d.provincia}`);
     try { return await revisadas.obtener(clave, () => deps.georef!.revisar(d)); }
     catch (e) { req.log.warn({ err: (e as Error).message }, "revisar dirección: Georef no respondió"); return { estado: "sin_servicio" as const, sugerencia: null }; }
+  });
+
+  api.post("/v1/direcciones/localidades", { schema: { body: PedidoLocalidades, response: { 200: RespuestaLocalidades } } }, async (req, reply) => {
+    reply.header("cache-control", "no-store");
+    const a = await ajuste();
+    if (!deps.georef || !a.georef) return { localidades: [] };
+    // Se pide mientras se escribe: más holgado que revisar, pero igual con freno.
+    await frenar(deps.redis, "dir-loc-ip", ip(req), 150, 600);
+    const d = req.body;
+    try { return { localidades: await localidades.obtener(sinTildes(`${d.texto}|${d.provincia}`), () => deps.georef!.localidades(d.texto, d.provincia)) }; }
+    catch (e) { req.log.warn({ err: (e as Error).message }, "localidades: Georef no respondió"); return { localidades: [] }; }
   });
 }

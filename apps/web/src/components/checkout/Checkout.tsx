@@ -9,7 +9,7 @@ import { CampoCupon, LineaCupon } from "../carrito/LineasCarrito";
 import { api, guardarAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
 import { OpcionesEnvio, type EleccionEnvio } from "./OpcionesEnvio";
-import { AvisoDireccion, CampoCalle } from "./Direccion";
+import { AvisoCP, AvisoDireccion, CampoCalle, CampoLocalidad } from "./Direccion";
 
 /*
  * Checkout en una sola página, como el de las tiendas de referencia:
@@ -203,8 +203,14 @@ export function Checkout({ config }: { config: ConfigPublica }) {
                     alUsar={(s) => setC((x) => ({ ...x, calle: s.calle, numero: s.numero, localidad: s.localidad || (x.localidad ?? ""), provincia: s.provincia }))} />
                 </div>
                 <div className="sm:col-span-2">{inp("piso", "Piso / depto (opcional)", { autoComplete: "address-line2" })}</div>
-                <div className="sm:col-span-2">{inp("cp", "Código postal", { autoComplete: "postal-code" })}</div>
-                <div className="sm:col-span-2">{inp("localidad", "Localidad", { autoComplete: "address-level2" })}</div>
+                <div className="sm:col-span-2">
+                  {inp("cp", "Código postal", { autoComplete: "postal-code" })}
+                  <AvisoCP cp={c.cp ?? ""} provincia={c.provincia ?? ""} alElegir={(p) => setC((x) => ({ ...x, provincia: p }))} />
+                </div>
+                <div className="sm:col-span-2">
+                  <CampoLocalidad valor={c.localidad ?? ""} alCambiar={(v) => setC((x) => ({ ...x, localidad: v }))} provincia={c.provincia ?? ""}
+                    activo={config.direcciones.revisar} error={errores.localidad} clase={campo} />
+                </div>
                 <label className="block sm:col-span-3">
                   <span className="mb-1 block text-sm font-bold">Provincia</span>
                   <select value={c.provincia} onChange={cambiar("provincia")} className={campo} autoComplete="address-level1">{NOMBRES_PROVINCIAS.map((p) => <option key={p}>{p}</option>)}</select>

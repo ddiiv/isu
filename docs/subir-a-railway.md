@@ -223,6 +223,15 @@ Con la cuenta de Mercado Pago no hace falta ninguna variable más: usa `MP_ACCES
 |---|---|
 | `SMTP_URL` | `smtp://usuario:clave@servidor:587`. Con Gmail o Workspace: la clave es una **contraseña de aplicación** (cuenta de Google → Seguridad → Contraseñas de aplicaciones), con `smtp.gmail.com`. También sirven Brevo o Amazon SES |
 | `CORREO_DE` | El remitente, p. ej. `Isuwaya <hola@isuwaya.com>` |
+| `CORREO_VENTAS` | Opcional. A dónde llega el aviso interno de cada venta de la tienda (asunto «Venta de la tienda minorista · ISU-1234 · $ total», con el PDF del pedido y el link al pedido en el backoffice, que sale de `ADMIN_URL`: el worker tiene que tenerla). Sin ella el aviso no se manda y no pasa nada más. El cliente recibe igual el PDF en «Pago confirmado» |
+
+**Usar la misma cuenta de mail de Stocker.** Stocker usa `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, `MAIL_PASS` y `MAIL_SECURE`; la tienda junta todo en una sola variable:
+
+- `SMTP_URL=smtp://USUARIO:CLAVE@HOST:PUERTO`, con `smtps://` si `MAIL_SECURE` es `true` o el puerto es 465 (con `smtps://` y puerto 465 la conexión va cifrada desde el arranque; con `smtp://` y 587 se cifra con STARTTLS).
+- El usuario y la clave van con los caracteres especiales codificados para URL: `@` → `%40`, `#` → `%23`, `/` → `%2F`, `:` → `%3A`, `%` → `%25`.
+- `CORREO_DE="Isuwaya <la misma dirección que MAIL_USER>"`.
+
+Va en el servicio que corre el worker (o en el único servicio, si todo corre en uno).
 
 Para que los mails no caigan en spam, el dominio necesita SPF y DKIM (te los da el proveedor de correo; van en el DNS).
 

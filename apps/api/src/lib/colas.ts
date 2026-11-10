@@ -7,7 +7,7 @@ import { COLAS, OPCIONES_TRABAJO } from "@isu/shared";
  * pueden perder (el cobro de un pedido, el número de seguimiento).
  * Si Redis no está, el pedido HTTP no falla: se registra y sigue.
  */
-export type Plantilla = "bienvenida" | "restablecer" | "pedido_recibido" | "pago_confirmado" | "pedido_vencido" | "arrepentimiento" | "transferencia_informada";
+export type Plantilla = "bienvenida" | "restablecer" | "pedido_recibido" | "pago_confirmado" | "pedido_vencido" | "arrepentimiento" | "transferencia_informada" | "venta_tienda";
 
 export interface Colas {
   email(plantilla: Plantilla, para: string, datos: Record<string, unknown>): Promise<void>;

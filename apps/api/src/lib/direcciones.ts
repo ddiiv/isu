@@ -83,7 +83,11 @@ export function crearGoogle(o: { url: string; clave: string; tiempoMs?: number }
 }
 
 // ── Georef ────────────────────────────────────────────────────────
-export interface Georef { revisar(d: { calle: string; numero: string; localidad: string; provincia: string }): Promise<RevisionDireccion> }
+export interface Georef {
+  revisar(d: { calle: string; numero: string; localidad: string; provincia: string }): Promise<RevisionDireccion>;
+  /** Localidades de la provincia que se parecen a lo escrito (Georef tolera errores de tipeo), con su nombre oficial. */
+  localidades(texto: string, provincia: string): Promise<string[]>;
+}
 
 interface DireccionGeoref {
   altura?: { valor?: number | string | null };
@@ -145,6 +149,18 @@ export function crearGeoref(o: { url: string; tiempoMs?: number }): Georef {
       if (!r.ok) throw new ErrorDirecciones(`Georef contestó ${r.status}`);
       const j = (await r.json().catch(() => ({}))) as { direcciones?: DireccionGeoref[] };
       return evaluarGeoref(d, Array.isArray(j.direcciones) ? j.direcciones : []);
+    },
+    async localidades(texto, provincia) {
+      const codigo = PROVINCIAS.find((p) => p.nombre === provincia)?.codigo;
+      if (!codigo) return [];
+      const q = new URLSearchParams({ nombre: texto, provincia: codigo, campos: "nombre", max: "8" });
+      const r = await fetch(`${base}/v2.0/localidades?${q}`, { signal: conTiempo(ms) })
+        .catch((e: Error) => { throw new ErrorDirecciones(`Georef no responde: ${e.message}`); });
+      if (!r.ok) throw new ErrorDirecciones(`Georef contestó ${r.status}`);
+      const j = (await r.json().catch(() => ({}))) as { localidades?: Array<{ nombre?: string | null }> };
+      // Georef repite el nombre cuando hay varias con el mismo (otro departamento): una sola vez.
+      const nombres = (Array.isArray(j.localidades) ? j.localidades : []).flatMap((l) => (l.nombre ? [l.nombre.slice(0, 80)] : []));
+      return [...new Set(nombres)].slice(0, 6);
     },
   };
 }

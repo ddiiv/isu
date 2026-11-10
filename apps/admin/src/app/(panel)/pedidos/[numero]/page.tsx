@@ -38,8 +38,8 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
     try { await fn(); aviso.ok(ok); await recargar(); } catch (e) { aviso.error(e); }
   };
   const medioPago = p.medio_pago === "local" ? "local" : "transferencia";
-  // Con transporte (etapa 4) el envío avanza solo (despacho en Stocker + seguimiento): a mano sólo el estándar.
-  const conTransporte = p.entrega === "envio" && typeof p.transporte === "string" && p.transporte !== "estandar";
+  // Con transporte (etapa 4) el envío avanza solo (despacho en Stocker + seguimiento): a mano sólo el estándar y la moto.
+  const conTransporte = p.entrega === "envio" && typeof p.transporte === "string" && p.transporte !== "estandar" && p.transporte !== "moto";
   const entregas: Array<[string, string]> = conTransporte ? [] : p.estado === "pagado"
     ? (p.entrega === "retiro" ? [["listo_para_retirar", "Listo para retirar"], ["retirado", "Retirado"]] : [["enviado", "Marcar enviado"]])
     : p.estado === "listo_para_retirar" ? [["retirado", "Retirado"]] : p.estado === "enviado" ? [["entregado", "Entregado"]] : [];

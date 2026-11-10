@@ -1,4 +1,5 @@
 import { formatearPesos, formatearPesosExactos } from "@isu/shared";
+import type { PedidoVenta } from "./pedido.js";
 
 /*
  * Mails al cliente. HTML simple (tablas, estilos en línea: es lo que leen
@@ -13,6 +14,8 @@ export const PLANTILLAS = [
   "envio_en_camino", "envio_en_sucursal", "envio_llega_hoy", "envio_entregado", "envio_no_entregado",
   // Etapa 8: pedir la opinión de la compra.
   "pedir_resena",
+  // Mail interno para el negocio: se vendió algo en la tienda online (sale a CORREO_VENTAS, no al cliente).
+  "venta_tienda",
 ] as const;
 export type Plantilla = (typeof PLANTILLAS)[number];
 
@@ -120,6 +123,19 @@ export function armar(plantilla: Plantilla, datos: Record<string, unknown>): { a
         asunto: `Pago confirmado · pedido ${d.numero}`,
         html: marco("¡Pago confirmado!", `<p>Hola, ${esc(d.nombre)}. Ya está pago tu pedido <b>${esc(d.numero)}</b>. ${sigue}</p>${tablaItems(d)}${boton("Ver mi pedido", d.enlace)}`),
         texto: `Pago confirmado para el pedido ${d.numero}.\n${textoItems(d)}${comoLlegar(d)}`,
+      };
+    }
+    case "venta_tienda": {
+      const v = datos as unknown as PedidoVenta & { enlaceAdmin?: string | null };
+      const aclaracion = "Esta es una venta de la página minorista (www.isuwaya.com): no es del portal mayorista ni de un local.";
+      const entrega = v.entrega === "retiro" ? `Retira en ${v.local}` : [v.transporte, v.sucursal && `sucursal ${v.sucursal}`, v.direccion].filter(Boolean).join(" · ");
+      const filas = ([["Cliente", v.nombre], ["Email", v.email], ["Teléfono", v.telefono], ["DNI", v.dni], ["Entrega", entrega], ["Medio de pago", v.medioPago]] as const)
+        .map(([k, x]) => `<tr><td style="padding:3px 12px 3px 0;color:#6b6b6b">${k}</td><td>${esc(x)}</td></tr>`).join("");
+      const verEnPanel = v.enlaceAdmin ? boton("Ver el pedido en el backoffice", v.enlaceAdmin) : "";
+      return {
+        asunto: `Venta de la tienda minorista · ${v.numero} · ${formatearPesos(v.total)}`,
+        html: marco(`Venta ${v.numero}`, `<p><b>${esc(aclaracion)}</b></p><table role="presentation" style="font-size:14px">${filas}</table>${tablaItems(v as unknown as DatosPedido)}${verEnPanel}<p style="color:#6b6b6b;font-size:13px">El PDF del pedido va adjunto.</p>`, "Isuwaya · Aviso interno de venta"),
+        texto: `${aclaracion}\n\nPedido ${v.numero}\nCliente: ${v.nombre} · ${v.email} · ${v.telefono} · DNI ${v.dni}\nEntrega: ${entrega}\nPago: ${v.medioPago}\n${textoItems(v as unknown as DatosPedido)}${v.enlaceAdmin ? `\nEn el backoffice: ${v.enlaceAdmin}` : ""}`,
       };
     }
     case "pedido_vencido": {

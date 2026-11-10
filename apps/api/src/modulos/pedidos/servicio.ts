@@ -196,9 +196,9 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       }
       const cfg = await deps.cotizador.config();
       paqueteEnvio = deps.cotizador.paquete(carrito, cfg);
-      if (opcion.llegaHoy) corteEnElDia = new Date(hoyA(cfg.enElDia.horaCorte).getTime() + 3 * 3600_000);
+      if (opcion.llegaHoy) corteEnElDia = new Date(hoyA(opcion.transporte === "moto" ? cfg.envioMoto.horaCorte : cfg.enElDia.horaCorte).getTime() + 3 * 3600_000);
       // Mercado Envíos lo cobra Mercado Pago: no suma al total de la tienda. Con cupón de envío gratis, $0.
-      conEnvio(c, opcion.precio, { soloMercadoPago: opcion.soloMercadoPago });
+      conEnvio(c, opcion.precio, { soloMercadoPago: opcion.soloMercadoPago, transporte: opcion.transporte });
     }
     const stocker = await stockerOError();
 
@@ -456,6 +456,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       // Correo, Andreani y OCA: el envío se prepara solo (si está prendido en Ajustes; lo decide la API).
       if (p.transporte && SE_PREPARAN_SOLOS.has(p.transporte)) await deps.colas.envios("preparar", { numero: p.numero }, `preparar-${p.numero}`);
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
+      // Aviso interno de la venta: el worker lo manda a CORREO_VENTAS (si está) y arma todo desde la base; `para` no se usa.
+      await deps.colas.email("venta_tienda", p.email, { numero: p.numero });
     }
     /*
      * El cobro a Stocker (con reintentos: sin él el depósito no lo despacha). También

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conDescuento, desdePesos, formatearPesos, formatearPesosExactos, fotosMaximasDelProducto, puedeAgregarFoto, centavos, porcentajePack, Packs, PACKS_POR_DEFECTO, leerPacks, cantidadesPack, maxPorcentajePack, rutaPack, leerRutaPack, nombreParaResena, Opiniones, EnlaceLocal, normalizarEnlace, enlaceDeLocal, Local } from "./index.js";
+import { conDescuento, desdePesos, formatearPesos, formatearPesosExactos, fotosMaximasDelProducto, puedeAgregarFoto, centavos, porcentajePack, Packs, PACKS_POR_DEFECTO, leerPacks, cantidadesPack, maxPorcentajePack, rutaPack, leerRutaPack, nombreParaResena, Opiniones, EnlaceLocal, normalizarEnlace, enlaceDeLocal, Local, EnvioMoto, ENVIO_MOTO_DE_FABRICA, ID_OPCION, cpEnRangos, provinciasDelCP, NOMBRES_PROVINCIAS } from "./index.js";
 
 describe("fotos", () => {
   it("el tope del padre es 5 por color", () => {
@@ -129,5 +129,72 @@ describe("link de los locales", () => {
     expect(enlaceDeLocal(locales, "Otro")).toBeNull();
     expect(enlaceDeLocal(locales, null)).toBeNull();
     expect(Local.safeParse({ nombre: "A", direccion: "B", localidad: "C", horario: "D", mapa: "javascript:alert(1)", retiro: true }).success).toBe(false);
+  });
+});
+
+describe("envío en moto", () => {
+  const ok = ENVIO_MOTO_DE_FABRICA;
+  it("los valores de fábrica son válidos y ninguna zona pisa a otra", () => {
+    expect(EnvioMoto.safeParse(ok).success).toBe(true);
+    for (let cp = 1000; cp <= 6712; cp++) expect(ok.zonas.filter((z) => cpEnRangos(String(cp), z.cps)).length, String(cp)).toBeLessThanOrEqual(1);
+    expect(ok.zonas.map((z) => z.nombre)).toEqual(["CABA", "Primer cordón", "Segundo cordón", "Tercer cordón", "Pilar, Luján y La Plata"]);
+  });
+  it("rechaza lo que no cierra: hora, días, precio, rangos, tope de zonas y campos de más", () => {
+    const malo = (x: object) => EnvioMoto.safeParse({ ...ok, ...x }).success;
+    expect(malo({ horaCorte: "25:00" })).toBe(false);
+    expect(malo({ dias: [7] })).toBe(false);
+    expect(malo({ zonas: [{ nombre: "A", precio: -1, cps: "1000" }] })).toBe(false);
+    expect(malo({ zonas: [{ nombre: "A", precio: 1.5, cps: "1000" }] })).toBe(false);
+    expect(malo({ zonas: [{ nombre: "A", precio: 0, cps: "mil" }] })).toBe(false);
+    expect(malo({ zonas: [{ nombre: "A".repeat(61), precio: 0, cps: "1000" }] })).toBe(false);
+    expect(malo({ zonas: [{ nombre: "A", precio: 0, cps: "1000", extra: 1 }] })).toBe(false);
+    expect(malo({ zonas: Array.from({ length: 11 }, () => ({ nombre: "A", precio: 0, cps: "1000" })) })).toBe(false);
+    expect(malo({ zonas: Array.from({ length: 10 }, () => ({ nombre: "A", precio: 0, cps: "" })) })).toBe(true);
+    expect(malo({ otro: 1 })).toBe(false);
+  });
+  it("moto es una opción de envío válida, sin adaptador", () => {
+    expect(ID_OPCION.test("moto:en_el_dia")).toBe(true);
+    expect(ID_OPCION.test("moto:domicilio")).toBe(true);
+    expect(ID_OPCION.test("drone:domicilio")).toBe(false);
+  });
+});
+
+describe("código postal → provincia", () => {
+  it("una provincia, en los bordes de sus rangos", () => {
+    expect(provinciasDelCP("1000")).toEqual(["CABA"]);
+    expect(provinciasDelCP("1499")).toEqual(["CABA"]);
+    expect(provinciasDelCP("1704")).toEqual(["Buenos Aires"]);
+    expect(provinciasDelCP("1600")).toEqual(["Buenos Aires"]);
+    expect(provinciasDelCP("1999")).toEqual(["Buenos Aires"]);
+    expect(provinciasDelCP("5000")).toEqual(["Córdoba"]);
+    expect(provinciasDelCP("4000")).toEqual(["Tucumán"]);
+    expect(provinciasDelCP("9410")).toEqual(["Tierra del Fuego"]);
+    expect(provinciasDelCP("8000")).toEqual(["Buenos Aires"]);
+  });
+  it("el CPA completo vale como los 4 números; con espacios, también", () => {
+    expect(provinciasDelCP("B1704ABC")).toEqual(["Buenos Aires"]);
+    expect(provinciasDelCP("c1043aaz")).toEqual(["CABA"]);
+    expect(provinciasDelCP(" 1704 ")).toEqual(["Buenos Aires"]);
+  });
+  it("donde dos provincias comparten rango, devuelve las dos", () => {
+    expect(provinciasDelCP("2000")).toEqual(["Santa Fe"]);
+    expect(provinciasDelCP("2800")).toEqual(["Buenos Aires", "Santa Fe"]);
+    expect(provinciasDelCP("2850")).toEqual(["Buenos Aires", "Entre Ríos", "Santa Fe"]);
+    expect(provinciasDelCP("8300")).toEqual(["Neuquén", "Río Negro"]);
+    expect(provinciasDelCP("6300")).toEqual(["Buenos Aires", "La Pampa"]);
+    expect(provinciasDelCP("3200")).toEqual(["Corrientes", "Entre Ríos"]);
+  });
+  it("un código que no existe, o mal escrito, no es de ninguna", () => {
+    expect(provinciasDelCP("1500")).toEqual([]);
+    expect(provinciasDelCP("0999")).toEqual([]);
+    expect(provinciasDelCP("9999")).toEqual([]);
+    expect(provinciasDelCP("170")).toEqual([]);
+    expect(provinciasDelCP("17044")).toEqual([]);
+    expect(provinciasDelCP("")).toEqual([]);
+  });
+  it("las provincias de la tabla son las del select del checkout, y todas tienen rango", () => {
+    const usadas = new Set<string>();
+    for (let n = 1000; n <= 9499; n++) provinciasDelCP(String(n)).forEach((p) => usadas.add(p));
+    expect([...usadas].sort()).toEqual([...NOMBRES_PROVINCIAS].sort());
   });
 });

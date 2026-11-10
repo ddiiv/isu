@@ -6,12 +6,15 @@ import os from "node:os";
 import path from "node:path";
 import { Redis } from "ioredis";
 import { crearPool, migrar } from "@isu/db";
+import { ENVIO_MOTO_DE_FABRICA } from "@isu/shared";
 import { crearTransportes, ErrorTransporte, firmaSeguimiento } from "@isu/envios";
 import { levantarSimulador, type Simulador } from "@isu/envios/simulador";
 import { construirApp } from "../src/app.js";
 import { leerEntorno } from "../src/entorno.js";
 import type { Colas } from "../src/lib/colas.js";
 import { crearSesionAdmin } from "../src/modulos/admin/sesion.js";
+import { ahoraEnArgentina } from "../src/modulos/envios/cotizador.js";
+import { conEnvio, type Cotizado } from "../src/modulos/pedidos/cotizar.js";
 
 /*
  * Etapa 4 en la API: opciones de envío en el checkout, pedido con
@@ -116,6 +119,7 @@ beforeAll(async () => {
   await pool.query("UPDATE tienda.ajustes SET valor = '0' WHERE clave = 'montoMinimoCarrito'");
   await pool.query(`UPDATE tienda.ajustes SET valor = '{"titular":"ISUWAYA SRL","cuit":"30-00000000-0","banco":"Banco QA","cbu":"0000000000000000000000","alias":"ISUWAYA.QA"}' WHERE clave = 'datosTransferencia'`);
   await pool.query(`UPDATE tienda.ajustes SET valor = '{"cps": "1000-1499", "dias": [], "horaCorte": "14:00"}' WHERE clave = 'enviosEnElDia'`);
+  await moto({ activo: false }); // los casos de abajo no la quieren en medio; los de moto la prenden
 
   const admin = async (email: string, rol: string) => {
     const a = await pool.query("INSERT INTO tienda.admins (email, nombre, hash, rol, totp_activo, debe_cambiar_clave) VALUES ($1, 'QA', 'x', $2, true, false) RETURNING id", [email, rol]);
@@ -127,6 +131,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await limpiar();
   await pool.query(`UPDATE tienda.ajustes SET valor = '{"cps": "1000-1499,1600-1899", "dias": [1, 2, 3, 4, 5], "horaCorte": "14:00"}' WHERE clave = 'enviosEnElDia'`);
+  await pool.query("UPDATE tienda.ajustes SET valor = $1::jsonb WHERE clave = 'envioMoto'", [JSON.stringify(ENVIO_MOTO_DE_FABRICA)]);
   await pool.query(`UPDATE tienda.ajustes SET valor = '{"titular":"","cuit":"","banco":"","cbu":"","alias":""}' WHERE clave = 'datosTransferencia'`);
   await app.close();
   await sim.cerrar();
@@ -136,7 +141,12 @@ afterAll(async () => {
 });
 beforeEach(async () => { const k = await redis.keys("isu:freno:*"); if (k.length) await redis.del(...k); });
 
-type Opcion = { id: string; precio: number; precioOriginal: number; gratis: boolean; soloMercadoPago: boolean; llegaHoy: boolean };
+/** El ajuste de la moto: todos los días hasta las 23:59 y una zona por CP, salvo lo que se pase. */
+const moto = (x: Record<string, unknown>) => pool.query(
+  "UPDATE tienda.ajustes SET valor = $1::jsonb WHERE clave = 'envioMoto'",
+  [JSON.stringify({ activo: true, dias: [0, 1, 2, 3, 4, 5, 6], horaCorte: "23:59", zonas: [{ nombre: "Flores", precio: 450_000, cps: "1406-1408" }, { nombre: "Lejos", precio: 750_000, cps: "9999" }], ...x })]);
+
+type Opcion = { id: string; nombre: string; detalle: string; precio: number; precioOriginal: number; gratis: boolean; soloMercadoPago: boolean; llegaHoy: boolean };
 const opciones = async (destino = DESTINO, medioPago?: string) => {
   const r = await post("/v1/envios/opciones", { items: ITEMS, destino, ...(medioPago ? { medioPago } : {}) });
   expect(r.statusCode, r.body).toBe(200);
@@ -191,6 +201,54 @@ describe("opciones de envío", () => {
     } finally {
       await pool.query(`UPDATE tienda.ajustes SET valor = '{"cps": "1000-1499", "dias": [], "horaCorte": "14:00"}' WHERE clave = 'enviosEnElDia'`);
     }
+  });
+  describe("envío en moto", () => {
+    afterEach(async () => { await moto({ activo: false }); await pool.query("UPDATE tienda.ajustes SET valor = 'null' WHERE clave = 'envioGratisDesde'"); });
+    const deMoto = async (cp: string) => (await opciones({ ...DESTINO, cp })).opciones.find((x) => x.id.startsWith("moto:"));
+
+    it("cobra el precio de la zona del CP y no se ofrece fuera de las zonas", async () => {
+      await moto({});
+      expect(await deMoto("1407")).toMatchObject({ id: "moto:en_el_dia", precio: 450_000, precioOriginal: 450_000, gratis: false, llegaHoy: true, soloMercadoPago: false, requiereSucursal: false, nombre: "Envío en moto · llega hoy" });
+      expect((await deMoto("9999"))!.precio).toBe(750_000);
+      expect(await deMoto("1300")).toBeUndefined();
+      await moto({ activo: false });
+      expect(await deMoto("1407")).toBeUndefined();
+    });
+    it("llega hoy sólo antes del corte; después, mañana o el próximo día de reparto; sin días no hay", async () => {
+      await moto({});
+      // Va por precio, no primera por llegar hoy: con otra opción más barata (o gratis) no queda elegida sola.
+      const o = (await opciones({ ...DESTINO, cp: "1407" })).opciones;
+      expect(o.find((x) => x.id.startsWith("moto:"))!.id).toBe("moto:en_el_dia");
+      expect(o.map((x) => x.precio)).toEqual([...o.map((x) => x.precio)].sort((a, b) => a - b));
+      await moto({ horaCorte: "00:00" }); // ya pasó
+      expect(await deMoto("1407")).toMatchObject({ id: "moto:domicilio", nombre: "Envío en moto", detalle: "Te llega mañana", llegaHoy: false, precio: 450_000 });
+      const hoy = ahoraEnArgentina(new Date()).dia;
+      await moto({ dias: [(hoy + 3) % 7] }); // hoy no hay reparto
+      expect((await deMoto("1407"))!.detalle).toBe(`Te llega el ${["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"][(hoy + 3) % 7]}`);
+      await moto({ dias: [] });
+      expect(await deMoto("1407")).toBeUndefined();
+    });
+    it("el cupón de envío gratis no cubre la moto: se cobra entera y el cupón no se gasta", () => {
+      const con = () => ({ neto: 5_000_000, aplicado: { envioGratis: true }, cupon: "ENVIOGRATIS" } as unknown as Cotizado);
+      expect(conEnvio(con(), 2_590_000, { transporte: "moto" })).toMatchObject({ envio: 2_590_000, envioBonificado: 0, total: 7_590_000, aplicado: null, cupon: null, avisoCupon: "El envío gratis del cupón no aplica al envío en moto." });
+      // Con un correo, el cupón sigue bonificando el envío.
+      expect(conEnvio(con(), 700_000, { transporte: "andreani" })).toMatchObject({ envio: 0, envioBonificado: 700_000, total: 5_000_000 });
+    });
+    it("no entra en el envío gratis: ni se abarata ni fija el mínimo", async () => {
+      await moto({ zonas: [{ nombre: "Flores", precio: 1000, cps: "1407" }] });
+      await pool.query("UPDATE tienda.ajustes SET valor = '100000' WHERE clave = 'envioGratisDesde'");
+      const { opciones: o } = await opciones({ ...DESTINO, cp: "1407" });
+      const m = o.find((x) => x.id.startsWith("moto:"))!;
+      expect(m).toMatchObject({ precio: 1000, precioOriginal: 1000, gratis: false });
+      const otras = o.filter((x) => !x.llegaHoy && !x.soloMercadoPago);
+      expect(otras[0]!.gratis).toBe(true); // la más barata de las otras sale $0 aunque la moto cueste menos
+      expect(otras[0]!.precio).toBe(0);
+    });
+    it("convive con el estándar: sin cobertura de transportes quedan las dos", async () => {
+      await moto({});
+      const { opciones: o } = await opciones({ ...DESTINO, cp: "9999" });
+      expect(o.map((x) => x.id)).toEqual(["moto:en_el_dia", "estandar:domicilio"]);
+    });
   });
   it("valida el pedido: CP inválido y campos de más", async () => {
     expect((await post("/v1/envios/opciones", { items: ITEMS, destino: { ...DESTINO, cp: "abc" } })).statusCode).toBe(400);
@@ -257,6 +315,25 @@ describe("pedido con transporte", () => {
     } finally {
       await pool.query("UPDATE tienda.productos SET alto_cm = NULL, ancho_cm = NULL, largo_cm = NULL, peso_gramos = 600 WHERE stocker_id = $1", [BASE + 1]);
     }
+  });
+  it("un pedido con envío en moto se crea (no es un transporte): precio de la zona, a mano y Stocker lo ve como moto con su corte", async () => {
+    await moto({});
+    try {
+      const r = await post("/v1/pedidos", pedido("moto1", { opcion: "moto:en_el_dia" }));
+      expect(r.statusCode, r.body).toBe(201);
+      const numero = r.json().numero as string;
+      const { rows } = await pool.query("SELECT transporte, servicio_envio, envio, total FROM tienda.pedidos WHERE numero = $1", [numero]);
+      expect(rows[0]).toMatchObject({ transporte: "moto", servicio_envio: "en_el_dia", envio: 450_000 });
+      expect(stockerRecibidos.at(-1)!.envio).toMatchObject({ tipo: "moto", despacharAntesDe: expect.any(String) });
+      // Se cobra y se despacha a mano, como el estándar: no hay nada que preparar con un transporte.
+      expect((await post(`/v1/admin/pedidos/${numero}/pago`, { medio: "transferencia", monto: rows[0].total, referencia: "QA-MOTO-1" }, adm(adminOperador))).statusCode).toBe(200);
+      expect((await get("/v1/admin/envios?vista=preparar", adm(adminOperador))).json().envios.map((e: { numero: string }) => e.numero)).not.toContain(numero);
+      expect((await post("/v1/admin/envios/preparar", { numeros: [numero] }, adm(adminOperador))).json().resultados[0]).toMatchObject({ ok: false, mensaje: expect.stringMatching(/a mano/) });
+      expect((await post(`/v1/admin/pedidos/${numero}/entrega`, { estado: "enviado" }, adm(adminOperador))).statusCode).toBe(200);
+      // El cliente lo ve como "Envío en moto" (nada de Cabify).
+      const seg = (await get(`/v1/seguimiento/${numero}?t=${firmaSeguimiento(numero, INTERNO)}`)).json().envio;
+      expect(seg).toMatchObject({ transporte: "moto", nombreTransporte: "Envío en moto", servicio: "en_el_dia" });
+    } finally { await moto({ activo: false }); }
   });
   it("el precio del envío lo pone la API aunque el navegador mande otro", async () => {
     const r = await post("/v1/pedidos", pedido("ok2", { opcion: "oca:domicilio", precio: 1 }));

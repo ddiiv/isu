@@ -4,7 +4,7 @@ import { fecha, pesos, useDatos } from "@/lib/api";
 import { Insignia, Tarjeta } from "./ui";
 
 /* El envío del pedido en su ficha: transporte, la bolsa, seguimiento, eventos y avisos mandados. */
-const TRANSPORTE: Record<string, string> = { correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío estándar" };
+const TRANSPORTE: Record<string, string> = { correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío estándar", moto: "Envío en moto" };
 const SERVICIO: Record<string, string> = { domicilio: "a domicilio", sucursal: "a sucursal", en_el_dia: "en el día" };
 const AVISO: Record<string, string> = { en_camino: "En camino", en_sucursal: "En sucursal", llega_hoy: "Llega hoy", entregado: "Entregado", no_entregado: "No entregado" };
 
@@ -33,7 +33,7 @@ export function CajaEnvio({ numero, pedido }: { numero: string; pedido: Record<s
           {datos.paquete.entra === false && <span className="font-bold text-oferta"> · no entra en ninguna bolsa</span>}
         </p>
       )}
-      {t === "estandar" ? <p className="mt-2 text-sm text-tinta-suave">Sin transporte integrado: se marca enviado y entregado a mano.</p>
+      {t === "estandar" || t === "moto" ? <p className="mt-2 text-sm text-tinta-suave">Sin transporte integrado: se marca enviado y entregado a mano.</p>
         : !vigente ? <p className="mt-2 text-sm">Todavía sin etiqueta. <Link href="/envios" className="text-marca hover:underline">Preparalo en Envíos</Link>.</p>
         : (
           <div className="mt-2 space-y-1 text-sm">

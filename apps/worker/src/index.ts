@@ -35,6 +35,10 @@ const env = z.object({
   SMTP_URL: z.string().min(8).optional(),
   CORREO_DE: z.string().min(3).default("Isuwaya <isu.isuwaya@gmail.com>"),
   CORREO_RESPONDER: z.string().email().optional(),
+  // A dónde va el aviso interno de cada venta de la tienda (con el PDF). Sin ella no se manda.
+  CORREO_VENTAS: z.string().email().optional(),
+  // Para el link al pedido en el backoffice dentro de ese aviso.
+  ADMIN_URL: z.string().url().optional(),
   // Etapa 4: el enlace de seguimiento de los avisos (los transportes se configuran con sus propias variables).
   SITIO_URL: z.string().url().optional(),
   // "CLAVE=" en el .env es lo mismo que no ponerla.
@@ -96,7 +100,7 @@ const envios = crearEnvios({
 if (!env.SITIO_URL || !env.INTERNO_TOKEN) console.warn("Sin SITIO_URL / INTERNO_TOKEN: los avisos de envío van sin enlace de seguimiento.");
 
 const procesar = crearProcesar(deps, {
-  correo: crearCorreo({ smtp: env.SMTP_URL, de: env.CORREO_DE, responder: env.CORREO_RESPONDER }),
+  correo: crearCorreo({ smtp: env.SMTP_URL, de: env.CORREO_DE, responder: env.CORREO_RESPONDER, pool, ventas: env.CORREO_VENTAS, adminUrl: env.ADMIN_URL }),
   api,
   envios,
   whatsapp: transportes.whatsapp,

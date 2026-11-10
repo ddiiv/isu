@@ -266,12 +266,13 @@ export async function cotizar(
  * envío gratis del cupón la deja en $0 (salvo Mercado Envíos, que lo cobra
  * Mercado Pago en su checkout y no pasa por la tienda).
  */
-export function conEnvio(c: Cotizado, precio: number, o: { soloMercadoPago?: boolean } = {}) {
-  if (c.aplicado?.envioGratis && o.soloMercadoPago) {
+export function conEnvio(c: Cotizado, precio: number, o: { soloMercadoPago?: boolean; transporte?: string } = {}) {
+  const moto = o.transporte === "moto";
+  if (c.aplicado?.envioGratis && (o.soloMercadoPago || moto)) {
     // No descuenta nada: no se aplica (ni gasta un uso).
     c.aplicado = null;
     c.cupon = null;
-    c.avisoCupon = "El envío gratis del cupón no aplica a Mercado Envíos (lo cobra Mercado Pago en su checkout).";
+    c.avisoCupon = moto ? "El envío gratis del cupón no aplica al envío en moto." : "El envío gratis del cupón no aplica a Mercado Envíos (lo cobra Mercado Pago en su checkout).";
   }
   const bonifica = !!c.aplicado?.envioGratis;
   c.envio = o.soloMercadoPago || bonifica ? 0 : precio;
