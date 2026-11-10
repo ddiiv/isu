@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import { normalizarTalle, recomendarTalle, type GuiaPublica, type MedidasCliente } from "@isu/shared/puro";
+import { evento } from "@/lib/ga";
 import { useMedidas } from "@/lib/medidas";
 import { IconoCerrar } from "./iconos";
 
@@ -20,7 +21,9 @@ export function useRecomendado(guia: GuiaPublica | null) {
   return r.talle;
 }
 
-export function BotonGuiaTalles({ guia, disponibles, coloresCon, onElegir }: {
+export function BotonGuiaTalles({ guia, disponibles, coloresCon, onElegir, itemId }: {
+  /** slug del producto (para GA4) */
+  itemId?: string;
   guia: GuiaPublica; disponibles: string[]; onElegir: (talle: string) => void;
   /** En qué otros colores hay stock de un talle (para no dejar al cliente sin salida). */
   coloresCon?: (talle: string) => string[];
@@ -38,7 +41,7 @@ export function BotonGuiaTalles({ guia, disponibles, coloresCon, onElegir }: {
 
   // El asistente la abre ("Guía de talles de esta prenda"): con el aviso, o entrando con #guia-talles.
   useEffect(() => {
-    const abrir = () => { setPestana(cuerpo.length ? "mi-talle" : "tabla"); if (!dialogo.current?.open) dialogo.current?.showModal(); };
+    const abrir = () => { if (!dialogo.current?.open) evento("size_guide_open", itemId ? { item_id: itemId } : {}); setPestana(cuerpo.length ? "mi-talle" : "tabla"); if (!dialogo.current?.open) dialogo.current?.showModal(); };
     if (window.location.hash === "#guia-talles") abrir();
     window.addEventListener("isu:abrir-guia", abrir);
     return () => window.removeEventListener("isu:abrir-guia", abrir);
@@ -53,7 +56,7 @@ export function BotonGuiaTalles({ guia, disponibles, coloresCon, onElegir }: {
 
   return (
     <>
-      <button id="guia-talles" type="button" onClick={() => { setPestana(cuerpo.length && Object.keys(medidas).length ? "mi-talle" : "tabla"); dialogo.current?.showModal(); }}
+      <button id="guia-talles" type="button" onClick={() => { evento("size_guide_open", itemId ? { item_id: itemId } : {}); setPestana(cuerpo.length && Object.keys(medidas).length ? "mi-talle" : "tabla"); dialogo.current?.showModal(); }}
         className="text-sm font-bold text-marca underline underline-offset-2 hover:text-marca-fuerte">
         Guía de talles
       </button>

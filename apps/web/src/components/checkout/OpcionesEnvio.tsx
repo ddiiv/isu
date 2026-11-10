@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { formatearPesos, type ItemCarrito, type OpcionEnvio, type SucursalEnvio } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
+import { evento, pesos } from "@/lib/ga";
+import { useCarrito } from "../carrito/Carrito";
 
 /*
  * Cómo te lo mandamos: con el código postal, la API cotiza con cada
@@ -26,6 +28,7 @@ export function OpcionesEnvio({ items, destino, medioPago, cupon, valor, alCambi
   /** Cambia cuando hay que volver a pedir las opciones (p. ej. la API dijo que una ya no está). */
   recargar: number;
 }) {
+  const { cotizacion } = useCarrito();
   const [opciones, setOpciones] = useState<OpcionEnvio[] | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -93,7 +96,7 @@ export function OpcionesEnvio({ items, destino, medioPago, cupon, valor, alCambi
           const elegida = valor.opcion?.id === o.id;
           return (
             <label key={o.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 ${elegida ? "border-tinta bg-white" : "border-linea"}`}>
-              <input type="radio" name="opcionEnvio" checked={elegida} onChange={() => alCambiar({ opcion: o, sucursal: null })} className="mt-1 accent-tinta" />
+              <input type="radio" name="opcionEnvio" checked={elegida} onChange={() => { alCambiar({ opcion: o, sucursal: null }); evento("add_shipping_info", { currency: "ARS", value: pesos(cotizacion?.total ?? 0), shipping_tier: o.id }); }} className="mt-1 accent-tinta" />
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <b>{o.nombre}</b>

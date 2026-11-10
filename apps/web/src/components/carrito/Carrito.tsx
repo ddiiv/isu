@@ -122,6 +122,8 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
   const ultimas = useRef<OpcionesCotizar>({});
   // Número del último pedido de cotización: con +/- seguidos las respuestas pueden llegar en otro orden, y gana la última pedida.
   const ultimaCotizacion = useRef(0);
+  // El cupón que la persona acaba de escribir (no el recuperado del navegador): su resultado va a GA4 una vez.
+  const cuponTipeado = useRef<string | null>(null);
   // Nada se guarda hasta haber leído lo guardado: si no, el carrito vacío del
   // primer dibujo pisa el de verdad (React en desarrollo corre los efectos dos veces).
   const [cargado, setCargado] = useState(false);
@@ -158,6 +160,10 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
       if (n !== ultimaCotizacion.current) return null;
       setCotizacion(c);
       if (cupon) {
+        if (cuponTipeado.current === cupon) {
+          cuponTipeado.current = null;
+          evento("apply_coupon", { coupon: /^[A-Z0-9_-]{3,30}$/.test(cupon) ? cupon : "(otro)", valid: c.cupon?.codigo === cupon });
+        }
         // No se aplicó: se dice por qué y se deja de mandar.
         if (c.cupon?.codigo !== cupon) { setAvisoCupon(c.avisoCupon ?? "Ese cupón no se puede usar."); setCupon(null); }
         else setAvisoCupon(null);
@@ -253,7 +259,7 @@ export function ProveedorCarrito({ children }: { children: React.ReactNode }) {
     vaciar: () => { setLineas([]); setCotizacion(null); setCupon(null); setAvisoCupon(null); },
     cotizacion, cotizando, cotizar,
     cupon,
-    ponerCupon: (codigo) => { setAvisoCupon(null); setCupon(codigo ? normalizar(codigo).slice(0, 40) || null : null); },
+    ponerCupon: (codigo) => { setAvisoCupon(null); const n = codigo ? normalizar(codigo).slice(0, 40) || null : null; cuponTipeado.current = n; setCupon(n); },
     avisoCupon,
   }), [lineas, abierto, cotizacion, cotizando, cotizar, cupon, avisoCupon, avisoStock]);
 

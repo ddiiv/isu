@@ -5,7 +5,9 @@ import Script from "next/script";
  *
  * Carga después de que la página es interactiva: nunca frena el primer
  * render. Los eventos de e-commerce (view_item, add_to_cart, purchase) se
- * mandan desde las pantallas de catálogo y checkout (etapas 1 y 2).
+ * mandan desde las pantallas de catálogo y checkout (etapas 1 y 2). El clic
+ * en cualquier link de WhatsApp (wa.me) sale acá como `contact`, con el
+ * `data-origen` del link o, si no tiene, la página.
  */
 export function Analytics() {
   const id = process.env.NEXT_PUBLIC_GA_ID;
@@ -14,7 +16,7 @@ export function Analytics() {
     <>
       <Script src={`https://www.googletagmanager.com/gtag/js?id=${id}`} strategy="afterInteractive" />
       <Script id="ga4" strategy="afterInteractive">
-        {`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${id}',{anonymize_ip:true});`}
+        {`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${id}',{anonymize_ip:true});document.addEventListener('click',function(e){try{var a=e.target.closest&&e.target.closest('a[href^="https://wa.me/"]');if(a)gtag('event','contact',{method:'whatsapp',origen:a.dataset.origen||location.pathname});}catch(_){}},true);`}
       </Script>
     </>
   );

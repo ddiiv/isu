@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { formatearPesos, type BannerPublico } from "@isu/shared/puro";
 import { Banner } from "@isu/ui/banner";
 import { src, srcBanner, srcSetBanner } from "@/lib/fotos";
+import { evento } from "@/lib/ga";
 
 /*
  * Carrusel de la portada (backoffice → Portada). Cada banner tiene su foto
@@ -33,6 +34,28 @@ export function CarruselBanners({ banners }: { banners: BannerPublico[] }) {
   const [pestanaVisible, setPestanaVisible] = useState(true);
   const [menosMovimiento, setMenosMovimiento] = useState(false);
   const varios = banners.length > 1;
+  const vistos = useRef(new Set<number>());
+
+  // GA4: el banner activo cuenta como visto una vez por visita, cuando el carrusel está a la vista.
+  useEffect(() => {
+    const b = banners[actual];
+    if (!b || !aLaVista || vistos.current.has(b.id)) return;
+    vistos.current.add(b.id);
+    evento("view_promotion", { promotion_id: String(b.id), promotion_name: b.titulo ?? b.alt, creative_slot: String(actual + 1), creative_name: "banner" });
+  }, [actual, aLaVista, banners]);
+
+  // GA4: un solo oyente en la diapositiva (el paquete de UI no sabe de Analytics): qué se tocó, según el DOM.
+  const elegido = (e: React.MouseEvent, b: BannerPublico, i: number) => {
+    const t = e.target as Element;
+    const a = t.closest("a");
+    const etiqueta = t.closest<HTMLElement>("[data-etiqueta]")?.dataset.etiqueta;
+    const boton = a && b.botones.find((x) => x.texto === a.textContent?.trim());
+    if (!a && !etiqueta) return;
+    evento("select_promotion", {
+      promotion_id: String(b.id), promotion_name: b.titulo ?? b.alt, creative_slot: String(i + 1),
+      creative_name: etiqueta ? `etiqueta:${etiqueta}` : boton ? `boton:${boton.texto}` : "banner",
+    });
+  };
 
   const ir = useCallback((i: number) => {
     const el = pista.current;
@@ -70,7 +93,8 @@ export function CarruselBanners({ banners }: { banners: BannerPublico[] }) {
       <ul ref={pista} className="flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onScroll={(e) => { const el = e.currentTarget; setActual(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))); }}>
         {banners.map((b, i) => (
-          <li key={b.id} data-activa={i === actual} className="flex w-full shrink-0 snap-start" aria-roledescription="diapositiva" aria-label={`${i + 1} de ${banners.length}`}>
+          <li key={b.id} data-activa={i === actual} className="flex w-full shrink-0 snap-start" aria-roledescription="diapositiva" aria-label={`${i + 1} de ${banners.length}`}
+            onClick={(e) => elegido(e, b, i)}>
             <div className="h-full w-full overflow-hidden">
               <Banner b={b} srcBanner={(c) => srcBanner(c)} srcSetBanner={srcSetBanner} srcProducto={(c) => src({ clave: c, ancho: null, alto: null, alt: null }, 800)} pesos={formatearPesos} prioridad={i === 0} />
             </div>
