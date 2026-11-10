@@ -7,6 +7,7 @@ import { crearProcesar, CLAVE_NEGOCIO, type Dependencias } from "./procesadores.
 import { crearClienteStocker, MAX_SKUS_POR_PEDIDO } from "./stocker/cliente.js";
 import { escucharStocker } from "./stocker/escucha.js";
 import { crearCorreo } from "./correo/enviar.js";
+import { crearCarritos } from "./correo/carritos.js";
 import { crearInvalidador } from "./stocker/invalidar.js";
 import { crearTransportes } from "@isu/envios";
 import { crearEnvios } from "./envios/envios.js";
@@ -41,6 +42,8 @@ const env = z.object({
   ADMIN_URL: z.string().url().optional(),
   // Etapa 4: el enlace de seguimiento de los avisos (los transportes se configuran con sus propias variables).
   SITIO_URL: z.string().url().optional(),
+  // De dónde salen las fotos (la misma variable que usa la web): para las fotos del mail de carrito abandonado.
+  NEXT_PUBLIC_CDN_IMAGENES: z.string().optional(),
   // "CLAVE=" en el .env es lo mismo que no ponerla.
 }).parse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v !== "")));
 
@@ -99,10 +102,20 @@ const envios = crearEnvios({
 });
 if (!env.SITIO_URL || !env.INTERNO_TOKEN) console.warn("Sin SITIO_URL / INTERNO_TOKEN: los avisos de envío van sin enlace de seguimiento.");
 
+const cdnFotos = env.NEXT_PUBLIC_CDN_IMAGENES?.split(",")[0]?.trim();
+const carritos = crearCarritos({
+  pool,
+  encolar: (nombre, datos, id) => colaNotificaciones.add(nombre, datos, { jobId: id }),
+  sitio: env.SITIO_URL,
+  smtp: !!env.SMTP_URL,
+  fotos: cdnFotos?.startsWith("https://") ? cdnFotos : env.SITIO_URL ? `${env.SITIO_URL.replace(/\/+$/, "")}/fotos` : undefined,
+});
+
 const procesar = crearProcesar(deps, {
   correo: crearCorreo({ smtp: env.SMTP_URL, de: env.CORREO_DE, responder: env.CORREO_RESPONDER, pool, ventas: env.CORREO_VENTAS, adminUrl: env.ADMIN_URL }),
   api,
   envios,
+  carritos,
   whatsapp: transportes.whatsapp,
 });
 
@@ -140,6 +153,8 @@ await colaEnvios.upsertJobScheduler("seguimiento", { every: 10 * 60_000 }, { nam
 await colaEnvios.removeJobScheduler("revisar-despachos").catch(() => false);
 // Etapa 8: pedir la opinión de las compras entregadas.
 await colaEnvios.upsertJobScheduler("pedir-resenas", { every: 60 * 60_000 }, { name: "pedir-resenas" });
+// Recordatorio de carritos abandonados (sólo mail, con consentimiento) y purga de los viejos.
+await colaEnvios.upsertJobScheduler("carritos-abandonados", { every: 10 * 60_000 }, { name: "carritos-abandonados" });
 
 let escucha: ReturnType<typeof escucharStocker> | null = null;
 if (deps) {

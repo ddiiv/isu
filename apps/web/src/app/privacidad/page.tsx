@@ -37,6 +37,8 @@ export default function Privacidad() {
       <h2>Cookies</h2>
       <p>Usamos cookies propias para que funcionen el carrito y tu sesión, y de Google Analytics para medir visitas. Podés borrarlas o bloquearlas desde tu navegador; si bloqueás las propias, el carrito puede no funcionar.</p>
       <p>Google Analytics mide qué páginas se visitan, qué productos se miran y cómo avanza una compra, para mejorar la tienda. La primera vez que entrás te preguntamos si aceptás esas cookies de medición y publicidad: podés aceptarlas o rechazarlas. Si rechazás, Analytics sólo cuenta visitas de forma agregada, sin cookies ni identificarte, y el remarketing queda apagado. Podés cambiar tu elección cuando quieras desde el link «Cookies» al pie de cualquier página.</p>
+      <h2>Recordatorio de carrito (opcional)</h2>
+      <p>Si en el checkout marcás la opción «Quiero recibir un recordatorio por mail si dejo mi compra sin terminar», guardamos tu email y las prendas de tu carrito (modelo y cantidad) para mandarte, a las 2 horas, un único mail recordándotelo. No guardamos datos de pago ni de entrega para esto. Lo hacemos sólo con tu consentimiento, que podés retirar cuando quieras con el enlace «No quiero más recordatorios» de ese mail. Borramos el carrito cuando comprás o te das de baja, y de todos modos a los 7 días. Si te das de baja, conservamos tu email, sin carrito, hasta 90 días sólo para no volver a anotarte por error si se reenvía el mismo carrito. No compartimos estos datos con terceros, salvo el servicio de envío de correo que usamos para mandarte el mensaje.</p>
     </PaginaLegal>
   );
 }

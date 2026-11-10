@@ -86,6 +86,7 @@ const limpiarPedidos = async () => {
   await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
   await pool.query("DELETE FROM tienda.descuentos WHERE nombre LIKE 'QA %'");
   await pool.query("DELETE FROM tienda.arrepentimientos WHERE email LIKE 'qa-compra%'");
+  await pool.query("DELETE FROM tienda.carritos_abandonados WHERE email LIKE 'qa-compra%'");
   await pool.query("DELETE FROM tienda.pedidos WHERE email LIKE 'qa-compra%'");
   await pool.query("DELETE FROM tienda.clientes WHERE email LIKE 'qa-compra%'");
 };
@@ -570,6 +571,110 @@ describe("botón de arrepentimiento", () => {
     expect(a.json().mensaje).not.toMatch(/cancelado/);
     expect(stocker.pedidos.get(r.numero)?.estado).toBe("aceptado");
     expect(mails("arrepentimiento")).toHaveLength(0);
+  });
+});
+
+describe("carrito abandonado (recordatorio por mail)", () => {
+  const mail = (n: string) => `qa-compra-car-${n}@test.com`;
+  const fila = async (n: string) => (await pool.query("SELECT * FROM tienda.carritos_abandonados WHERE email = $1", [mail(n)])).rows[0];
+  const anotar = (n: string, extra: Record<string, unknown> = {}) => post("/v1/carrito-recordatorio", { email: mail(n), items: [{ sku: "QA-C-M", cantidad: 2 }], acepto: true, ...extra });
+  beforeEach(async () => { await cargarCatalogo(); });
+  afterAll(async () => { await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'"); });
+
+  it("con el tilde: 204, se guarda el mail y SKU+cantidad (sólo los que existen), con un token de baja de 256 bits", async () => {
+    const r = await anotar("a", { email: "  QA-Compra-Car-A@Test.com ", items: [{ sku: "QA-C-M", cantidad: 2 }, { sku: "QA-C-M", cantidad: 1 }, { sku: "NO-EXISTE", cantidad: 1 }] });
+    expect([r.statusCode, r.body]).toEqual([204, ""]);
+    const f = await fila("a");
+    expect(f.items).toEqual([{ sku: "QA-C-M", cantidad: 3 }]);
+    expect(Buffer.from(f.baja_token, "base64url")).toHaveLength(32);
+    expect([f.recordado_en, f.convertido_en, f.baja_en]).toEqual([null, null, null]);
+  });
+
+  it("sin el tilde (falta, false o distinto de true) o con items de más: 400 y no se guarda nada", async () => {
+    for (const [i, extra] of [{ acepto: false }, { acepto: "true" }, { acepto: undefined }, { items: Array.from({ length: 31 }, (_, k) => ({ sku: `S-${k}`, cantidad: 1 })) }, { items: [] }, { email: "no-es-mail" }].entries()) {
+      const r = await anotar(`x${i}`, extra);
+      expect(r.statusCode, JSON.stringify(extra)).toBe(400);
+    }
+    expect((await pool.query("SELECT 1 FROM tienda.carritos_abandonados WHERE email LIKE 'qa-compra-car-x%'")).rowCount).toBe(0);
+    // Un carrito con puros SKU inexistentes: 204 y nada guardado.
+    expect((await anotar("y", { items: [{ sku: "NO-EXISTE", cantidad: 1 }] })).statusCode).toBe(204);
+    expect(await fila("y")).toBeUndefined();
+  });
+
+  it("la respuesta es idéntica exista o no el mail (no se puede averiguar quién tiene un carrito)", async () => {
+    const nuevo = await anotar("b");
+    const repetido = await anotar("b");
+    for (const r of [nuevo, repetido]) expect([r.statusCode, r.body, r.headers["content-length"]]).toEqual([204, "", undefined]);
+    expect(nuevo.headers).toEqual(expect.objectContaining({ "cache-control": "no-store" }));
+    expect((await pool.query("SELECT 1 FROM tienda.carritos_abandonados WHERE email = $1", [mail("b")])).rowCount).toBe(1);
+  });
+
+  it("la baja borra los items, se respeta (reenviar el carrito no la vuelve a anotar) y el token falso también da 204", async () => {
+    await anotar("c");
+    const { baja_token } = await fila("c");
+    const b = await post("/v1/carrito-recordatorio/baja", { token: baja_token });
+    expect([b.statusCode, b.body]).toEqual([204, ""]);
+    const f = await fila("c");
+    expect(f.items).toEqual([]);
+    expect(f.baja_en).not.toBeNull();
+    const antes = f.baja_en;
+    expect((await anotar("c", { items: [{ sku: "QA-C-L", cantidad: 1 }] })).statusCode).toBe(204);
+    const despues = await fila("c");
+    expect([despues.items, despues.baja_en, despues.recordado_en]).toEqual([[], antes, null]);
+    // Token que no existe, o con formato raro: sin enterarse de nada más.
+    expect((await post("/v1/carrito-recordatorio/baja", { token: "a".repeat(43) })).statusCode).toBe(204);
+    expect((await post("/v1/carrito-recordatorio/baja", { token: "corto" })).statusCode).toBe(400);
+  });
+
+  it("un solo recordatorio por mail cada 90 días aunque cambie el carrito (y no se guardan items nuevos); pasados los 90, vuelve a anotarse", async () => {
+    await anotar("d");
+    // Como lo deja el worker al recordar: marcado y sin items.
+    await pool.query("UPDATE tienda.carritos_abandonados SET recordado_en = now() - interval '3 hours', items = '[]' WHERE email = $1", [mail("d")]);
+    const antes = await fila("d");
+    for (const items of [[{ sku: "QA-C-M", cantidad: 2 }], [{ sku: "QA-C-L", cantidad: 1 }]]) {
+      expect((await anotar("d", { items })).statusCode).toBe(204);
+      const f = await fila("d");
+      expect([f.recordado_en, f.items, f.actualizado_en]).toEqual([antes.recordado_en, [], antes.actualizado_en]);
+    }
+    // Aunque pase más de un día (antes se re-armaba a las 24 h).
+    await pool.query("UPDATE tienda.carritos_abandonados SET recordado_en = now() - interval '30 days' WHERE email = $1", [mail("d")]);
+    await anotar("d", { items: [{ sku: "QA-C-L", cantidad: 1 }] });
+    expect((await fila("d")).recordado_en).not.toBeNull();
+    expect((await fila("d")).items).toEqual([]);
+    await pool.query("UPDATE tienda.carritos_abandonados SET recordado_en = now() - interval '91 days' WHERE email = $1", [mail("d")]);
+    await anotar("d", { items: [{ sku: "QA-C-L", cantidad: 1 }] });
+    const f = await fila("d");
+    expect([f.recordado_en, f.items]).toEqual([null, [{ sku: "QA-C-L", cantidad: 1 }]]);
+  });
+
+  it("al crear un pedido con ese mail, el carrito queda convertido y sin items", async () => {
+    await anotar("e", { email: "qa-compra-car-e@test.com" });
+    const r = await post("/v1/pedidos", pedido("car-e"));
+    expect(r.statusCode, r.body).toBe(201);
+    const f = await fila("e");
+    expect(f.convertido_en).not.toBeNull();
+    expect(f.items).toEqual([]);
+  });
+
+  it("con la tienda apagada: 204 y no se guarda nada (la baja sigue andando)", async () => {
+    await anotar("f");
+    const { baja_token } = await fila("f");
+    await pool.query(`INSERT INTO tienda.ajustes (clave, valor) VALUES ('tiendaCerrada', $1) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor`,
+      [JSON.stringify({ activa: true, titulo: "Cerrado", mensaje: "Volvemos.", vuelve: "" })]);
+    expect((await anotar("g")).statusCode).toBe(204);
+    expect(await fila("g")).toBeUndefined();
+    expect((await post("/v1/carrito-recordatorio/baja", { token: baja_token })).statusCode).toBe(204);
+    expect((await fila("f")).baja_en).not.toBeNull();
+    await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'");
+  });
+
+  it("freno por mail (20 por hora) y por IP en las dos rutas (30 por hora)", async () => {
+    for (let i = 0; i < 20; i++) expect((await anotar("h")).statusCode).toBe(204);
+    expect((await anotar("h")).statusCode).toBe(429);
+    for (let i = 0; i < 9; i++) expect((await anotar(`z${i}`)).statusCode).toBe(204);
+    expect((await anotar("otro")).statusCode).toBe(429);
+    for (let i = 0; i < 30; i++) expect((await post("/v1/carrito-recordatorio/baja", { token: "b".repeat(43) })).statusCode).toBe(204);
+    expect((await post("/v1/carrito-recordatorio/baja", { token: "b".repeat(43) })).statusCode).toBe(429);
   });
 });
 

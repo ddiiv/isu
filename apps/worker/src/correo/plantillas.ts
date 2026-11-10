@@ -14,6 +14,8 @@ export const PLANTILLAS = [
   "envio_en_camino", "envio_en_sucursal", "envio_llega_hoy", "envio_entregado", "envio_no_entregado",
   // Etapa 8: pedir la opinión de la compra.
   "pedir_resena",
+  // Recordatorio de un carrito dejado (sólo a quien marcó el tilde del checkout).
+  "carrito_abandonado",
   // Mail interno para el negocio: se vendió algo en la tienda online (sale a CORREO_VENTAS, no al cliente).
   "venta_tienda",
 ] as const;
@@ -164,6 +166,19 @@ export function armar(plantilla: Plantilla, datos: Record<string, unknown>): { a
         asunto: `¿Qué te pareció tu compra, ${d.nombre}?`,
         html: marco(`¿Qué te pareció, ${d.nombre}?`, `<p>Ya tenés tu pedido <b>${esc(d.numero)}</b>. Contanos cómo te quedó: tu opinión ayuda a otras personas a elegir el talle y a nosotros a hacer mejor la ropa.</p>${lista}${estrellas ? `<p style="margin:20px 0 4px;color:#6b6b6b;font-size:13px">Tocá las estrellas:</p><p style="margin:0;line-height:1.3">${estrellas}</p>` : ""}${boton("Dejar mi opinión", d.enlace)}<p style="color:#6b6b6b;font-size:13px">Te lleva un minuto. Si algo no te quedó bien, respondé este mail y lo resolvemos.</p>`),
         texto: `¿Qué te pareció tu compra, ${d.nombre}? Contanos cómo te quedó el pedido ${d.numero}: ${d.enlace}`,
+      };
+    }
+    case "carrito_abandonado": {
+      const d = datos as { items: Array<{ nombre: string; color: string | null; talle: string | null; cantidad: number; precio: number; foto: string | null }>; enlace: string; baja: string };
+      const items = (Array.isArray(d.items) ? d.items : []).slice(0, 30);
+      // La foto sólo si es https: el mail nunca arma una URL con lo que venga de afuera.
+      const foto = (u: unknown) => (typeof u === "string" && /^https:\/\/[^\s"'<>]+$/.test(u) ? `<img src="${esc(u)}" width="64" alt="" style="display:block;border-radius:8px">` : "");
+      const filas = items.map((i) => `<tr><td width="72" style="padding:8px 12px 8px 0">${foto(i.foto)}</td><td style="padding:8px 0;font-size:14px">${esc(i.cantidad)} × ${esc(i.nombre)}${i.color ? ` · ${esc(i.color)}` : ""}${i.talle ? ` · ${esc(i.talle)}` : ""}</td><td align="right" style="font-size:14px">${esc(formatearPesos(i.precio * i.cantidad))}</td></tr>`).join("");
+      const sinBaja = enlaceSeguro(d.baja) === "#";
+      return {
+        asunto: "Un carrito pendiente en Isuwaya",
+        html: marco("Un carrito te espera", `<p>Este es el carrito que quedó pendiente en isuwaya.com. Los precios son los de hoy y el stock puede cambiar.</p><table role="presentation" width="100%" style="border-top:1px solid #e7e5e4;border-bottom:1px solid #e7e5e4;margin:16px 0">${filas}</table>${boton("Volver a mi carrito", d.enlace)}<p style="color:#6b6b6b;font-size:12px">Alguien pidió en isuwaya.com que te recordemos este carrito. Si fuiste vos, podés volver a él; si no, ignorá este mail${sinBaja ? "" : ` o <a href="${esc(enlaceSeguro(d.baja))}" style="color:#6b6b6b">dá de baja acá</a>`}. Es el único mail que te mandamos por este carrito.</p>`),
+        texto: `Un carrito pendiente en isuwaya.com (precios de hoy):\n${items.map((i) => `- ${i.cantidad} × ${i.nombre}${i.color ? ` · ${i.color}` : ""}${i.talle ? ` · ${i.talle}` : ""} · ${formatearPesos(i.precio * i.cantidad)}`).join("\n")}\nVolver a mi carrito: ${d.enlace}\n\nAlguien pidió en isuwaya.com que te recordemos este carrito. Si fuiste vos, podés volver a él; si no, ignorá este mail${sinBaja ? "" : ` o dá de baja acá: ${d.baja}`}. Es el único mail que te mandamos por este carrito.`,
       };
     }
     case "envio_en_camino":
