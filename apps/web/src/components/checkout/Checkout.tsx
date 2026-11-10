@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { centavos, conDescuento, formatearPesos, NOMBRES_PROVINCIAS, PedidoNuevo, type ConfigPublica, type Cotizacion, type LugarDireccion, type MedioPago } from "@isu/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { centavos, conDescuento, Email, formatearPesos, NOMBRES_PROVINCIAS, PedidoNuevo, type ConfigPublica, type Cotizacion, type LugarDireccion, type MedioPago } from "@isu/shared";
 import { itemDe, useCarrito } from "../carrito/Carrito";
 import { Foto } from "../Foto";
 import { CampoCupon, LineaCupon } from "../carrito/LineasCarrito";
@@ -49,6 +49,11 @@ export function Checkout({ config }: { config: ConfigPublica }) {
   const [envio, setEnvio] = useState<EleccionEnvio>({ opcion: null, sucursal: null });
   const [recargarEnvio, setRecargarEnvio] = useState(0);
   const [avisosWhatsapp, setAvisosWhatsapp] = useState(true);
+  // Recordatorio de carrito abandonado: el tilde viene SIN marcar. Sólo con él marcado y un mail válido se manda
+  // el carrito a la API (al salir del campo de mail, con espera, y de nuevo sólo si cambia el mail o el carrito).
+  const [recordar, setRecordar] = useState(false);
+  const [emailListo, setEmailListo] = useState("");
+  const ultimoRecordatorio = useRef("");
   const cambiar = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setC((x) => ({ ...x, [k]: e.target.value }));
   // Etapa 11: la sugerencia de Google elegida completa la dirección (lo que no trae queda como estaba).
   const elegirLugar = (l: LugarDireccion) => {
@@ -81,6 +86,23 @@ export function Checkout({ config }: { config: ConfigPublica }) {
   // Dependencias a propósito: se recotiza al cambiar entrega, medio, cantidades o la opción de envío
   useEffect(() => { void cotizar({ entrega, medioPago: medio, envio: datosEnvio() }); }, [entrega, medio, unidades, opcionId]);
   const items = useMemo(() => lineas.map(itemDe), [lineas]);
+  // Los packs se anotan como sus prendas sueltas (la API del recordatorio sólo guarda SKU y cantidad).
+  const itemsRecordatorio = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of lineas) for (const p of l.pack ? l.pack.prendas.map((x) => ({ sku: x.sku, n: x.cantidad * l.cantidad })) : [{ sku: l.sku, n: l.cantidad }]) m.set(p.sku, Math.min(20, (m.get(p.sku) ?? 0) + p.n));
+    return [...m].slice(0, 30).map(([sku, cantidad]) => ({ sku, cantidad }));
+  }, [lineas]);
+  useEffect(() => {
+    const mail = Email.safeParse(emailListo);
+    if (!recordar || !mail.success || !itemsRecordatorio.length) return;
+    const clave = JSON.stringify([mail.data, itemsRecordatorio]);
+    if (clave === ultimoRecordatorio.current) return;
+    const espera = setTimeout(() => {
+      ultimoRecordatorio.current = clave;
+      api("carrito-recordatorio", { cuerpo: { email: mail.data, items: itemsRecordatorio, acepto: true } }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(espera);
+  }, [recordar, emailListo, itemsRecordatorio]);
   const [verResumen, setVerResumen] = useState(false);
 
   const cuerpo = useMemo(() => ({
@@ -171,7 +193,11 @@ export function Checkout({ config }: { config: ConfigPublica }) {
 
           <fieldset className="space-y-3">
             <legend className={titulo}>Contacto</legend>
-            {inp("email", "Email", { type: "email", autoComplete: "email", inputMode: "email" })}
+            {inp("email", "Email", { type: "email", autoComplete: "email", inputMode: "email", onBlur: (e) => setEmailListo(e.target.value) })}
+            <label className="flex gap-2 text-sm text-tinta-suave">
+              <input type="checkbox" checked={recordar} onChange={(e) => { setRecordar(e.target.checked); setEmailListo(c.email ?? ""); }} className="mt-0.5 size-4 accent-tinta" />
+              <span>Quiero recibir un recordatorio por mail si dejo mi compra sin terminar. Puedo darme de baja cuando quiera. <Link href="/privacidad" target="_blank" className="underline">Cómo usamos tu mail</Link>.</span>
+            </label>
             <div className="grid gap-3 sm:grid-cols-2">
               {inp("nombre", "Nombre", { autoComplete: "given-name" })}
               {inp("apellido", "Apellido", { autoComplete: "family-name" })}

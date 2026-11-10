@@ -42,4 +42,24 @@ describe("crearCorreo", () => {
     expect(m.text).toContain("https://admin.isuwaya.com/pedidos/ISU-1234");
     expect(m.attachments).toHaveLength(1);
   });
+  it("el recordatorio de carrito lleva List-Unsubscribe (sólo si el enlace es https); los demás mails no", async () => {
+    const enviar = crearCorreo({ smtp: "smtp://x", de: "a@b.com", pool });
+    const datos = (baja: string) => ({ items: [{ nombre: "Remera", color: null, talle: "M", cantidad: 1, precio: 1_000_000, foto: null }], enlace: "https://x.test/carrito", baja });
+    await enviar({ plantilla: "carrito_abandonado", para: "ana@test.com", datos: datos("https://x.test/baja-recordatorios#t=abc") });
+    await enviar({ plantilla: "carrito_abandonado", para: "ana@test.com", datos: datos("javascript:alert(1)") });
+    await enviar({ plantilla: "bienvenida", para: "ana@test.com", datos: { nombre: "Ana" } });
+    expect(sendMail.mock.calls.map((c) => (c[0] as { headers?: unknown }).headers)).toEqual([{ "List-Unsubscribe": "<https://x.test/baja-recordatorios#t=abc>" }, undefined, undefined]);
+  });
+  it("recordatorio de carrito: si ya hay baja o compra (o el registro no está) se descarta sin mandar y sin error", async () => {
+    const datos = { items: [{ nombre: "Remera", color: null, talle: "M", cantidad: 1, precio: 1_000_000, foto: null }], enlace: "https://x.test/carrito", baja: "https://x.test/baja-recordatorios#t=abc" };
+    const consultas: unknown[][] = [];
+    const sinVigente = { query: vi.fn(async (_sql: string, params: unknown[]) => { consultas.push(params); return { rows: [] }; }) } as never;
+    const r = await crearCorreo({ smtp: "smtp://x", de: "a@b.com", pool: sinVigente })({ plantilla: "carrito_abandonado", para: "Ana@Test.com", datos });
+    expect(r).toEqual({ enviado: false, omitido: "baja o compra" });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(consultas).toEqual([["Ana@Test.com"]]);
+    // Con el registro vigente sí sale.
+    await crearCorreo({ smtp: "smtp://x", de: "a@b.com", pool })({ plantilla: "carrito_abandonado", para: "ana@test.com", datos });
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
 });

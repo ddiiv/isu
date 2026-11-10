@@ -8,6 +8,7 @@ import { crearCobros } from "./stocker/cobros.js";
 import { crearNovedades } from "./stocker/novedades.js";
 import type { Invalidador } from "./stocker/invalidar.js";
 import type { Envios } from "./envios/envios.js";
+import type { Carritos } from "./correo/carritos.js";
 import type { Whatsapp } from "@isu/envios";
 
 /*
@@ -29,6 +30,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/seguir          uno ya (botón "Actualizar" del backoffice).
  * envios/revisar-despachos  (viejo) lo mismo que stocker/novedades.
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
+ * envios/carritos-abandonados  cada 10 minutos: purga los carritos viejos y manda el recordatorio (un solo mail) a quien lo pidió.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
  * envios/preparar        prepara solo el envío de un pedido recién pagado (lo hace la API).
  * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
@@ -51,6 +53,7 @@ export interface Extras {
   /** POST a una ruta interna de la API (con la credencial interna). */
   api?: (ruta: string) => Promise<unknown>;
   envios?: Envios;
+  carritos?: Carritos;
   whatsapp?: Whatsapp | null;
 }
 
@@ -197,6 +200,10 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
       "pedir-resenas": async () => {
         if (!extras.envios) throw sinReintento("Envíos sin configurar");
         return extras.envios.pedirResenas();
+      },
+      "carritos-abandonados": async () => {
+        if (!extras.carritos) throw sinReintento("Carritos sin configurar");
+        return extras.carritos.recordar();
       },
       "mercado-envios": async (t) => {
         if (!extras.envios) throw sinReintento("Envíos sin configurar");

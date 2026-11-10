@@ -324,6 +324,10 @@ export function crearServicioPedidos(deps: DepsPedidos) {
           : "Justo se vendió algo de tu carrito. Revisalo y probá de nuevo.", { faltantes });
     }
 
+    // Compró: el recordatorio de carrito abandonado de ese mail ya no corresponde. Si falla, el pedido sigue igual.
+    await pool.query("UPDATE tienda.carritos_abandonados SET convertido_en = now(), items = '[]'::jsonb WHERE email = $1", [contacto.email])
+      .catch((e: Error) => deps.log.error({ err: e.message, pedido: p.numero }, "no se pudo marcar el carrito como comprado"));
+
     const estado = ESTADO_INICIAL[medioPago];
     p = (await pool.query<FilaPedido>(
       "UPDATE tienda.pedidos SET estado = $2, vence_en = $3, stocker_estado = $4, actualizado_en = now() WHERE id = $1 RETURNING *",

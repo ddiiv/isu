@@ -91,4 +91,23 @@ describe("venta_tienda (aviso interno)", () => {
   it("escapa lo que escribió el cliente", () => {
     expect(armar("venta_tienda", venta({ nombre: "<script>x</script>" })).html).not.toContain("<script>");
   });
+  it("carrito abandonado: escapa los nombres, no arma enlaces ni fotos raros y lleva la baja", () => {
+    const m = armar("carrito_abandonado", {
+      items: [{ nombre: '<script>x</script><b>Remera</b>', color: '"><i>Negro</i>', talle: "M", cantidad: 2, precio: 1_000_000, foto: "javascript:alert(1)" },
+        { nombre: "Buzo", color: null, talle: null, cantidad: 1, precio: 2_000_000, foto: "https://f.isuwaya.test/p/1/abc-400.webp" }],
+      enlace: "https://www.isuwaya.test/carrito", baja: "https://www.isuwaya.test/baja-recordatorios#t=tok",
+    });
+    expect(m.html).not.toContain("<script>");
+    expect(m.html).not.toContain("<i>Negro");
+    expect(m.html).not.toContain("javascript:");
+    expect(m.html).toContain("&lt;script&gt;x&lt;/script&gt;");
+    expect(m.html).toContain('<img src="https://f.isuwaya.test/p/1/abc-400.webp"');
+    expect(m.html).toContain('href="https://www.isuwaya.test/carrito"');
+    expect(m.html).toContain('href="https://www.isuwaya.test/baja-recordatorios#t=tok"');
+    expect(m.html).toContain("Volver a mi carrito");
+    expect(m.html).toContain("Alguien pidió en isuwaya.com que te recordemos este carrito");
+    expect(m.html).toContain("dá de baja acá");
+    expect(m.html + m.texto).not.toContain("marcaste");
+    expect(m.texto).toContain("dá de baja acá: https://www.isuwaya.test/baja-recordatorios#t=tok");
+  });
 });

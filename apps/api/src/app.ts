@@ -19,6 +19,7 @@ import { rutasProductos } from "./modulos/productos/rutas.js";
 import { rutasFotos } from "./modulos/fotos/rutas.js";
 import { rutasCuentas } from "./modulos/cuentas/rutas.js";
 import { rutasPedidos } from "./modulos/pedidos/rutas.js";
+import { rutasCarritos } from "./modulos/carritos/rutas.js";
 import { rutasOutfits } from "./modulos/outfits/rutas.js";
 import { crearServicioPedidos } from "./modulos/pedidos/servicio.js";
 import { crearColas, type Colas } from "./lib/colas.js";
@@ -143,6 +144,7 @@ export async function construirApp(deps: Dependencias) {
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
   await rutasEnvios(app, { pool, redis, env, cotizador, transportes, descuentos });
+  await rutasCarritos(app, { pool, redis, env });
 
   // ── Etapa 3: backoffice ──
   // Sin FOTOS_DIR ni R2 el backoffice funciona igual, pero no deja subir fotos.

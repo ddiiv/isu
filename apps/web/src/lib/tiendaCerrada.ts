@@ -10,5 +10,5 @@ export const estadoTienda = (): EstadoTienda => (g.__isuTienda ??= { cerrada: nu
 /** El dueño prendió o apagó la tienda (o cambió el catálogo): el próximo pedido pregunta de nuevo, sin esperar al vencimiento. */
 export const vencerTienda = () => { estadoTienda().vence = 0; };
 
-/** Páginas que siguen abiertas con la tienda apagada: lo de quien ya compró (pedido, seguimiento, arrepentimiento, opinión) y lo legal. */
-export const LIBRES_CON_TIENDA_APAGADA = /^\/(pedido|seguimiento|arrepentimiento|opinar|terminos|privacidad|devoluciones|cerrada)(\/|$)/;
+/** Páginas que siguen abiertas con la tienda apagada: lo de quien ya compró (pedido, seguimiento, arrepentimiento, opinión, baja de recordatorios) y lo legal. */
+export const LIBRES_CON_TIENDA_APAGADA = /^\/(pedido|seguimiento|arrepentimiento|opinar|baja-recordatorios|terminos|privacidad|devoluciones|cerrada)(\/|$)/;

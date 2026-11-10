@@ -26,6 +26,9 @@ const REGLAS: Regla[] = [
   { metodo: "POST", patron: /^cuenta\/olvide$/, api: () => "/v1/cuenta/olvide" },
   { metodo: "POST", patron: /^cuenta\/contrasena$/, api: () => "/v1/cuenta/contrasena" },
   { metodo: "POST", patron: /^arrepentimiento$/, api: () => "/v1/arrepentimiento" },
+  // Recordatorio de carrito abandonado (sólo con el tilde del checkout) y su baja desde el mail.
+  { metodo: "POST", patron: /^carrito-recordatorio$/, api: () => "/v1/carrito-recordatorio" },
+  { metodo: "POST", patron: /^carrito-recordatorio\/baja$/, api: () => "/v1/carrito-recordatorio/baja" },
   { metodo: "POST", patron: /^outfits$/, api: () => "/v1/outfits" },
   // Etapa 4: envíos y seguimiento.
   { metodo: "POST", patron: /^envios\/opciones$/, api: () => "/v1/envios/opciones" },

@@ -26,6 +26,12 @@ export function crearCorreo(o: { smtp?: string; de: string; responder?: string; 
   const t = o.smtp ? nodemailer.createTransport({ url: o.smtp, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000 }) : null;
   return async (datos: unknown) => {
     const j = Trabajo.parse(datos);
+    // Recordatorio de carrito: si entre que se encoló y ahora la persona se dio de baja o compró (un reintento con espera, o el hueco
+    // entre marcar y encolar), el mail se descarta sin error.
+    if (j.plantilla === "carrito_abandonado" && o.pool) {
+      const vigente = await o.pool.query("SELECT 1 FROM tienda.carritos_abandonados WHERE email = lower($1) AND baja_en IS NULL AND convertido_en IS NULL", [j.para]);
+      if (!vigente.rows.length) return { enviado: false, omitido: "baja o compra" };
+    }
     const interno = j.plantilla === "venta_tienda";
     if (interno && !o.ventas) return { enviado: false, omitido: "sin CORREO_VENTAS" };
     const cargar = (interno || j.plantilla === "pago_confirmado") && o.pool && typeof j.datos.numero === "string" ? cargarPedido(o.pool, j.datos.numero) : null;
@@ -47,7 +53,9 @@ export function crearCorreo(o: { smtp?: string; de: string; responder?: string; 
       try { attachments = [{ filename: `pedido-${adjuntar.numero}.pdf`, content: await pdfPedido(adjuntar, interno), contentType: "application/pdf" }]; }
       catch (e) { console.error(`[correo] no se pudo armar el PDF de ${adjuntar.numero}:`, (e as Error).message); }
     }
-    const r = await t.sendMail({ from: o.de, to: para, replyTo: o.responder, subject: m.asunto, html: m.html, text: m.texto, attachments });
+    // Sólo el recordatorio de carrito lleva el enlace de baja también en la cabecera (el cliente de mail muestra «Cancelar suscripción»).
+    const baja = j.plantilla === "carrito_abandonado" && typeof j.datos.baja === "string" && /^https:\/\/[^\s"'<>]+$/.test(j.datos.baja) ? { "List-Unsubscribe": `<${j.datos.baja}>` } : undefined;
+    const r = await t.sendMail({ from: o.de, to: para, replyTo: o.responder, subject: m.asunto, html: m.html, text: m.texto, attachments, headers: baja });
     return { enviado: true, id: r.messageId };
   };
 }
