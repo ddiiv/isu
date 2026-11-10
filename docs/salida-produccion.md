@@ -89,3 +89,27 @@ La tienda es **aditiva**: todo lo suyo vive en el esquema `tienda` y en tablas/c
 | El asistente entero | Ajustes → "Mostrar el asistente" apagado: vuelve el botón de WhatsApp. |
 | Un cupón mal cargado | Backoffice → Cupones → **Pausar**: deja de aplicarse al instante (los pedidos ya hechos conservan su precio). |
 | La importación del mayorista | Las fotos se pueden borrar o reordenar por producto en el backoffice; `--reemplazar` vuelve a traerlas de cero. No toca precios ni stock. |
+
+## Eventos de Analytics
+
+Todos salen desde `apps/web/src/lib/ga.ts` (`evento`), no hacen nada si GA no está cargado y nunca mandan datos personales (ni email, teléfono, DNI, nombre, dirección ni textos de error).
+
+| Evento | Cuándo sale | Parámetros |
+|---|---|---|
+| `view_item_list`, `select_item`, `view_item`, `generate_lead` | Grillas, tarjetas y ficha (e-commerce) | lista, `items` |
+| `view_cart`, `add_to_cart`, `remove_from_cart`, `begin_checkout`, `add_payment_info`, `purchase` | Carrito, checkout y pedido pagado | `currency`, `value`, `items`, `payment_type`, `transaction_id` |
+| `search` | /buscar, una vez por consulta ya resuelta | `search_term` (máx. 100 caracteres; no se manda si parece un email o tiene 6+ dígitos), `results` |
+| `view_promotion` | Banner del inicio activo y a la vista, una vez por banner por visita | `promotion_id`, `promotion_name`, `creative_slot` (1..n), `creative_name` = `banner` |
+| `select_promotion` | Tocar el banner, un botón, la tarjeta de producto o un punto de etiqueta | los mismos; `creative_name` = `banner`, `boton:<texto>` o `etiqueta:<slug>` |
+| `contact` | Clic en cualquier link `wa.me` (botón flotante, footer, páginas) | `method` = `whatsapp`, `origen` (`boton_flotante` o la ruta de la página) |
+| `size_guide_open` | Abrir la guía de talles de una ficha | `item_id` (slug) |
+| `apply_coupon` | El cliente escribe un código y se cotiza (válido o rechazado) | `coupon` (sólo si tiene forma de código), `valid` |
+| `add_shipping_info` | El cliente elige una opción de envío en el checkout | `currency`, `value`, `shipping_tier` (id de la opción: `moto:en_el_dia`, `andreani:domicilio`…) |
+| `payment_failed` | Mercado Pago vuelve con el pago rechazado, o el pedido figura vencido; una vez por pedido y navegador | `payment_type` (`mercadopago` o `transferencia`) |
+
+En Analytics (Administrar → Eventos):
+
+- **Marcar como evento clave:** `purchase`, `begin_checkout`, `generate_lead`, `contact`, `add_shipping_info`.
+- **Dimensiones personalizadas** (ámbito Evento): `results` (de `search`), `creative_name` (de `select_promotion`), `payment_type` (de `payment_failed`), `shipping_tier` (de `add_shipping_info`).
+
+Las dimensiones y los eventos clave tardan 24-48 h en aparecer en los informes; los eventos se ven antes en Tiempo real / DebugView.

@@ -58,6 +58,16 @@ export function EstadoPedido({ numero, whatsapp }: { numero: string; whatsapp: s
           }
         } catch { /* */ }
       }
+      // payment_failed una sola vez por pedido y navegador: Mercado Pago volvió con el pago rechazado, o el pedido venció.
+      const rechazado = /rejected/.test(window.location.search);
+      if (rechazado || x.estado === "vencido") {
+        try {
+          if (!localStorage.getItem(`isu:ga:fallo:${numero}`)) {
+            evento("payment_failed", { payment_type: rechazado || !x.pago.transferencia ? "mercadopago" : "transferencia" });
+            localStorage.setItem(`isu:ga:fallo:${numero}`, "1");
+          }
+        } catch { /* */ }
+      }
     } catch (e) {
       setError((e as ErrorApi).status === 404 ? "No encontramos ese pedido en este navegador. Abrilo desde el enlace del mail o ingresá a tu cuenta." : (e as Error).message);
     }

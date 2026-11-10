@@ -116,7 +116,7 @@ export function Etiquetas({ etiquetas, fotoMovil, vista, movil, srcProducto, pes
             const abiertaEsta = abierta === i;
             const tarjeta = lugarTarjeta((l.x / 100) * medida.w, (l.y / 100) * medida.h, medida.w, medida.h);
             return (
-              <div key={`${p.slug}-${i}`} data-etiqueta>
+              <div key={`${p.slug}-${i}`} data-etiqueta={p.slug}>
                 <button type="button" ref={(el) => { puntos.current[i] = el; }} tabIndex={vista ? -1 : undefined}
                   aria-expanded={abiertaEsta} aria-controls={`${id}-${i}`} aria-label={`Ver ${p.nombre}`}
                   onClick={(ev) => {

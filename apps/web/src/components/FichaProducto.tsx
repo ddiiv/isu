@@ -173,7 +173,7 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
           {/* El botón queda fuera del <fieldset> (que es sólo de los talles), a la altura del título. */}
           {p.guiaTalles && (
             <div className="absolute right-0 top-0 z-10">
-              <BotonGuiaTalles guia={p.guiaTalles} disponibles={delColor.filter((v) => v.stock > 0 && v.talle).map((v) => v.talle!)}
+              <BotonGuiaTalles guia={p.guiaTalles} itemId={p.slug} disponibles={delColor.filter((v) => v.stock > 0 && v.talle).map((v) => v.talle!)}
                 coloresCon={(t) => p.colores.filter((c) => c.clave !== color && p.variantes.some((v) => v.color === c.clave && v.stock > 0 && !!v.talle && normalizarTalle(v.talle) === t)).map((c) => c.nombre)}
                 onElegir={(t) => { setTalle(t); setAvisoTalle(false); }} />
             </div>

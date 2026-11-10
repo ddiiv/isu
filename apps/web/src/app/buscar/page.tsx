@@ -3,6 +3,7 @@ import Link from "next/link";
 import { buscarProductos, obtenerCategorias, obtenerConfig } from "@/lib/api";
 import { FormBuscar } from "@/components/FormBuscar";
 import { Grilla } from "@/components/Grilla";
+import { EventoBusqueda } from "@/components/EventoBusqueda";
 
 // Los resultados no se indexan (contenido duplicado): Google entra por las categorías y fichas.
 export const metadata: Metadata = { title: "Buscar", robots: { index: false, follow: true } };
@@ -22,6 +23,7 @@ export default async function Buscar({ searchParams }: { searchParams: Promise<{
       <h1 className="text-[clamp(2.2rem,6vw,4.5rem)] leading-none">{valida ? <>Resultados para <span className="text-marca">“{q}”</span></> : "Buscar"}</h1>
       <FormBuscar valor={q} autoFocus={!valida} className="mt-6 max-w-xl" />
 
+      {valida && r && <EventoBusqueda q={q} total={r.total} />}
       {valida && r === null && <p className="mt-10 text-tinta-suave">No pudimos buscar en este momento. Probá de nuevo en unos segundos.</p>}
       {valida && r && r.total > 0 && (
         <div className="mt-8"><Grilla productos={r.productos} lista="Búsqueda" descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} /></div>

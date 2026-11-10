@@ -6,6 +6,7 @@ export function BotonWhatsapp({ numero }: { numero: string }) {
   return (
     <a
       href={`https://wa.me/${numero}?text=${texto}`}
+      data-origen="boton_flotante"
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Escribinos por WhatsApp"
