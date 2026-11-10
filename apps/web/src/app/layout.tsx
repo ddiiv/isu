@@ -5,7 +5,8 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { BotonWhatsapp } from "@/components/BotonWhatsapp";
 import { BotonAsistente } from "@/components/chat/BotonAsistente";
-import { Analytics } from "@/components/Analytics";
+import { Analytics, ConsentimientoGa, idGa } from "@/components/Analytics";
+import { AvisoCookies } from "@/components/AvisoCookies";
 import { WebVitals } from "@/components/WebVitals";
 import { Hidratado } from "@/components/Hidratado";
 import { ProveedorCarrito } from "@/components/carrito/Carrito";
@@ -46,6 +47,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   if (CDN_FOTOS?.startsWith("http")) preconnect(new URL(CDN_FOTOS).origin);
   return (
     <html lang="es-AR" className={`${display.variable} ${texto.variable}`}>
+      <head><ConsentimientoGa /></head>
       <body>
         <a href="#contenido" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:shadow">Saltar al contenido</a>
         <ProveedorCarrito>
@@ -58,6 +60,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <CajonCarrito descuento={config.descuentoTransferencia} montoMinimo={config.montoMinimoCarrito} cuotas={config.cuotasSinInteres} medios={config.mediosPago} />
         </ProveedorCarrito>
         <Analytics />
+        {idGa() && <AvisoCookies />}
         <WebVitals />
         <Hidratado />
       </body>

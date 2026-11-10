@@ -90,6 +90,14 @@ La tienda es **aditiva**: todo lo suyo vive en el esquema `tienda` y en tablas/c
 | Un cupón mal cargado | Backoffice → Cupones → **Pausar**: deja de aplicarse al instante (los pedidos ya hechos conservan su precio). |
 | La importación del mayorista | Las fotos se pueden borrar o reordenar por producto en el backoffice; `--reemplazar` vuelve a traerlas de cero. No toca precios ni stock. |
 
+## Aviso de cookies
+
+Banner chico abajo (`AvisoCookies`, sólo si hay `NEXT_PUBLIC_GA_ID`) con «Aceptar» y «Rechazar». La elección queda en `localStorage` (`isu:consent`) y se manda como `gtag('consent','update')` con los 4 valores (`analytics_storage`, `ad_storage`, `ad_user_data`, `ad_personalization`).
+
+Orden (Consent Mode v2): un `<script>` inline en el `<head>` del layout raíz (`ConsentimientoGa`) hace el `consent default` en `denied` (`wait_for_update: 500`) y, si hay elección guardada, el `update` en el acto; recién después cargan `gtag.js` y el `config` (`Analytics`, `afterInteractive`). Se reabre desde el link «Cookies» del pie.
+
+Con «Rechazar», Analytics sigue midiendo en modo sin cookies (no identifica personas) pero el remarketing queda apagado.
+
 ## Eventos de Analytics
 
 Todos salen desde `apps/web/src/lib/ga.ts` (`evento`), no hacen nada si GA no está cargado y nunca mandan datos personales (ni email, teléfono, DNI, nombre, dirección ni textos de error).

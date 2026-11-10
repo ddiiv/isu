@@ -36,6 +36,7 @@ export default function Privacidad() {
 
       <h2>Cookies</h2>
       <p>Usamos cookies propias para que funcionen el carrito y tu sesión, y de Google Analytics para medir visitas. Podés borrarlas o bloquearlas desde tu navegador; si bloqueás las propias, el carrito puede no funcionar.</p>
+      <p>Google Analytics mide qué páginas se visitan, qué productos se miran y cómo avanza una compra, para mejorar la tienda. La primera vez que entrás te preguntamos si aceptás esas cookies de medición y publicidad: podés aceptarlas o rechazarlas. Si rechazás, Analytics sólo cuenta visitas de forma agregada, sin cookies ni identificarte, y el remarketing queda apagado. Podés cambiar tu elección cuando quieras desde el link «Cookies» al pie de cualquier página.</p>
     </PaginaLegal>
   );
 }
