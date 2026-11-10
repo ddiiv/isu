@@ -1,18 +1,33 @@
 "use client";
-import { armarBolsa, leerPaqueteEnvios, NOMBRE_TRANSPORTE, TRANSPORTES, type AjusteTransportes, type EnviosEnElDia, type OrigenEnvios, type PaqueteEnvios } from "@isu/shared";
-import { Boton, Campo, Casilla, claseEntrada, Tarjeta } from "./ui";
+import { armarBolsa, leerPaqueteEnvios, NOMBRE_TRANSPORTE, TRANSPORTES, type AjusteTransportes, type EnvioMoto, type EnviosEnElDia, type OrigenEnvios, type PaqueteEnvios } from "@isu/shared";
+import { Boton, Campo, Casilla, claseEntrada, EntradaPesos, Tarjeta } from "./ui";
 
 /*
  * Ajustes de envíos (etapa 4): qué transporte y servicio se ofrece y con qué
  * recargo, desde dónde salen los paquetes, cómo se arma el paquete (etapa 15:
  * todo el pedido en una bolsa, la más chica en la que entra), los envíos en
- * el día y los avisos por WhatsApp. Las credenciales de cada
+ * el día, el envío en moto (logística propia) y los avisos por WhatsApp. Las credenciales de cada
  * transporte NO van acá: son variables del servidor.
  */
 export interface ValoresEnvios {
-  transportes?: AjusteTransportes; origenEnvios?: OrigenEnvios; paqueteEnvios?: PaqueteEnvios; enviosEnElDia?: EnviosEnElDia; avisosWhatsapp?: boolean; prepararEnviosSolos?: boolean;
+  transportes?: AjusteTransportes; origenEnvios?: OrigenEnvios; paqueteEnvios?: PaqueteEnvios; enviosEnElDia?: EnviosEnElDia; envioMoto?: EnvioMoto; avisosWhatsapp?: boolean; prepararEnviosSolos?: boolean;
 }
 const DIAS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+function Dias({ dias, alCambiar }: { dias: number[]; alCambiar: (d: number[]) => void }) {
+  return (
+    <fieldset>
+      <legend className="mb-1 text-sm font-bold">Días</legend>
+      <div className="flex flex-wrap gap-2">
+        {DIAS.map((n, i) => (
+          <label key={n} className={`cursor-pointer rounded-full px-3 py-1.5 text-sm ring-1 ${dias.includes(i) ? "bg-tinta text-white ring-tinta" : "ring-linea"}`}>
+            <input type="checkbox" className="sr-only" checked={dias.includes(i)} onChange={(e) => alCambiar(e.target.checked ? [...dias, i].sort() : dias.filter((x) => x !== i))} />{n}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
 
 export function AjustesEnvios({ v, poner }: { v: ValoresEnvios; poner: (k: keyof ValoresEnvios, x: unknown) => void }) {
   const t = v.transportes;
@@ -20,6 +35,7 @@ export function AjustesEnvios({ v, poner }: { v: ValoresEnvios; poner: (k: keyof
   // El formato viejo (cajas por cantidad de prendas) se muestra ya pasado a bolsas.
   const p = v.paqueteEnvios ? leerPaqueteEnvios(v.paqueteEnvios) : null;
   const d = v.enviosEnElDia;
+  const m = v.envioMoto;
   const num = (s: string) => (s === "" ? 0 : Number(s));
   return (
     <>
@@ -99,17 +115,38 @@ export function AjustesEnvios({ v, poner }: { v: ValoresEnvios; poner: (k: keyof
         <Tarjeta titulo="Envíos en el día (Cabify)">
           <div className="space-y-3">
             <Campo etiqueta="Códigos postales" ayuda="Rangos separados por coma: 1000-1499,1600-1899"><input className={claseEntrada} value={d.cps} onChange={(e) => poner("enviosEnElDia", { ...d, cps: e.target.value })} /></Campo>
-            <fieldset>
-              <legend className="mb-1 text-sm font-bold">Días</legend>
-              <div className="flex flex-wrap gap-2">
-                {DIAS.map((n, i) => (
-                  <label key={n} className={`cursor-pointer rounded-full px-3 py-1.5 text-sm ring-1 ${d.dias.includes(i) ? "bg-tinta text-white ring-tinta" : "ring-linea"}`}>
-                    <input type="checkbox" className="sr-only" checked={d.dias.includes(i)} onChange={(e) => poner("enviosEnElDia", { ...d, dias: e.target.checked ? [...d.dias, i].sort() : d.dias.filter((x) => x !== i) })} />{n}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <Dias dias={d.dias} alCambiar={(x) => poner("enviosEnElDia", { ...d, dias: x })} />
             <Campo etiqueta="Hora de corte" ayuda="Pagado antes de esta hora, llega hoy."><input type="time" className={`${claseEntrada} w-36`} value={d.horaCorte} onChange={(e) => poner("enviosEnElDia", { ...d, horaCorte: e.target.value })} /></Campo>
+          </div>
+        </Tarjeta>
+      )}
+      {m && (
+        <Tarjeta titulo="Envío en moto (logística propia)" className="lg:col-span-2">
+          <p className="mb-3 text-xs text-tinta-tenue">
+            Precio fijo por zona, sólo para los códigos postales que cargues. Pagado antes de la hora de corte en un día de reparto, llega hoy; si no, el próximo día de reparto.
+            Se despacha a mano desde el pedido y no entra en el envío gratis. Si un código postal está en dos zonas, vale la primera de la lista.
+          </p>
+          <div className="space-y-3">
+            <Casilla etiqueta="Ofrecer el envío en moto" marcada={m.activo} onChange={(x) => poner("envioMoto", { ...m, activo: x })} />
+            <Dias dias={m.dias} alCambiar={(x) => poner("envioMoto", { ...m, dias: x })} />
+            <Campo etiqueta="Hora de corte" ayuda="Pagado antes de esta hora, llega hoy."><input type="time" className={`${claseEntrada} w-36`} value={m.horaCorte} onChange={(e) => poner("envioMoto", { ...m, horaCorte: e.target.value })} /></Campo>
+            <p className="text-sm font-bold">Zonas</p>
+            <div className="space-y-2">
+              {m.zonas.map((z, i) => {
+                const cambiar = (x: Partial<typeof z>) => poner("envioMoto", { ...m, zonas: m.zonas.map((y, j) => (j === i ? { ...y, ...x } : y)) });
+                return (
+                  <div key={i} className="grid grid-cols-1 items-end gap-2 rounded-xl border border-linea p-2 sm:grid-cols-[1fr_9rem_2fr_auto]">
+                    <Campo etiqueta="Nombre"><input className={claseEntrada} maxLength={60} value={z.nombre} onChange={(e) => cambiar({ nombre: e.target.value })} /></Campo>
+                    <Campo etiqueta="Precio"><EntradaPesos valor={z.precio} onChange={(c) => cambiar({ precio: c ?? 0 })} /></Campo>
+                    <Campo etiqueta="Códigos postales" ayuda="Rangos separados por coma: 1000-1499,1702"><input className={claseEntrada} maxLength={500} value={z.cps} onChange={(e) => cambiar({ cps: e.target.value })} /></Campo>
+                    <Boton type="button" variante="texto" aria-label={`Quitar la zona ${z.nombre}`} onClick={() => poner("envioMoto", { ...m, zonas: m.zonas.filter((_, j) => j !== i) })}>Quitar</Boton>
+                  </div>
+                );
+              })}
+            </div>
+            {m.zonas.length < 10 && (
+              <Boton type="button" variante="borde" onClick={() => poner("envioMoto", { ...m, zonas: [...m.zonas, { nombre: "Nueva zona", precio: 0, cps: "" }] })}>Agregar zona</Boton>
+            )}
           </div>
         </Tarjeta>
       )}

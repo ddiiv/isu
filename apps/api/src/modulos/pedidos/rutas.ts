@@ -56,7 +56,7 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
       const o = cp.success
         ? await deps.cotizador.elegir({ destino: { cp: cp.data, provincia: e.provincia, localidad: e.localidad }, carrito: { lineas: c.lineas, filas: c.filas, neto: c.neto }, medioPago: req.body.medioPago, id: e.opcion }).catch(() => null)
         : null;
-      conEnvio(c, o?.precio ?? 0, { soloMercadoPago: o?.soloMercadoPago });
+      conEnvio(c, o?.precio ?? 0, { soloMercadoPago: o?.soloMercadoPago, transporte: o?.transporte });
       opcionEnvio = o;
     }
     const { filas: _f, cobrado: _c, aplicado: _a, neto: _n, envioBonificado: _e, cuponInvalido: _i, ...publica } = c;

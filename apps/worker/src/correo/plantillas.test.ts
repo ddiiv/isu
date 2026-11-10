@@ -71,3 +71,24 @@ describe("mails", () => {
     }
   });
 });
+
+describe("venta_tienda (aviso interno)", () => {
+  const venta = (extra: Record<string, unknown> = {}) => ({
+    numero: "ISU-1234", creadoEn: new Date().toISOString(), nombre: "Ana Pérez", email: "ana@test.com", telefono: "1155550000", dni: "30111222",
+    entrega: "retiro", local: "Vía Flores · Local 21", direccion: null, transporte: null, sucursal: null, medioPago: "Transferencia",
+    subtotal: 2_000_000, descuentoCupon: 0, cupon: null, descuento: 400_000, envio: 0, total: 1_600_000,
+    items: [{ nombre: "Remera", color: "Negro", talle: "M", precio: 1_000_000, cantidad: 2 }], enlaceAdmin: "https://admin.isuwaya.com/pedidos/ISU-1234", ...extra,
+  });
+  it("asunto con número y total; primero aclara que es de la tienda minorista; link al backoffice", () => {
+    const m = armar("venta_tienda", venta());
+    expect(m.asunto).toMatch(/^Venta de la tienda minorista · ISU-1234 · \$\s?16\.000$/);
+    expect(m.html.indexOf("venta de la página minorista")).toBeLessThan(m.html.indexOf("Remera"));
+    expect(m.texto.startsWith("Esta es una venta de la página minorista")).toBe(true);
+    expect(m.html).toContain('href="https://admin.isuwaya.com/pedidos/ISU-1234"');
+    expect(m.texto).toContain("https://admin.isuwaya.com/pedidos/ISU-1234");
+    expect(armar("venta_tienda", venta({ enlaceAdmin: null })).html).not.toContain("backoffice</a>");
+  });
+  it("escapa lo que escribió el cliente", () => {
+    expect(armar("venta_tienda", venta({ nombre: "<script>x</script>" })).html).not.toContain("<script>");
+  });
+});

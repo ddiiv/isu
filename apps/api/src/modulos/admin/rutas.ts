@@ -16,7 +16,7 @@ import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
 import { rutasGuiasAdmin } from "./talles.js";
 import { auditar, exigir, registrarAcceso, type Admin } from "./sesion.js";
-import { AjusteChatbot, AjusteDirecciones, AjusteChatbotIa, AjusteTransportes, EnviosEnElDia, OrigenEnvios, PaqueteEnvios } from "@isu/shared";
+import { AjusteChatbot, AjusteDirecciones, AjusteChatbotIa, AjusteTransportes, EnvioMoto, EnviosEnElDia, OrigenEnvios, PaqueteEnvios } from "@isu/shared";
 
 /*
  * Backoffice. Todo exige sesión con doble factor y un rol:
@@ -154,12 +154,12 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     /*
      * Con transporte (etapa 4) el "enviado" lo marca el despacho en Stocker y
      * el "entregado" el seguimiento del transporte: a mano, sólo el envío
-     * estándar y el retiro. Un pedido de envío no se marca "retirado" ni al revés.
+     * estándar, la moto y el retiro. Un pedido de envío no se marca "retirado" ni al revés.
      */
     const { rows } = await pool.query<{ id: number; estado: string; entrega: string }>(
       `UPDATE tienda.pedidos SET estado = $2, actualizado_en = now()
         WHERE numero = $1 AND estado = ANY($3::text[])
-          AND CASE WHEN $2 IN ('enviado', 'entregado') THEN entrega = 'envio' AND COALESCE(transporte, 'estandar') = 'estandar' ELSE entrega = 'retiro' END
+          AND CASE WHEN $2 IN ('enviado', 'entregado') THEN entrega = 'envio' AND COALESCE(transporte, 'estandar') IN ('estandar', 'moto') ELSE entrega = 'retiro' END
         RETURNING id, estado, entrega`,
       [req.params.numero, req.body.estado, validos[req.body.estado]],
     );
@@ -732,6 +732,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     origenEnvios: OrigenEnvios,
     paqueteEnvios: PaqueteEnvios,
     enviosEnElDia: EnviosEnElDia,
+    envioMoto: EnvioMoto,
     avisosWhatsapp: z.boolean(),
     // Preparar solo el envío (Correo, Andreani, OCA) apenas el pedido queda pagado.
     prepararEnviosSolos: z.boolean(),

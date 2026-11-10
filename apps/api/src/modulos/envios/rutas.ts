@@ -37,9 +37,9 @@ export async function rutasEnvios(app: FastifyInstance, deps: {
     const c = await cotizar(deps.pool, req.body.items, { medioPago: req.body.medioPago, descuentos: deps.descuentos, cupon: req.body.cupon, email: req.body.email, entrega: "envio" });
     reply.headers(sinCache);
     const r = await deps.cotizador.opciones({ destino: req.body.destino, carrito: { lineas: c.lineas, filas: c.filas, neto: c.neto }, medioPago: req.body.medioPago });
-    // Cupón de envío gratis: las opciones salen en $0 (Mercado Envíos no: lo cobra Mercado Pago).
+    // Cupón de envío gratis: las opciones salen en $0 (Mercado Envíos no: lo cobra Mercado Pago; la moto tampoco entra).
     if (c.aplicado?.envioGratis) {
-      r.opciones = r.opciones.map((o) => (o.soloMercadoPago ? o : { ...o, precio: 0, gratis: true }));
+      r.opciones = r.opciones.map((o) => (o.soloMercadoPago || o.transporte === "moto" ? o : { ...o, precio: 0, gratis: true }));
     }
     return r;
   });

@@ -1,7 +1,7 @@
 import type pg from "pg";
 import type { Redis } from "ioredis";
 import {
-  AjusteTransportes, armarBolsa, cpEnRangos, EnviosEnElDia, leerPaqueteEnvios, NOMBRE_TRANSPORTE, OrigenEnvios, PAQUETE_DE_FABRICA, TRANSPORTES,
+  AjusteTransportes, armarBolsa, cpEnRangos, ENVIO_MOTO_DE_FABRICA, EnvioMoto, EnviosEnElDia, leerPaqueteEnvios, NOMBRE_TRANSPORTE, OrigenEnvios, PAQUETE_DE_FABRICA, TRANSPORTES,
   type MedioPago, type PaqueteEnvios, type OpcionEnvio, type ServicioEnvio, type SucursalEnvio, type TransporteTienda,
 } from "@isu/shared";
 import type { Cotizacion as CotizacionTransporte, Paquete, Transportes } from "@isu/envios";
@@ -24,6 +24,7 @@ export interface ConfigEnvios {
   origen: OrigenEnvios;
   paquete: PaqueteEnvios;
   enElDia: EnviosEnElDia;
+  envioMoto: EnvioMoto;
   envioGratisDesde: number | null;
   costoEnvio: number;
 }
@@ -32,10 +33,11 @@ const POR_DEFECTO: ConfigEnvios = {
   origen: { nombre: "Isuwaya", calle: "Bacacay", numero: "3231", piso: "", cp: "1406", localidad: "Flores", provincia: "CABA", email: "isu.isuwaya@gmail.com", telefono: "1168515444", cuit: "" },
   paquete: PAQUETE_DE_FABRICA,
   enElDia: { cps: "", dias: [], horaCorte: "14:00" },
+  envioMoto: ENVIO_MOTO_DE_FABRICA,
   envioGratisDesde: null,
   costoEnvio: 790_000,
 };
-const ESQUEMAS = { transportes: AjusteTransportes, origenEnvios: OrigenEnvios, enviosEnElDia: EnviosEnElDia } as const;
+const ESQUEMAS = { transportes: AjusteTransportes, origenEnvios: OrigenEnvios, enviosEnElDia: EnviosEnElDia, envioMoto: EnvioMoto } as const;
 
 export interface Destino { cp: string; provincia: string; localidad: string }
 export interface Carrito { lineas: Array<{ sku: string; cantidad: number; subtotal: number }>; filas: Map<string, Fila>; neto: number }
@@ -43,6 +45,7 @@ export interface Carrito { lineas: Array<{ sku: string; cantidad: number; subtot
 export interface PrendaDelPaquete { peso_gramos: number | null; alto_cm: number | null; ancho_cm: number | null; largo_cm: number | null; cantidad: number }
 
 const ZONA = "America/Argentina/Buenos_Aires";
+const NOMBRE_DIA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 const DIAS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>;
 /** Día de la semana y hora (HH:MM) en Argentina. */
 export function ahoraEnArgentina(d: Date) {
@@ -73,7 +76,7 @@ export function crearCotizadorEnvios(deps: {
 
   async function config(): Promise<ConfigEnvios> {
     const { rows } = await pool.query<{ clave: string; valor: unknown }>(
-      "SELECT clave, valor FROM tienda.ajustes WHERE clave = ANY($1::text[])", [["transportes", "origenEnvios", "paqueteEnvios", "enviosEnElDia", "envioGratisDesde", "costoEnvio"]]);
+      "SELECT clave, valor FROM tienda.ajustes WHERE clave = ANY($1::text[])", [["transportes", "origenEnvios", "paqueteEnvios", "enviosEnElDia", "envioMoto", "envioGratisDesde", "costoEnvio"]]);
     const c: ConfigEnvios = structuredClone(POR_DEFECTO);
     for (const r of rows) {
       if (r.clave === "envioGratisDesde") c.envioGratisDesde = typeof r.valor === "number" ? r.valor : null;
@@ -90,6 +93,7 @@ export function crearCotizadorEnvios(deps: {
         if (r.clave === "transportes") c.transportes = v.data as AjusteTransportes;
         if (r.clave === "origenEnvios") c.origen = v.data as OrigenEnvios;
         if (r.clave === "enviosEnElDia") c.enElDia = v.data as EnviosEnElDia;
+        if (r.clave === "envioMoto") c.envioMoto = v.data as EnvioMoto;
       }
     }
     return c;
@@ -170,14 +174,31 @@ export function crearCotizadorEnvios(deps: {
     /*
      * Envío gratis desde cierto monto: la opción estándar más barata sale
      * gratis y las demás cuestan la diferencia. En el día y Mercado Envíos
-     * (lo cobra Mercado Pago) no entran.
+     * (lo cobra Mercado Pago) no entran, y la moto se suma después: ni se
+     * abarata ni fija el mínimo.
      */
     if (cfg.envioGratisDesde !== null && args.carrito.neto >= cfg.envioGratisDesde) {
       const estandar = lista.filter((o) => !o.llegaHoy && !o.soloMercadoPago);
       const minimo = Math.min(...estandar.map((o) => o.precio));
       if (Number.isFinite(minimo)) for (const o of estandar) { o.precio -= minimo; o.gratis = o.precio === 0; }
     }
-    lista.sort((a, b) => Number(b.llegaHoy) - Number(a.llegaHoy) || a.precio - b.precio);
+    const m = cfg.envioMoto;
+    const zona = m.activo && m.dias.length ? m.zonas.find((z) => cpEnRangos(args.destino.cp, z.cps)) : undefined;
+    if (zona) {
+      const { dia, hora } = ahoraEnArgentina(ahora());
+      const hoy = m.dias.includes(dia) && hora < m.horaCorte;
+      // El próximo día de reparto, contando desde mañana (hoy ya no hay o pasó el corte).
+      const siguiente = [1, 2, 3, 4, 5, 6, 7].find((n) => m.dias.includes((dia + n) % 7))!;
+      lista.push({
+        id: hoy ? "moto:en_el_dia" : "moto:domicilio", transporte: "moto", servicio: hoy ? "en_el_dia" : "domicilio",
+        nombre: hoy ? `${NOMBRE_TRANSPORTE.moto} · llega hoy` : NOMBRE_TRANSPORTE.moto,
+        detalle: hoy ? `Si lo pagás antes de las ${m.horaCorte}, te llega hoy` : `Te llega ${siguiente === 1 ? "mañana" : `el ${NOMBRE_DIA[(dia + siguiente) % 7]}`}`,
+        precio: zona.precio, precioOriginal: zona.precio, gratis: false, requiereSucursal: false, llegaHoy: hoy, soloMercadoPago: false,
+      });
+    }
+    // Primero lo que llega hoy con un transporte; la moto va por precio: con envío gratis no queda elegida sola.
+    const adelante = (o: OpcionEnvio) => Number(o.llegaHoy && o.transporte !== "moto");
+    lista.sort((a, b) => adelante(b) - adelante(a) || a.precio - b.precio);
     const aviso = fallaron.length ? `${[...new Set(fallaron)].join(" y ")} no respondió: te mostramos las demás opciones.` : null;
     return { opciones: lista, aviso };
   }

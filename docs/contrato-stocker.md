@@ -98,7 +98,7 @@ precio y el stock; la tienda guarda una copia para no preguntarle en cada visita
 
 La tienda elige el transporte, cotiza y genera la etiqueta con la API de cada correo; **el despacho sigue siendo de Stocker** (Envíos del día), porque ahí la reserva se convierte en egreso de stock.
 
-- `POST /api/integraciones/tienda/pedidos` acepta `envio: { tipo, seguimiento?, despacharAntesDe? }`. `tipo`: `correo_argentino` · `andreani` · `oca` · `mercado_envios` · `cabify` · `retiro` · `envio` (estándar). `despacharAntesDe` (ISO) marca el corte de los envíos en el día (Cabify).
+- `POST /api/integraciones/tienda/pedidos` acepta `envio: { tipo, seguimiento?, despacharAntesDe? }`. `tipo`: `correo_argentino` · `andreani` · `oca` · `mercado_envios` · `cabify` · `moto` (envío en moto, logística propia) · `retiro` · `envio` (estándar). `despacharAntesDe` (ISO) marca el corte de los envíos en el día (Cabify).
 - `POST …/pedidos/:pedido/envio` `{ tipo, seguimiento }` → carga el número de seguimiento cuando la tienda genera la etiqueta. Idempotente; **409 `YA_DESPACHADO`** si ya salió con otro número. `seguimiento`: `^[A-Za-z0-9-]{4,60}$`.
 - El resumen del pedido suma `envioTipo` y `envioId`.
 - Al despachar (y al marcar faltante) en Envíos del día, Stocker avisa con `pg_notify('stocker_tienda_envios', {"b": negocio, "p": "ISU-…", "e": "despachado" | "faltante"})`. Sólo para pedidos de la plataforma `tienda`. La tienda además repasa cada 15 minutos (`GET …/pedidos/:pedido`, `despachadoEn`) por si se perdió un aviso.

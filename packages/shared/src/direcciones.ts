@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cpEnRangos } from "./envios.js";
 
 /*
  * Direcciones en el checkout (etapa 11).
@@ -38,6 +39,49 @@ export function provinciaDelCheckout(nombre: string | null | undefined): string 
   return PROVINCIAS.find((p) => sinTildes(p.nombre) === n)?.nombre ?? null;
 }
 
+/*
+ * Rangos del código postal argentino (los 4 números) por provincia. Donde dos
+ * provincias comparten rango (la frontera de la Pampa húmeda, el Litoral, el
+ * Norte) el código es de las dos: se devuelven las dos y no se le marca nada
+ * a quien eligió cualquiera. Es una ayuda: ante la duda, rangos anchos.
+ */
+const RANGOS_CP: Readonly<Record<string, string>> = {
+  CABA: "1000-1499",
+  "Buenos Aires": "1600-1999,2700-2999,6000-6799,7000-8199,8500-8519",
+  Catamarca: "4139,4700-4799,5260-5269,5340-5359",
+  Chaco: "3500-3799",
+  Chubut: "9000-9299",
+  Córdoba: "2100-2199,2400-2699,5000-5299,5800-5999,6100-6299",
+  Corrientes: "3190-3349,3400-3499",
+  "Entre Ríos": "2820-3299",
+  Formosa: "3600-3639",
+  Jujuy: "4500-4699",
+  "La Pampa": "6200-6399,8200-8299",
+  "La Rioja": "5300-5399,5470-5479",
+  Mendoza: "5500-5699",
+  Misiones: "3300-3399",
+  Neuquén: "8300-8399,8407",
+  "Río Negro": "8300-8599",
+  Salta: "4190-4199,4400-4599",
+  "San Juan": "5400-5499",
+  "San Luis": "5700-5799,5880-5889,6216,6277-6279",
+  "Santa Cruz": "9000-9099,9300-9409",
+  "Santa Fe": "2000-2999,3000-3099,3500-3599,6100-6119",
+  "Santiago del Estero": "2354,3700-3799,4200-4399,5250-5259",
+  "Tierra del Fuego": "9410-9499",
+  Tucumán: "4000-4199",
+};
+
+/**
+ * De qué provincia(s) es un código postal ("1704", o el CPA "B1704ABC").
+ * Vacío si no existe en ninguna: ahí conviene pedir que lo revise.
+ */
+export function provinciasDelCP(cp: string): string[] {
+  const t = cp.trim();
+  const n = /^([A-Za-z]\d{4}[A-Za-z]{3}|\d{4})$/.test(t) ? /\d{4}/.exec(t)![0] : null;
+  return n ? Object.keys(RANGOS_CP).filter((p) => cpEnRangos(n, RANGOS_CP[p]!)) : [];
+}
+
 /** Token de sesión de Google (agrupa las sugerencias de una compra): un UUID. */
 export const SesionDireccion = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 
@@ -71,6 +115,10 @@ export const RevisionDireccion = z.object({
   sugerencia: z.object({ calle: z.string(), numero: z.string(), localidad: z.string(), provincia: z.string(), texto: z.string() }).nullable(),
 });
 export type RevisionDireccion = z.infer<typeof RevisionDireccion>;
+
+/** Localidades parecidas a lo escrito, dentro de la provincia elegida (Georef). */
+export const PedidoLocalidades = z.object({ texto: z.string().trim().min(3).max(60), provincia: z.string().trim().min(2).max(60) }).strict();
+export const RespuestaLocalidades = z.object({ localidades: z.array(z.string()) });
 
 /** Ajustes → Direcciones en el checkout. */
 export const AjusteDirecciones = z.object({

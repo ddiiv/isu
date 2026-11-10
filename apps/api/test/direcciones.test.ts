@@ -147,8 +147,13 @@ beforeAll(async () => {
   urlGeoref = await levantar((req, res) => {
     const u = new URL(req.url!, "http://x");
     if (georefSim.caido) return json(res, 502, {});
-    if (u.pathname !== "/v2.0/direcciones") return json(res, 404, {});
     georefSim.pedidos.push(u.searchParams);
+    if (u.pathname === "/v2.0/localidades") {
+      // Tolera «Megia» por «Mejía» como Georef; repite el nombre cuando hay dos con el mismo.
+      const n = (u.searchParams.get("nombre") ?? "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/g/g, "j");
+      return json(res, 200, { localidades: ["Ramos Mejía", "Ramos Mejía", "Ramallo"].filter((l) => l.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").startsWith(n)).map((nombre) => ({ nombre })) });
+    }
+    if (u.pathname !== "/v2.0/direcciones") return json(res, 404, {});
     const d = u.searchParams.get("direccion") ?? "";
     const altura = Number(/(\d+)$/.exec(d)?.[1] ?? 0);
     const calle = /corr?ientes/i.test(d) ? "AV. CORRIENTES" : /thames/i.test(d) ? "THAMES" : null;
@@ -194,6 +199,21 @@ describe("direcciones · clientes de Google y Georef", () => {
     // Una provincia que no es del checkout no se consulta.
     expect(await g.revisar({ calle: "Corrientes", numero: "1", localidad: "", provincia: "Narnia" })).toEqual({ estado: "sin_servicio", sugerencia: null });
     expect(georefSim.pedidos).toHaveLength(2);
+  });
+});
+
+describe("direcciones · localidades de Georef", () => {
+  it("Georef: localidades de la provincia, con su código oficial y sin repetidas", async () => {
+    const g = crearGeoref({ url: urlGeoref });
+    expect(await g.localidades("Ramos Megia", "Buenos Aires")).toEqual(["Ramos Mejía"]);
+    expect(georefSim.pedidos[0]!.get("provincia")).toBe("06");
+    expect(georefSim.pedidos[0]!.get("nombre")).toBe("Ramos Megia");
+    expect(await g.localidades("Ram", "Buenos Aires")).toEqual(["Ramos Mejía", "Ramallo"]);
+    // Una provincia que no es del checkout no se consulta; Georef caído → error.
+    expect(await g.localidades("Ram", "Narnia")).toEqual([]);
+    expect(georefSim.pedidos).toHaveLength(2);
+    georefSim.caido = true;
+    await expect(g.localidades("Ram", "Buenos Aires")).rejects.toThrow(/502/);
   });
 });
 
@@ -311,6 +331,30 @@ describe("direcciones · rutas de la API", () => {
   it("Georef caído: sin_servicio (el checkout no dice nada)", async () => {
     georefSim.caido = true;
     expect((await post("revisar", { calle: "Thames", numero: "777", provincia: "CABA" })).json()).toEqual({ estado: "sin_servicio", sugerencia: null });
+  });
+
+  it("localidades: parecidas dentro de la provincia; la misma búsqueda no se consulta dos veces", async () => {
+    const buscar = async (texto: string) => (await post("localidades", { texto, provincia: "Buenos Aires" })).json();
+    expect(await buscar("Ramos Megia")).toEqual({ localidades: ["Ramos Mejía"] });
+    const antes = georefSim.pedidos.length;
+    expect(await buscar("ramos mégia")).toEqual({ localidades: ["Ramos Mejía"] });
+    expect(georefSim.pedidos.length).toBe(antes);
+    expect((await post("localidades", { texto: "Ra", provincia: "Buenos Aires" })).statusCode).toBe(400);
+    expect((await post("localidades", { texto: "Ramos", provincia: "Buenos Aires", otro: 1 })).statusCode).toBe(400);
+  });
+
+  it("localidades: apagado en Ajustes o Georef caído → lista vacía (el campo queda común); con tope por IP", async () => {
+    await ajuste({ georef: false });
+    expect((await post("localidades", { texto: "Ramos", provincia: "Buenos Aires" })).json()).toEqual({ localidades: [] });
+    expect(georefSim.pedidos).toHaveLength(0);
+    await ajuste({});
+    georefSim.caido = true;
+    expect((await post("localidades", { texto: "Ramos", provincia: "Buenos Aires" })).json()).toEqual({ localidades: [] });
+    georefSim.caido = false;
+    // Pasado el freno de 150 por 10 minutos, 429 (Redis ya cuenta los de arriba).
+    const codigos = new Set<number>();
+    for (let i = 0; i < 150; i++) codigos.add((await post("localidades", { texto: "Ramos", provincia: "Buenos Aires" })).statusCode);
+    expect(codigos.has(429)).toBe(true);
   });
 
   it("estado para el backoffice: sólo con sesión del dueño", async () => {

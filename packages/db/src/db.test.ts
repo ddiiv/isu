@@ -299,6 +299,7 @@ describe("envíos (0008)", () => {
     await expect(pedido({ servicio_envio: "sucursal" })).rejects.toThrow(/check/);
     await expect(pedido({ entrega: "retiro", local_retiro: "Flores", direccion: null })).rejects.toThrow(/check/);
     await expect(pedido({ transporte: "dron" })).rejects.toThrow(/check/);
+    await pedido({ transporte: "moto", servicio_envio: "en_el_dia" });
     await pedido({ servicio_envio: "sucursal", sucursal_envio: JSON.stringify({ id: "X1", nombre: "Suc" }) });
   });
   it("un solo envío vigente por pedido; el número de seguimiento sin caracteres raros y único por transporte", async () => {
@@ -323,8 +324,8 @@ describe("envíos (0008)", () => {
     await expect(pool.query("INSERT INTO tienda.avisos (pedido_id, tipo, canal) VALUES ($1,'en_camino','sms')", [id])).rejects.toThrow(/check/);
   });
   it("siembra los ajustes de envíos", async () => {
-    const r = await pool.query("SELECT clave FROM tienda.ajustes WHERE clave = ANY($1::text[]) ORDER BY clave", [["transportes", "origenEnvios", "paqueteEnvios", "enviosEnElDia", "avisosWhatsapp"]]);
-    expect(r.rows.map((x) => x.clave)).toEqual(["avisosWhatsapp", "enviosEnElDia", "origenEnvios", "paqueteEnvios", "transportes"]);
+    const r = await pool.query("SELECT clave FROM tienda.ajustes WHERE clave = ANY($1::text[]) ORDER BY clave", [["transportes", "origenEnvios", "paqueteEnvios", "enviosEnElDia", "envioMoto", "avisosWhatsapp"]]);
+    expect(r.rows.map((x) => x.clave)).toEqual(["avisosWhatsapp", "envioMoto", "enviosEnElDia", "origenEnvios", "paqueteEnvios", "transportes"]);
   });
 });
 

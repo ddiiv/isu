@@ -14,6 +14,7 @@ simuladores), pero no se puede abrir al público hasta completarlos.
 | Transferencias que se confirman solas (opcional): credenciales de Talo, o los datos de la cuenta de Mercado Pago | `TALO_USER_ID` `TALO_CLIENT_ID` `TALO_CLIENT_SECRET` (api) y Ajustes → Transferencias que se confirman solas. Ver `transferencias.md` | Pendiente |
 | Sugerencias de calle en el checkout (opcional): proyecto en Google Cloud con facturación y «Places API (New)». Con los topes de fábrica (300 y 300 por día) no se paga | `GOOGLE_MAPS_API_KEY` (api) y Ajustes → Direcciones en el checkout. Ver `direcciones-checkout.md` | Decidir |
 | Cuenta de correo transaccional (SMTP) + SPF/DKIM del dominio | `SMTP_URL`, `CORREO_DE` (worker) | Pendiente |
+| Aviso interno de cada venta de la tienda (opcional): la dirección que lo recibe. Con la misma cuenta de Stocker: `SMTP_URL=smtp://USUARIO:CLAVE@HOST:PUERTO` (`smtps://` si `MAIL_SECURE` es true o el puerto es 465; `@` → `%40` en usuario y clave) y `CORREO_DE="Isuwaya <la misma dirección>"` | `CORREO_VENTAS` (worker, junto con `ADMIN_URL` para el link al pedido). Ver `subir-a-railway.md` § Mails | Pendiente |
 | Credencial de Stocker (origen «Tienda online minorista») | `STOCKER_TOKEN` (worker y api) | Pendiente (se emite desde el backoffice de Stocker) |
 | Locales que abastecen online en Stocker | Stocker → Locales | Revisar |
 | Bucket de fotos (público) y de comprobantes (privado) en Cloudflare R2 | `R2_*` (api y worker) | Pendiente |
@@ -44,6 +45,7 @@ simuladores), pero no se puede abrir al público hasta completarlos.
 | Remitente (dirección del depósito, CUIT, teléfono) y **las bolsas que usan** (medidas y peso) | Backoffice → Ajustes → Remitente y «Paquete: todo en una bolsa» | Revisar |
 | **Peso y medidas de cada producto** (la prenda doblada): con eso se cotiza el envío con todos los transportes | Backoffice → Productos → filtro «Sin peso o medidas» → «Peso y medidas…» (de a muchos) o en cada producto | Pendiente |
 | Códigos postales, días y hora de corte de los envíos en el día | Backoffice → Ajustes → Envíos en el día | Revisar |
+| Zonas, precios y códigos postales del **envío en moto** (los de fábrica salen de datos abiertos: probar 5 a 10 direcciones reales por zona) y qué pasa con el resto de La Matanza | Backoffice → Ajustes → Envío en moto (viene **apagado**: prenderlo después de revisar) | Revisar |
 | **Asistente**: revisar las preguntas frecuentes de arranque (textos, plazos reales) con alguien de atención | Backoffice → Asistente | Pendiente |
 | **Asistente con IA** (opcional): cuenta en console.anthropic.com, clave y tope diario. Costo aproximado con el modelo por defecto (`claude-opus-5-5`, US$4 / US$20 por millón de tokens de entrada/salida): 1 a 2 centavos de dólar por consulta con IA (sólo las que no cubren las preguntas frecuentes); con el tope de 300 por día, como mucho unos US$5 diarios. Se puede usar otro modelo con `CHATBOT_MODELO` | `ANTHROPIC_API_KEY` (api) + Backoffice → Ajustes | Decidir |
 | Variables de transportes y WhatsApp también en el **worker** (sigue los envíos y manda los avisos) | Railway → worker | Al desplegar |

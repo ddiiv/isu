@@ -30,13 +30,22 @@ Con calle, número y provincia completos, la tienda le pregunta a **Georef**, el
 
 **Nunca frena la compra.** Georef no conoce todos los barrios cerrados ni las calles nuevas: el cliente siempre puede seguir con lo que escribió.
 
+## 2 bis. Código postal y localidad que no cierran
+
+Dos ayudas más, sin frenar nunca la compra:
+
+- **Código postal ↔ provincia.** Con el código completo (4 números o el CPA), la tienda lo compara con los rangos oficiales de cada provincia (en `packages/shared/src/direcciones.ts`). Si no es de la provincia elegida, avisa debajo del campo: «El código postal 1704 es de Buenos Aires.» con un botón «Cambiar la provincia a Buenos Aires» (uno por provincia, si el código lo comparten dos). Si no existe en ninguna: «No encontramos ese código postal. Revisalo.» Es una tabla propia, con rangos anchos para no marcar de más: ante un caso raro, el cliente sigue igual.
+- **Localidad con sugerencias.** Desde 3 letras, la tienda le pide a Georef (`/localidades`, la misma casilla de Ajustes que apaga la revisión de calle) las de la provincia elegida y las muestra en una lista (flechas, Enter, Escape). Al elegir una se completa con el nombre oficial. Si lo escrito no coincide con ninguna pero hay parecidas («Ramos Megia»), la lista dice «¿Quisiste decir…?». Si Georef no responde, es un campo común.
+
+El código postal **no** se completa a partir de la localidad: no hay una fuente oficial gratis. Sólo lo trae Google, al elegir una calle.
+
 ## 3. Ajustes → «Direcciones en el checkout»
 
 Hay dos casillas y dos topes:
 
 - **Sugerencias mientras se escribe la calle (Google):** prendida de fábrica. Si falta `GOOGLE_MAPS_API_KEY` en el servidor, lo avisa ahí mismo.
 - **Tope por día:** búsquedas y direcciones completadas. Abajo de cada uno dice cuántas se usaron hoy.
-- **Revisar que la calle y la altura existan (Georef):** prendida de fábrica.
+- **Revisar que la calle y la altura existan (Georef):** prendida de fábrica. También apaga las sugerencias de localidad.
 
 ### Cuánto cuesta Google
 
@@ -135,6 +144,8 @@ Un local sin link se ve igual que antes, sin nada para tocar.
 
 El `.env.example` ya apunta ahí. Para probar:
 
+- «Palermo» o «Flo» en Localidad (con CABA) → sugerencias; «Quilm» con Buenos Aires.
+- Código postal 1704 con CABA → «es de Buenos Aires».
 - «Thames 1500» → sugerencia → todo completo.
 - «Corientes» 1234 → «¿Tu dirección es Av. Corrientes 1234, CABA?».
 - Thames 99999 → «No encontramos la altura».

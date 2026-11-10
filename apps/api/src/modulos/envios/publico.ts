@@ -17,8 +17,8 @@ export async function envioPublico(pool: pg.Pool | pg.PoolClient, transportes: T
     ? (await pool.query<{ fecha: Date; estado: EstadoEnvioTienda; descripcion: string; ubicacion: string | null }>(
       "SELECT fecha, estado, descripcion, ubicacion FROM tienda.envio_eventos WHERE envio_id = $1 ORDER BY fecha DESC, id DESC LIMIT 50", [e.id])).rows
     : [];
-  const t = pedido.transporte as TransporteTienda | "estandar";
-  const adaptador = t !== "estandar" ? transportes.adaptadores[t] : undefined;
+  const t = pedido.transporte as TransporteTienda | "estandar" | "moto";
+  const adaptador = t !== "estandar" && t !== "moto" ? transportes.adaptadores[t] : undefined;
   return {
     transporte: t,
     nombreTransporte: NOMBRE_TRANSPORTE[t],

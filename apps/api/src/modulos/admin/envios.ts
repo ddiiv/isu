@@ -55,7 +55,7 @@ export const SE_PREPARAN_SOLOS = new Set(["correo_argentino", "andreani", "oca"]
 const ERRORES_PROBLEMA = 5;
 
 const CONDICION: Record<(typeof VISTAS)[number], string> = {
-  preparar: "p.estado = 'pagado' AND p.transporte <> 'estandar' AND e.id IS NULL",
+  preparar: "p.estado = 'pagado' AND p.transporte NOT IN ('estandar', 'moto') AND e.id IS NULL",
   etiquetados: "p.estado = 'pagado' AND e.id IS NOT NULL AND e.despachado_en IS NULL",
   en_camino: `e.despachado_en IS NOT NULL AND e.seguimiento IS NOT NULL AND e.estado NOT IN ('entregado','no_entregado','devuelto','cancelado') AND e.errores_seguidos < ${ERRORES_PROBLEMA}`,
   // Salió sin el número del rótulo (Correo): el cliente no lo puede seguir.
@@ -66,7 +66,7 @@ const CONDICION: Record<(typeof VISTAS)[number], string> = {
 interface FilaPreparar {
   id: number; numero: string; estado: string; nombre: string; apellido: string; email: string; telefono: string; dni: string;
   direccion: { calle: string; numero: string; piso?: string; cp: string; localidad: string; provincia: string; indicaciones?: string } | null;
-  transporte: TransporteTienda | "estandar"; servicio_envio: "domicilio" | "sucursal" | "en_el_dia"; sucursal_envio: { id: string } | null;
+  transporte: TransporteTienda | "estandar" | "moto"; servicio_envio: "domicilio" | "sucursal" | "en_el_dia"; sucursal_envio: { id: string } | null;
   paquete_envio: Paquete | null; total: number; subtotal: number; descuento: number; prendas: number;
 }
 
@@ -198,7 +198,7 @@ export async function rutasEnviosAdmin(app: FastifyInstance, deps: DepsEnviosAdm
     const p = rows[0];
     if (!p) throw new ErrorHttp(404, "no_encontrado", "No existe ese pedido.");
     if (p.estado !== "pagado") throw new ErrorHttp(409, "no_pagado", "Sólo se preparan pedidos pagados que no salieron.");
-    if (!p.transporte || p.transporte === "estandar") throw new ErrorHttp(409, "sin_transporte", "Este pedido va con envío estándar: se marca a mano.");
+    if (!p.transporte || p.transporte === "estandar" || p.transporte === "moto") throw new ErrorHttp(409, "sin_transporte", "Este pedido va con envío estándar o en moto: se marca a mano.");
     const vigente = await pool.query("SELECT 1 FROM tienda.envios WHERE pedido_id = $1 AND activo", [p.id]);
     if (vigente.rowCount) throw new ErrorHttp(409, "ya_preparado", "Ya tiene un envío. Si hay que rehacerlo, descartalo primero.");
 

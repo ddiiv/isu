@@ -1,6 +1,9 @@
 import nodemailer from "nodemailer";
+import type pg from "pg";
 import { z } from "zod";
 import { armar, PLANTILLAS, type Plantilla } from "./plantillas.js";
+import { cargarPedido } from "./pedido.js";
+import { pdfPedido } from "./pdf.js";
 
 /*
  * Envío por SMTP (en local, Mailpit; en producción, el proveedor que se elija:
@@ -13,17 +16,38 @@ const Trabajo = z.object({
   datos: z.record(z.string(), z.unknown()),
 });
 
-export function crearCorreo(o: { smtp?: string; de: string; responder?: string }) {
+/*
+ * «Pago confirmado» lleva el PDF del pedido; «venta_tienda» (el aviso interno) sale a `ventas`
+ * (CORREO_VENTAS; sin ella no se manda) con el PDF y el link al pedido en el backoffice (`adminUrl`).
+ * Los datos del PDF salen de la base, del pedido de ese número; el PDF no se guarda en ningún lado.
+ */
+export function crearCorreo(o: { smtp?: string; de: string; responder?: string; pool?: pg.Pool; ventas?: string; adminUrl?: string }) {
   // Topes propios: los de nodemailer (2 min para conectar, 10 de inactividad) dejan colgado el trabajo de la cola.
   const t = o.smtp ? nodemailer.createTransport({ url: o.smtp, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000 }) : null;
   return async (datos: unknown) => {
     const j = Trabajo.parse(datos);
-    const m = armar(j.plantilla as Plantilla, j.datos);
+    const interno = j.plantilla === "venta_tienda";
+    if (interno && !o.ventas) return { enviado: false, omitido: "sin CORREO_VENTAS" };
+    const cargar = (interno || j.plantilla === "pago_confirmado") && o.pool && typeof j.datos.numero === "string" ? cargarPedido(o.pool, j.datos.numero) : null;
+    // Al cliente el mail le llega igual aunque la base no conteste (sale sin el PDF); el interno se arma con la base y reintenta.
+    const pedido = interno ? await cargar : await cargar?.catch((e: Error) => { console.error("[correo] no se pudo leer el pedido para el PDF:", e.message); return null; }) ?? null;
+    // El aviso interno se arma entero con lo que dice la base; si el pedido no está, reintentar no lo arregla.
+    if (interno && !pedido) throw Object.assign(new Error("Venta de un pedido que no existe"), { sinReintento: true });
+    // Un pago_confirmado sólo lleva el PDF si el pedido es de quien recibe el mail.
+    const adjuntar = pedido && (interno || pedido.email.toLowerCase() === j.para.toLowerCase()) ? pedido : null;
+    const m = armar(j.plantilla as Plantilla, interno ? { ...pedido, enlaceAdmin: o.adminUrl ? `${o.adminUrl.replace(/\/+$/, "")}/pedidos/${pedido!.numero}` : null } : j.datos);
+    const para = interno ? o.ventas! : j.para;
     if (!t) {
-      console.warn(`[correo] sin SMTP_URL: no se manda «${m.asunto}» a ${j.para.replace(/^(.).*@/, "$1***@")}`);
+      console.warn(`[correo] sin SMTP_URL: no se manda «${m.asunto}» a ${para.replace(/^(.).*@/, "$1***@")}`);
       return { enviado: false };
     }
-    const r = await t.sendMail({ from: o.de, to: j.para, replyTo: o.responder, subject: m.asunto, html: m.html, text: m.texto });
+    let attachments: Array<{ filename: string; content: Buffer; contentType: string }> | undefined;
+    if (adjuntar) {
+      // Un PDF que no sale no frena el mail: el cliente tiene que enterarse igual de que pagó.
+      try { attachments = [{ filename: `pedido-${adjuntar.numero}.pdf`, content: await pdfPedido(adjuntar, interno), contentType: "application/pdf" }]; }
+      catch (e) { console.error(`[correo] no se pudo armar el PDF de ${adjuntar.numero}:`, (e as Error).message); }
+    }
+    const r = await t.sendMail({ from: o.de, to: para, replyTo: o.responder, subject: m.asunto, html: m.html, text: m.texto, attachments });
     return { enviado: true, id: r.messageId };
   };
 }
