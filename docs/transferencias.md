@@ -2,7 +2,7 @@
 
 Cuando un cliente paga por transferencia, el pedido pasa a **pagado** solo, sin esperar el comprobante y sin que nadie lo marque a mano. Stocker recibe el aviso y puede despachar.
 
-Hay dos maneras. Se prenden en **Ajustes → Transferencias que se confirman solas**, y se pueden usar las dos juntas.
+Hay dos maneras. Se prenden en **Medios de pago → Transferencia → Transferencias que se confirman solas**, y se pueden usar las dos juntas.
 
 | | Talo: un CVU por pedido | Tu cuenta de Mercado Pago |
 |---|---|---|
@@ -10,7 +10,7 @@ Hay dos maneras. Se prenden en **Ajustes → Transferencias que se confirman sol
 | Qué tan rápido | Al instante (Talo avisa) | En minutos (la tienda mira lo que entró) |
 | Costo | La comisión de Talo por transferencia (según Talo, cerca del 1%) | Ninguno: recibir transferencias en Mercado Pago no tiene costo |
 | Si el cliente transfiere mal | Se ve en Transferencias como «monto distinto» | Si transfiere sin los centavos, queda «sin pedido» y se asigna a mano |
-| Hace falta | Cuenta en Talo y sus credenciales en el servidor | Que los **Datos para transferir** de Ajustes sean los de tu cuenta de Mercado Pago |
+| Hace falta | Cuenta en Talo y sus credenciales en el servidor | Que los **Datos para transferir** (Medios de pago) sean los de tu cuenta de Mercado Pago |
 
 Con las dos prendidas va Talo, y si Talo no responde en ese momento, el pedido usa la cuenta de Mercado Pago. Con ninguna, todo sigue como antes: el cliente sube el comprobante y se confirma a mano.
 
@@ -44,7 +44,7 @@ Una misma transferencia nunca se cuenta dos veces.
    TALO_CLIENT_SECRET=…
    ```
    `TALO_API_URL` no hace falta: sin valor usa `https://api.talo.com.ar`. Para probar con el sandbox de Talo, poné `TALO_API_URL=https://sandbox-api.talo.com.ar`, con las credenciales del sandbox.
-4. Hacé deploy. En backoffice → **Ajustes**, prendé **Un CVU por pedido (Talo)** y guardá.
+4. Hacé deploy. En backoffice → **Medios de pago**, prendé **Un CVU por pedido (Talo)** y guardá.
 5. **Probalo con una compra chica:**
    - Hacé un pedido por transferencia y transferí el monto exacto al CVU que te muestra.
    - En un par de minutos el pedido tiene que pasar a pagado solo.
@@ -53,7 +53,7 @@ Talo avisa a `https://<API_PUBLICA_URL>/v1/pagos/talo/aviso`. La tienda le pasa 
 
 ## Mercado Pago: cómo se configura
 
-1. En **Ajustes → Datos para transferir** cargá los datos de **tu cuenta de Mercado Pago**:
+1. En **Medios de pago → Transferencia → Datos para transferir** cargá los datos de **tu cuenta de Mercado Pago**:
    - **Titular** y **CUIT**;
    - **Banco:** «Mercado Pago»;
    - **CBU / CVU:** el CVU de la cuenta;
@@ -91,7 +91,7 @@ El panel muestra cuántas hay por resolver. Asignar y descartar piden rol operad
 ## Precios: transferencia más barata, tarjeta al precio de lista
 
 - La tienda muestra el **precio normal** y lo cobra así con tarjeta y Mercado Pago (ya incluye lo que cobra Mercado Pago).
-- Con **transferencia** hace un **% OFF**: Ajustes → «% OFF con transferencia».
+- Con **transferencia** hace un **% OFF**: Medios de pago → Transferencia → «% OFF con transferencia».
 - **Recargo por pagar con tarjeta: no.** Lo prohíbe la [Ley 25.065, art. 37 inc. c)](https://servicios.infoleg.gob.ar/infolegInternet/anexos/55000-59999/55556/texact.htm): el comercio no puede hacer «diferencias de precio entre operaciones al contado y con tarjeta».
   - La [Res. 51-E/2017](https://www.argentina.gob.ar/normativa/nacional/resoluci%C3%B3n-51-2017-271185/texto) lo extiende a cualquier pago en una cuota con débito, crédito u otro medio electrónico.
   - Al pie de la letra, la misma regla alcanza al descuento por transferencia. Es muy común y casi no se controla, pero conviene confirmarlo con el contador.

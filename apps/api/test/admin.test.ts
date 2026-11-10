@@ -14,7 +14,7 @@ import type { Colas } from "../src/lib/colas.js";
 import { codigo } from "../src/lib/totp.js";
 import { ARGON_ADMIN } from "../src/modulos/admin/ingreso.js";
 import { firmaOpinar } from "@isu/envios";
-import { BANNERS_SUGERIDOS } from "@isu/shared";
+import { BANNERS_SUGERIDOS, MEDIOS_PAGO } from "@isu/shared";
 import { armarBanner } from "../src/modulos/portada/banners.js";
 import { almacenDeComprobantes } from "@isu/almacen";
 
@@ -153,7 +153,7 @@ beforeAll(async () => {
     env: leerEntorno({
       NODE_ENV: "test", LOG_LEVEL: "silent", DATABASE_URL: DB, REDIS_URL: REDIS, CACHE_SEGUNDOS: "0",
       INTERNO_TOKEN: INTERNO, ADMIN_CLAVE_CIFRADO: CLAVE_CIFRADO, FOTOS_DIR: dirFotos, COMPROBANTES_DIR: dirComprobantes,
-      STOCKER_API_URL: urlStocker, STOCKER_TOKEN: "s".repeat(30),
+      STOCKER_API_URL: urlStocker, STOCKER_TOKEN: "s".repeat(30), MP_ACCESS_TOKEN: "m".repeat(30), MP_WEBHOOK_SECRET: "w".repeat(30),
     }),
     pool, redis, colas,
   });
@@ -578,6 +578,28 @@ describe("ajustes (sólo el dueño)", () => {
     expect(ok.json()).toEqual({ ok: true, guardados: ["avisoUltimas"] });
     expect((await app.inject("/v1/config")).json().avisoUltimas).toBe(4);
     await req("PUT", "/v1/admin/ajustes", dueno, { avisoUltimas: 3 });
+  });
+  it("medios de pago: se apagan con el ajuste (validado, sólo el dueño, auditado) y no salen en la tienda; no se apagan todos", async () => {
+    try {
+      expect((await app.inject("/v1/config")).json().mediosPago).toContain("mercadopago");
+      for (const malo of [["efectivo"], "local", [...MEDIOS_PAGO], [...MEDIOS_PAGO, "local"]]) {
+        expect((await req("PUT", "/v1/admin/ajustes", dueno, { mediosPagoApagados: malo })).statusCode, JSON.stringify(malo)).toBe(400);
+      }
+      expect((await req("PUT", "/v1/admin/ajustes", operador, { mediosPagoApagados: ["pagofacil"] })).json().error).toBe("sin_permiso");
+      expect((await req("PUT", "/v1/admin/ajustes", dueno, { mediosPagoApagados: ["pagofacil", "pagofacil"] })).json()).toEqual({ ok: true, guardados: ["mediosPagoApagados"] });
+      const medios = (await app.inject("/v1/config")).json().mediosPago;
+      expect(medios).not.toContain("pagofacil");
+      expect(medios).toContain("mercadopago");
+      expect((await req("GET", "/v1/admin/auditoria?entidad=ajuste", dueno)).json().registros[0].detalle.mediosPagoApagados).toEqual(["pagofacil"]);
+      // Cualquier rol ve el estado; sólo booleanos, nunca el valor de una credencial.
+      const est = await req("GET", "/v1/admin/medios-pago", operador);
+      expect(est.json()).toEqual({ mercadopago: { credencial: true, webhook: true }, transferencia: { datos: expect.any(Boolean) }, local: { locales: expect.any(Boolean) }, apagados: ["pagofacil"] });
+      expect(est.body).not.toContain("m".repeat(30));
+      expect(est.body).not.toContain("w".repeat(30));
+      expect((await req("GET", "/v1/admin/medios-pago")).statusCode).toBe(401);
+    } finally {
+      await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'mediosPagoApagados'");
+    }
   });
   it("apagar la tienda: se valida el aviso, queda en la auditoría y cualquier rol puede ver si está apagada", async () => {
     const aviso = { activa: true, titulo: "Volvemos pronto", mensaje: "Estamos haciendo cambios.", vuelve: "Volvemos el lunes 9 hs" };

@@ -420,6 +420,24 @@ describe("pedidos", () => {
     expect(JSON.stringify(pref)).not.toContain(r.json().acceso); // el token de acceso al pedido no viaja a Mercado Pago
   });
 
+  it("un medio apagado en Medios de pago: no sale en la tienda, se rechaza al cotizar y al crear, y los pedidos ya hechos siguen", async () => {
+    const hecho = (await post("/v1/pedidos", pedido("apag"))).json();
+    const apagar = (m: string[]) => pool.query("INSERT INTO tienda.ajustes (clave, valor) VALUES ('mediosPagoApagados', $1) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor", [JSON.stringify(m)]);
+    try {
+      await apagar(["transferencia"]);
+      expect((await get("/v1/config")).json().mediosPago).not.toContain("transferencia");
+      const nuevo = await post("/v1/pedidos", pedido("apag2"));
+      expect([nuevo.statusCode, nuevo.json().error, nuevo.json().mensaje]).toEqual([400, "medio_apagado", "Ese medio de pago no está disponible."]);
+      expect((await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }], entrega: "retiro", medioPago: "transferencia" })).statusCode).toBe(400);
+      expect((await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }], entrega: "retiro", medioPago: "local" })).statusCode).toBe(200);
+      // El pedido que ya estaba hecho con ese medio se sigue pagando.
+      const ok = await post("/v1/pagos/registrar", { pedido: hecho.numero, medio: "transferencia", monto: 1_600_000, referencia: "OP-APAGADO", quien: "Caja" }, { authorization: `Bearer ${PAGOS}` });
+      expect(ok.json()).toMatchObject({ estado: "pagado" });
+    } finally {
+      await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'mediosPagoApagados'");
+    }
+  });
+
   it("Pago Fácil: preferencia sólo en efectivo y con vencimiento", async () => {
     await post("/v1/pedidos", pedido("pf", { medioPago: "pagofacil" }));
     const pref = mp.preferencias.at(-1)! as { payment_methods: { excluded_payment_types: Array<{ id: string }> }; date_of_expiration?: string };

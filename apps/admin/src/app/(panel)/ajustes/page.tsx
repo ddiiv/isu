@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EnlaceLocal, leerPacks, normalizarEnlace, PACK_TOPE, type AjusteDirecciones, type AjustePacks, type Local } from "@isu/shared";
 import { api, fecha, useDatos } from "@/lib/api";
@@ -8,10 +9,7 @@ import { ApagarTienda } from "@/components/ApagarTienda";
 
 /* Ajustes de la tienda (sólo el dueño). Cada campo se valida en la API; los cambios quedan en la auditoría. */
 type Valores = Record<string, unknown> & {
-  anuncio: string | null; whatsapp: string; email: string | null; descuentoTransferencia: number; cuotasSinInteres: number;
-  montoMinimoCarrito: number; envioGratisDesde: number | null; costoEnvio: number; avisoUltimas: number; mostrarAgotados: boolean; publicarNuevos: boolean;
-  horasPagoOnline: number; horasPagoFacil: number; horasTransferencia: number; horasPagoLocal: number;
-  datosTransferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string };
+  anuncio: string | null; whatsapp: string; email: string | null; montoMinimoCarrito: number; envioGratisDesde: number | null; costoEnvio: number; avisoUltimas: number; mostrarAgotados: boolean; publicarNuevos: boolean;
   locales: Local[];
   chatbot?: { activo: boolean; saludo: string };
   chatbotIa?: { activo: boolean; topeDiario: number };
@@ -20,36 +18,22 @@ type Valores = Record<string, unknown> & {
   resenas?: { publicarSolas: boolean; pedirDias: number };
   cuidados?: string;
   cifras?: Array<{ valor: string; texto: string }>;
-  // Transferencias que se confirman solas
-  transferenciasAuto?: { talo: boolean; mercadoPago: boolean };
   // Etapa 11
   direcciones?: AjusteDirecciones;
 } & ValoresEnvios;
 type EstadoDirecciones = { google: boolean; georef: boolean; hoy: { sugerencias: number | null; lugares: number | null } };
-type EstadoTransferencias = { talo: { prendido: boolean; configurado: boolean }; mercadoPago: { prendido: boolean; configurado: boolean } };
-// Hasta 7 días (168 h): después Stocker libera sola la mercadería que no se cobró.
-const HORAS: Array<[keyof Valores, string, number, number]> = [
-  ["horasPagoOnline", "Mercado Pago (tarjeta)", 1, 72], ["horasPagoFacil", "Pago Fácil / Rapipago", 24, 168],
-  ["horasTransferencia", "Transferencia", 2, 168], ["horasPagoLocal", "Pagar al retirar en el local", 24, 168],
-];
-/** Un plazo guardado antes del tope de Stocker se muestra (y se guarda) con el tope. */
-const conTopes = (x: Valores): Valores => ({ ...x, ...Object.fromEntries(HORAS.filter(([k]) => typeof x[k] === "number").map(([k, , , max]) => [k, Math.min(max, x[k] as number)])) });
-
 export default function Ajustes() {
   const { datos, error, recargar } = useDatos<{ ajustes: Array<{ clave: string; valor: unknown; actualizadoPor: string | null; actualizadoEn: string }> }>("ajustes");
   const [v, setV] = useState<Valores | null>(null);
-  // Qué tiene credenciales en el servidor (Talo, Mercado Pago).
-  const { datos: tr } = useDatos<{ estado: EstadoTransferencias }>("transferencias");
   // Si la clave de Google está en el servidor y cuánto se usó hoy.
   const { datos: dir } = useDatos<EstadoDirecciones>("direcciones");
   const aviso = useAviso();
   const original = datos ? Object.fromEntries(datos.ajustes.map((a) => [a.clave, a.valor])) as Valores : null;
   // Packs: el formato viejo ([x2…x5]) se muestra ya pasado al nuevo (al guardar queda así).
-  useEffect(() => { if (original) setV(conTopes(structuredClone({ ...original, ...(original.packs ? { packs: leerPacks(original.packs) } : {}) }))); }, [datos]);
+  useEffect(() => { if (original) setV(structuredClone({ ...original, ...(original.packs ? { packs: leerPacks(original.packs) } : {}) })); }, [datos]);
   if (error) return <Mensaje>{error}</Mensaje>;
   if (!v || !original) return <Cargando />;
   const poner = <K extends keyof Valores>(k: K, x: Valores[K]) => setV({ ...v, [k]: x });
-  const t = v.datosTransferencia ?? { titular: "", cuit: "", banco: "", cbu: "", alias: "" };
   const locales = v.locales ?? [];
   const ultima = datos!.ajustes.reduce((a, b) => (a && a.actualizadoEn > b.actualizadoEn ? a : b), datos!.ajustes[0]);
 
@@ -72,41 +56,16 @@ export default function Ajustes() {
             <Campo etiqueta="Email público"><input type="email" className={claseEntrada} value={v.email ?? ""} onChange={(e) => poner("email", e.target.value || null)} /></Campo>
           </div>
         </Tarjeta>
+        <Tarjeta titulo="Medios de pago">
+          <p className="text-sm text-tinta-suave">Los medios de pago ahora están en <Link href="/medios-pago" className="font-bold text-marca underline">Medios de pago</Link>: el % OFF con transferencia, las cuotas, los datos para transferir y el tiempo para pagar.</p>
+        </Tarjeta>
         <Tarjeta titulo="Precios y envío">
           <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="% OFF con transferencia"><input type="number" min={0} max={100} className={claseEntrada} value={v.descuentoTransferencia} onChange={(e) => poner("descuentoTransferencia", Number(e.target.value) || 0)} /></Campo>
-            <Campo etiqueta="Cuotas sin interés"><input type="number" min={1} max={24} className={claseEntrada} value={v.cuotasSinInteres} onChange={(e) => poner("cuotasSinInteres", Number(e.target.value) || 1)} /></Campo>
             <Campo etiqueta="Compra mínima"><EntradaPesos valor={v.montoMinimoCarrito} onChange={(c) => poner("montoMinimoCarrito", c ?? 0)} /></Campo>
             <Campo etiqueta="Costo de envío estándar" ayuda="Si no hay transportes o ninguno responde."><EntradaPesos valor={v.costoEnvio} onChange={(c) => poner("costoEnvio", c ?? 0)} /></Campo>
             <Campo etiqueta="Envío gratis desde" ayuda="Vacío = nunca."><EntradaPesos valor={v.envioGratisDesde} onChange={(c) => poner("envioGratisDesde", c)} /></Campo>
           </div>
         </Tarjeta>
-        <Tarjeta titulo="Datos para transferir">
-          <p className="mb-3 text-xs text-tinta-tenue">Sin CBU o alias, la tienda no ofrece transferencia. Revisalos bien: es donde te pagan.</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {([["titular", "Titular"], ["cuit", "CUIT"], ["banco", "Banco"], ["cbu", "CBU / CVU (22 números)"], ["alias", "Alias"]] as const).map(([k, e]) => (
-              <Campo key={k} etiqueta={e}><input className={claseEntrada} value={t[k]} onChange={(x) => poner("datosTransferencia", { ...t, [k]: x.target.value })} /></Campo>
-            ))}
-          </div>
-        </Tarjeta>
-        {v.transferenciasAuto && (
-          <Tarjeta titulo="Transferencias que se confirman solas">
-            <p className="mb-3 text-xs text-tinta-tenue">El pedido se confirma solo cuando llega la plata, sin esperar el comprobante. Lo que no se pueda asignar solo (por ejemplo, si transfirieron sin los centavos) aparece en Transferencias para asignarlo a mano.</p>
-            <div className="space-y-3">
-              <Casilla etiqueta="Un CVU por pedido (Talo)"
-                ayuda={tr && !tr.estado.talo.configurado
-                  ? "Faltan las credenciales de Talo en el servidor (TALO_USER_ID, TALO_CLIENT_ID y TALO_CLIENT_SECRET): mientras tanto se usa lo de abajo."
-                  : "Cada pedido tiene su propia cuenta por el monto exacto y Talo avisa al instante. Talo cobra una comisión por cada transferencia."}
-                marcada={v.transferenciasAuto.talo} onChange={(x) => poner("transferenciasAuto", { ...v.transferenciasAuto!, talo: x })} />
-              <Casilla etiqueta="Mis datos para transferir son de mi cuenta de Mercado Pago"
-                ayuda={tr && !tr.estado.mercadoPago.configurado
-                  ? "Falta MP_ACCESS_TOKEN en el servidor."
-                  : "Cada pedido pide un monto con centavos únicos ($ 45.000,37) y se reconoce entre lo que entra a la cuenta. Recibir transferencias en Mercado Pago no tiene costo."}
-                marcada={v.transferenciasAuto.mercadoPago} onChange={(x) => poner("transferenciasAuto", { ...v.transferenciasAuto!, mercadoPago: x })} />
-            </div>
-            <p className="mt-3 text-xs text-tinta-tenue">Con las dos prendidas va Talo; si Talo no responde, la cuenta de Mercado Pago. Con ninguna, como siempre: se confirma a mano.</p>
-          </Tarjeta>
-        )}
         {v.direcciones && (() => {
           const d = v.direcciones;
           const tope = (k: "topeSugerencias" | "topeLugares", x: string) => poner("direcciones", { ...d, [k]: Math.max(0, Math.min(5000, Math.trunc(Number(x)) || 0)) });
@@ -140,12 +99,6 @@ export default function Ajustes() {
             </Tarjeta>
           );
         })()}
-        <Tarjeta titulo="Tiempo para pagar (horas)">
-          <p className="mb-3 text-xs text-tinta-tenue">Mientras tanto la mercadería queda apartada en Stocker. Si no paga, se libera sola. Hasta 7 días (168 h): es lo máximo que Stocker la aparta sin cobrar.</p>
-          <div className="grid grid-cols-2 gap-3">
-            {HORAS.map(([k, e, min, max]) => <Campo key={k} etiqueta={e}><input type="number" min={min} max={max} className={claseEntrada} value={v[k] as number} onChange={(x) => poner(k, Number(x.target.value) || min)} /></Campo>)}
-          </div>
-        </Tarjeta>
         <Tarjeta titulo="Catálogo">
           <div className="space-y-3">
             <Casilla etiqueta="Publicar solos los productos nuevos de Stocker" ayuda="Si no, quedan ocultos hasta que alguien los publique." marcada={v.publicarNuevos} onChange={(x) => poner("publicarNuevos", x)} />

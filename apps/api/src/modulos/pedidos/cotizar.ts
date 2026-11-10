@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { ErrorHttp } from "../../lib/errores.js";
 import { conRebaja, type Descuentos } from "../../lib/descuentos.js";
 import { buscarCupon, categoriasDe, CODIGO, elegir, motivoNoVigente, normalizarCodigo, promocionesVigentes, type CuponAplicado, type LineaParaCupon } from "../../lib/cupones.js";
 import {
@@ -36,6 +37,8 @@ export interface Ajustes {
   horasPagoLocal: number;
   datosTransferencia: { titular: string; cuit: string; banco: string; cbu: string; alias: string };
   locales: Array<{ nombre: string; retiro: boolean }>;
+  /** medios que el dueño dejó de ofrecer (Medios de pago); los pedidos ya hechos con uno siguen su curso */
+  mediosPagoApagados: string[];
   /** cuántas prendas lleva un pack (mínimo y máximo) y el % por cada cantidad */
   packs: AjustePacks;
 }
@@ -43,7 +46,7 @@ export interface Ajustes {
 const POR_DEFECTO: Ajustes = {
   montoMinimoCarrito: 0, envioGratisDesde: null, costoEnvio: 790_000, descuentoTransferencia: 20,
   horasPagoOnline: 2, horasPagoFacil: 72, horasTransferencia: 48, horasPagoLocal: 72,
-  datosTransferencia: { titular: "", cuit: "", banco: "", cbu: "", alias: "" }, locales: [],
+  datosTransferencia: { titular: "", cuit: "", banco: "", cbu: "", alias: "" }, locales: [], mediosPagoApagados: [],
   packs: PACKS_POR_DEFECTO,
 };
 
@@ -85,6 +88,8 @@ export async function cotizar(
   opciones: { entrega?: "envio" | "retiro"; medioPago?: MedioPago; ajustes?: Ajustes; descuentos?: Descuentos; cupon?: string | null; email?: string | null } = {},
 ): Promise<Cotizado> {
   const a = opciones.ajustes ?? await leerAjustes(pool);
+  // Vale para el carrito, las opciones de envío y el pedido nuevo: los tres cotizan por acá.
+  if (opciones.medioPago && a.mediosPagoApagados.includes(opciones.medioPago)) throw new ErrorHttp(400, "medio_apagado", "Ese medio de pago no está disponible.");
   // Sueltas: el mismo SKU dos veces se suma. Packs: la misma composición dos veces, también.
   const sueltas = new Map<string, number>();
   const grupos = new Map<string, { prendas: Map<string, number>; cantidad: number }>();

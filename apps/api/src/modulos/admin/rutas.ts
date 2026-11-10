@@ -6,13 +6,14 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { hash } from "@node-rs/argon2";
 import { claveNueva, procesarFoto, FotoInvalida, type Almacen } from "@isu/almacen";
-import { ConfigPublica, ESTADOS_PENDIENTES, HORAS_MAXIMAS_PAGO, Local, parteDe, slug as esquemaSlug } from "@isu/shared";
+import { ConfigPublica, ESTADOS_PENDIENTES, HORAS_MAXIMAS_PAGO, Local, MEDIOS_PAGO, MedioPago, parteDe, slug as esquemaSlug } from "@isu/shared";
 import type { Entorno } from "../../entorno.js";
 import type { CacheCorta } from "../../lib/cache.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { ipDe } from "../../lib/cliente.js";
 import { leerTiendaCerrada } from "../../lib/tienda.js";
+import { leerAjustes } from "../pedidos/cotizar.js";
 import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
 import { rutasGuiasAdmin } from "./talles.js";
@@ -744,6 +745,10 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     resenas: z.object({ publicarSolas: z.boolean(), pedirDias: z.number().int().min(1).max(60) }).strict(),
     // Transferencias que se confirman solas: CVU por pedido (Talo) y/o alias de la cuenta de Mercado Pago con centavos únicos.
     transferenciasAuto: z.object({ talo: z.boolean(), mercadoPago: z.boolean() }).strict(),
+    // Medios de pago que la tienda no ofrece (Medios de pago). Siempre queda al menos uno ofrecido.
+    mediosPagoApagados: z.array(MedioPago).max(MEDIOS_PAGO.length)
+      .refine((l) => new Set(l).size < MEDIOS_PAGO.length, "Tiene que quedar al menos un medio de pago ofrecido")
+      .transform((l) => [...new Set(l)]),
     // Etapa 11: ayudas para la dirección del checkout (Google con topes por día, Georef).
     direcciones: AjusteDirecciones,
   };
@@ -751,6 +756,17 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.get("/v1/admin/tienda", async (req) => {
     await exigir(pool, req);
     return { tiendaCerrada: await leerTiendaCerrada(pool) };
+  });
+  // Medios de pago: qué está configurado y qué se apagó. Cualquier rol; sólo booleanos, nunca valores de credenciales.
+  api.get("/v1/admin/medios-pago", async (req) => {
+    await exigir(pool, req);
+    const a = await leerAjustes(pool);
+    return {
+      mercadopago: { credencial: !!deps.env.MP_ACCESS_TOKEN, webhook: !!deps.env.MP_WEBHOOK_SECRET },
+      transferencia: { datos: !!(a.datosTransferencia.cbu || a.datosTransferencia.alias) },
+      local: { locales: a.locales.some((l) => l.retiro) },
+      apagados: a.mediosPagoApagados,
+    };
   });
   api.get("/v1/admin/ajustes", async (req) => {
     await exigir(pool, req, "dueno");
