@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
+import type { TiendaCerrada } from "@isu/shared";
 import { api } from "@/lib/api";
 
 /*
@@ -17,6 +18,10 @@ export type Rol = "dueno" | "operador" | "lectura";
 export interface Yo { email: string; nombre: string; rol: Rol; debeCambiarClave: boolean }
 const Contexto = createContext<Yo | null>(null);
 export const useYo = () => useContext(Contexto)!;
+/* La tienda apagada (Ajustes → Apagar la tienda): el marco lo avisa en todas las pantallas y lo comparte con Ajustes. */
+interface EstadoTienda { tienda: TiendaCerrada | null; guardar: (t: TiendaCerrada) => Promise<void> }
+const ContextoTienda = createContext<EstadoTienda>({ tienda: null, guardar: async () => {} });
+export const useTienda = () => useContext(ContextoTienda);
 export const puede = (yo: Yo, rol: Rol) => ({ lectura: 0, operador: 1, dueno: 2 })[yo.rol] >= ({ lectura: 0, operador: 1, dueno: 2 })[rol];
 
 /* Íconos de trazo (24×24), del mismo grosor que los de la tienda. */
@@ -83,6 +88,8 @@ const iniciales = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(
 export function Marco({ children }: { children: React.ReactNode }) {
   const [yo, setYo] = useState<Yo | null>(null);
   const [menu, setMenu] = useState(false);
+  const [tienda, setTienda] = useState<TiendaCerrada | null>(null);
+  const [falloPrender, setFalloPrender] = useState<string | null>(null);
   const ruta = usePathname();
   useEffect(() => {
     api<Yo | undefined>("yo").then((y) => {
@@ -91,6 +98,10 @@ export function Marco({ children }: { children: React.ReactNode }) {
       else setYo(y);
     }).catch(() => { /* api() ya lleva al ingreso */ });
   }, []);
+  // En cada pantalla se vuelve a mirar: otra persona pudo apagarla o prenderla.
+  useEffect(() => {
+    if (yo) api<{ tiendaCerrada: TiendaCerrada }>("tienda").then((r) => setTienda(r.tiendaCerrada)).catch(() => { /* el aviso es un extra: sin él, el panel sigue */ });
+  }, [yo, ruta]);
   useEffect(() => setMenu(false), [ruta]);
   useEffect(() => {
     if (!menu) return;
@@ -100,14 +111,32 @@ export function Marco({ children }: { children: React.ReactNode }) {
   }, [menu]);
   if (!yo) return <p className="p-10 text-center text-tinta-tenue" role="status">Cargando…</p>;
 
+  const guardarTienda = async (t: TiendaCerrada) => {
+    await api("ajustes", { metodo: "PUT", cuerpo: { tiendaCerrada: t } });
+    setTienda(t);
+  };
+  const aviso = tienda?.activa && (
+    <div role="status" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-amber-300 px-4 py-2.5 text-sm text-tinta">
+      <p className="font-bold">La tienda está apagada: los clientes ven el aviso.</p>
+      {puede(yo, "dueno") && (
+        <button type="button" className="rounded-lg bg-tinta px-3.5 py-1.5 font-bold text-white hover:bg-marca-fuerte focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tinta"
+          onClick={() => { setFalloPrender(null); guardarTienda({ ...tienda, activa: false }).catch((e: Error) => setFalloPrender(e.message)); }}>Prender la tienda</button>
+      )}
+      {falloPrender && <p role="alert" className="basis-full font-bold">No se pudo prender: {falloPrender}</p>}
+    </div>
+  );
   const activo = (href: string) => (href === "/" ? ruta === "/" : ruta.startsWith(href));
   const grupos = GRUPOS.map((g) => ({ ...g, items: g.items.filter((m) => puede(yo, m.rol)) })).filter((g) => g.items.length);
   return (
     <Contexto.Provider value={yo}>
-      <header className="sticky top-0 z-30 flex items-center justify-between bg-tinta px-4 py-3 text-white lg:hidden">
-        <Link href="/" className="flex items-baseline gap-2"><span className="font-display text-xl">Isuwaya</span><span className="text-xs text-white/60">Backoffice</span></Link>
-        <button type="button" className="rounded-full border border-white/25 px-3.5 py-1.5 text-sm font-bold" aria-expanded={menu} aria-controls="menu-backoffice" onClick={() => setMenu(!menu)}>Menú</button>
-      </header>
+     <ContextoTienda.Provider value={{ tienda, guardar: guardarTienda }}>
+      <div className="sticky top-0 z-30 lg:hidden">
+        <header className="flex items-center justify-between bg-tinta px-4 py-3 text-white">
+          <Link href="/" className="flex items-baseline gap-2"><span className="font-display text-xl">Isuwaya</span><span className="text-xs text-white/60">Backoffice</span></Link>
+          <button type="button" className="rounded-full border border-white/25 px-3.5 py-1.5 text-sm font-bold" aria-expanded={menu} aria-controls="menu-backoffice" onClick={() => setMenu(!menu)}>Menú</button>
+        </header>
+        {aviso}
+      </div>
       {menu && <button type="button" aria-label="Cerrar menú" className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMenu(false)} />}
       <div className="min-h-screen lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
         <aside id="menu-backoffice"
@@ -149,9 +178,11 @@ export function Marco({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
         <div className="min-w-0">
+          <div className="sticky top-0 z-20 hidden lg:block">{aviso}</div>
           <main className="mx-auto max-w-7xl px-4 py-6 sm:px-8 lg:py-10">{children}</main>
         </div>
       </div>
+     </ContextoTienda.Provider>
     </Contexto.Provider>
   );
 }

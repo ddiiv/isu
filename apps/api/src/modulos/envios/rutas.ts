@@ -8,6 +8,7 @@ import type { Transportes } from "@isu/envios";
 import type { Entorno } from "../../entorno.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { frenar } from "../../lib/frenos.js";
+import { exigirTiendaAbierta } from "../../lib/tienda.js";
 import { ipDe } from "../../lib/cliente.js";
 import type { Descuentos } from "../../lib/descuentos.js";
 import { cotizar } from "../pedidos/cotizar.js";
@@ -32,6 +33,7 @@ export async function rutasEnvios(app: FastifyInstance, deps: {
   api.post("/v1/envios/opciones", {
     schema: { body: z.object({ items: Items, destino: DestinoEnvio, medioPago: MedioPago.optional(), cupon: CodigoCupon.optional(), email: Email.optional() }).strict(), response: { 200: RespuestaOpcionesEnvio } },
   }, async (req, reply) => {
+    await exigirTiendaAbierta(deps.pool);
     await frenar(deps.redis, "envios-ip", ipDe(req, deps.env.INTERNO_TOKEN), 120, 600);
     if (req.body.cupon?.trim()) await frenar(deps.redis, "cupon-ip", ipDe(req, deps.env.INTERNO_TOKEN), 40, 600);
     const c = await cotizar(deps.pool, req.body.items, { medioPago: req.body.medioPago, descuentos: deps.descuentos, cupon: req.body.cupon, email: req.body.email, entrega: "envio" });

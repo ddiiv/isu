@@ -573,6 +573,55 @@ describe("botón de arrepentimiento", () => {
   });
 });
 
+describe("tienda apagada", () => {
+  const apagar = (extra: Record<string, unknown> = {}) => pool.query(
+    `INSERT INTO tienda.ajustes (clave, valor) VALUES ('tiendaCerrada', $1) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor`,
+    [JSON.stringify({ activa: true, titulo: "Cerrado por balance", mensaje: "Volvemos con todo.", vuelve: "Volvemos el lunes 9 hs", ...extra })]);
+  afterAll(async () => { await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'"); });
+
+  it("de fábrica está abierta, y la config pública informa el aviso cuando se apaga", async () => {
+    await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'");
+    expect((await get("/v1/config")).json().tiendaCerrada).toMatchObject({ activa: false, titulo: "Volvemos pronto" });
+    await apagar();
+    expect((await get("/v1/config")).json().tiendaCerrada).toEqual({ activa: true, titulo: "Cerrado por balance", mensaje: "Volvemos con todo.", vuelve: "Volvemos el lunes 9 hs" });
+  });
+
+  it("no se puede cotizar ni crear un pedido nuevo: 503 con el mensaje del aviso, y no queda nada", async () => {
+    await cargarCatalogo();
+    await apagar();
+    for (const [url, cuerpo] of [
+      ["/v1/pedidos", pedido("cerrada")],
+      ["/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }] }],
+      ["/v1/envios/opciones", { items: [{ sku: "QA-C-M", cantidad: 1 }], destino: { cp: "1406", provincia: "CABA", localidad: "Flores" } }],
+    ] as const) {
+      const r = await post(url, cuerpo);
+      expect(r.statusCode, url).toBe(503);
+      expect(r.json(), url).toMatchObject({ error: "tienda_cerrada", mensaje: "Volvemos con todo.", titulo: "Cerrado por balance", vuelve: "Volvemos el lunes 9 hs" });
+    }
+    expect((await pool.query("SELECT 1 FROM tienda.pedidos WHERE email = 'qa-compra-cerrada@test.com'")).rowCount).toBe(0);
+    // Al prenderla, se compra como siempre.
+    await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'");
+    expect((await post("/v1/pedidos", pedido("cerrada"))).statusCode).toBe(201);
+  });
+
+  it("lo que ya se compró sigue andando: ver el pedido, el aviso de pago de Mercado Pago y el arrepentimiento", async () => {
+    await cargarCatalogo();
+    const r = (await post("/v1/pedidos", pedido("cerrada2", { medioPago: "mercadopago", items: [{ sku: "QA-C-M", cantidad: 1 }] }))).json();
+    await apagar();
+    expect((await get(`/v1/pedidos/${r.numero}`, { "x-isu-acceso": r.acceso })).statusCode).toBe(200);
+    mp.pagos.set("7001", { id: 7001, status: "approved", external_reference: r.numero, transaction_amount: 10000, currency_id: "ARS" });
+    expect((await post("/v1/pagos/mercadopago/aviso?type=payment&data.id=7001", {}, firmar("7001"))).json().aplicado).toBe(true);
+    expect((await pool.query("SELECT estado FROM tienda.pedidos WHERE numero = $1", [r.numero])).rows[0].estado).toBe("pagado");
+    expect((await post("/v1/arrepentimiento", { numero: r.numero, email: "qa-compra-cerrada2@test.com", nombre: "Ana" })).statusCode).toBe(201);
+  });
+
+  it("un ajuste roto cuenta como tienda abierta", async () => {
+    await cargarCatalogo();
+    await pool.query(`INSERT INTO tienda.ajustes (clave, valor) VALUES ('tiendaCerrada', '"roto"') ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor`);
+    expect((await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }] })).statusCode).toBe(200);
+  });
+});
+
 describe("cupones", () => {
   const cupon = async (c: Record<string, unknown>) => {
     const d = { codigo: null, automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoria_ids: [], producto_ids: [], sobre_rebajas: true,

@@ -1,11 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { MapaRedirecciones, rutaVieja } from "@isu/shared";
+import { ConfigPublica, MapaRedirecciones, rutaVieja } from "@isu/shared";
 import { SITIO } from "@/lib/sitio";
 import { origenDelPedido } from "@/lib/origen";
 import { estadoRedirecciones } from "@/lib/redirecciones";
+import { estadoTienda, LIBRES_CON_TIENDA_APAGADA } from "@/lib/tiendaCerrada";
 
 /*
- * Redirecciones 301 de la tienda anterior (backoffice → Redirecciones).
+ * Dos cosas antes de armar cada página:
+ *
+ *  1. Tienda apagada (backoffice → Ajustes → Apagar la tienda): las páginas de
+ *     compra se reescriben a /cerrada (503, ver app/cerrada/route.ts). Quedan
+ *     abiertas las de quien ya compró y las legales (LIBRES_CON_TIENDA_APAGADA).
+ *  2. Redirecciones 301 de la tienda anterior (backoffice → Redirecciones).
  *
  * Corre antes de armar cada página. El mapa vive en memoria y se renueva
  * cada 5 minutos en segundo plano, o enseguida cuando el worker avisa que
@@ -53,7 +59,45 @@ function renovar(): Promise<void> {
   return enVuelo;
 }
 
+/*
+ * Apagada o no: se pregunta a la API cada 30 s, o enseguida cuando el dueño la
+ * prende o apaga (/api/revalidar). Si la API no contesta, sigue como estaba.
+ */
+const VIGENCIA_TIENDA = 30_000;
+let tiendaEnVuelo: Promise<void> | null = null;
+function renovarTienda(): Promise<void> {
+  const t = estadoTienda();
+  tiendaEnVuelo ??= fetch(`${API}/v1/config`, { headers: CABECERAS, cache: "no-store", signal: AbortSignal.timeout(3000) })
+    .then(async (r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      t.cerrada = ConfigPublica.shape.tiendaCerrada.parse(((await r.json()) as { tiendaCerrada?: unknown }).tiendaCerrada).activa;
+      t.vence = Date.now() + VIGENCIA_TIENDA;
+    })
+    .catch((e: Error) => {
+      t.vence = Date.now() + REINTENTO;
+      console.warn(`[tienda] no se pudo ver si está apagada: ${e.message}`);
+    })
+    .finally(() => { tiendaEnVuelo = null; });
+  return tiendaEnVuelo;
+}
+
+async function tiendaApagada(): Promise<boolean> {
+  const t = estadoTienda();
+  if (Date.now() > t.vence) {
+    const r = renovarTienda();
+    // Sin dato (recién arrancó) o recién avisado un cambio: esperar la respuesta, como mucho 1,5 s.
+    if (t.cerrada === null || t.vence === 0) await Promise.race([r, new Promise((s) => setTimeout(s, 1500))]);
+  }
+  return t.cerrada === true;
+}
+
 export async function proxy(req: NextRequest) {
+  if ((req.method === "GET" || req.method === "HEAD") && !LIBRES_CON_TIENDA_APAGADA.test(req.nextUrl.pathname) && (await tiendaApagada())) {
+    const aviso = req.nextUrl.clone();
+    aviso.pathname = "/cerrada";
+    aviso.search = "";
+    return NextResponse.rewrite(aviso);
+  }
   const ruta = rutaVieja(req.nextUrl.pathname);
   if (!ruta) return NextResponse.next();
   if (Date.now() > estado.vence) {

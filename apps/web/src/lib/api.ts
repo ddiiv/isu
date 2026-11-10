@@ -1,5 +1,5 @@
 import "server-only";
-import { BannerPublico, ConfigPublica, CategoriaNodo, ListadoProductos, PACKS_POR_DEFECTO, ProductoDetalle, ResenasInicio, ResenasProducto } from "@isu/shared";
+import { BannerPublico, ConfigPublica, CategoriaNodo, ListadoProductos, PACKS_POR_DEFECTO, ProductoDetalle, ResenasInicio, ResenasProducto, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
 import { z } from "zod";
 
 /*
@@ -57,6 +57,8 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
+  // Sin API no se sabe: la tienda sigue abierta (el proxy recuerda el último estado que vio).
+  tiendaCerrada: TIENDA_CERRADA_DE_FABRICA,
 };
 
 export const CATEGORIAS_RESPALDO: CategoriaNodo[] = [

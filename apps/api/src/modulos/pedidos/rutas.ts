@@ -10,6 +10,7 @@ import type { Almacen } from "@isu/almacen";
 import type { Entorno } from "../../entorno.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { frenar } from "../../lib/frenos.js";
+import { exigirTiendaAbierta } from "../../lib/tienda.js";
 import { esInterno, ipDe } from "../../lib/cliente.js";
 import { iguales, tokenNuevo } from "../../lib/cripto.js";
 import { firmaValida, type MercadoPago } from "../../lib/mercadopago.js";
@@ -42,6 +43,7 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
 
   // ── Carrito: cotización (precios, stock, envío y descuento de verdad) ──
   api.post("/v1/carrito", { schema: { body: PedidoCotizar, response: { 200: Cotizacion } } }, async (req, reply) => {
+    await exigirTiendaAbierta(deps.pool);
     // Probar códigos es gratis para quien adivina: con tope por IP (sólo cuenta si escribió uno).
     if (req.body.cupon?.trim()) await frenar(deps.redis, "cupon-ip", ip(req), 40, 600);
     const c = await cotizar(deps.pool, req.body.items, {
@@ -65,6 +67,8 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
 
   // ── Crear pedido ──
   api.post("/v1/pedidos", { schema: { body: PedidoNuevo, response: { 201: PedidoCreado } } }, async (req, reply) => {
+    // Con la tienda apagada no entra ninguna compra nueva, ni con el checkout abierto de antes.
+    await exigirTiendaAbierta(deps.pool);
     // Por IP con margen: una familia o una oficina comparten IP. Por email, más corto.
     await frenar(deps.redis, "pedidos-ip", ip(req), 20, 600);
     await frenar(deps.redis, "pedidos-email", req.body.contacto.email, 6, 600);

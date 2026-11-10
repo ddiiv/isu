@@ -69,6 +69,21 @@ export function enlaceDeLocal(locales: ReadonlyArray<Pick<Local, "nombre" | "map
 }
 export type Local = z.infer<typeof Local>;
 
+/** Apagar la tienda un rato (backoffice → Ajustes): con `activa`, la tienda muestra este aviso y no deja comprar. `vuelve` es texto libre. */
+export const TiendaCerrada = z.object({
+  activa: z.boolean(),
+  titulo: z.string().trim().min(1, "Falta el título").max(80),
+  mensaje: z.string().trim().min(1, "Falta el mensaje").max(500),
+  vuelve: z.string().trim().max(80).default(""),
+}).strict();
+export type TiendaCerrada = z.infer<typeof TiendaCerrada>;
+export const TIENDA_CERRADA_DE_FABRICA: TiendaCerrada = {
+  activa: false,
+  titulo: "Volvemos pronto",
+  mensaje: "Estamos haciendo unos cambios en la tienda. En un rato volvemos.",
+  vuelve: "",
+};
+
 /** Lo que la tienda necesita saber de la configuración, sin sesión. */
 export const ConfigPublica = z.object({
   montoMinimoCarrito: z.number().int().nonnegative(), // centavos
@@ -99,6 +114,8 @@ export const ConfigPublica = z.object({
   cifras: z.array(z.object({ valor: z.string().trim().min(1).max(20), texto: z.string().trim().min(1).max(60) })).max(4).default([]),
   /** Etapa 11: ayudas para la dirección en el checkout (sugerencias de Google, revisión con Georef). */
   direcciones: z.object({ sugerencias: z.boolean(), revisar: z.boolean() }).default({ sugerencias: false, revisar: false }),
+  /** Tienda apagada por el dueño (el aviso que ven los clientes). */
+  tiendaCerrada: TiendaCerrada.default(TIENDA_CERRADA_DE_FABRICA),
 });
 export type ConfigPublica = z.infer<typeof ConfigPublica>;
 
