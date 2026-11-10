@@ -31,7 +31,7 @@ Abajo del carrito (cajón y página) hay dos botones, como en Deliver:
 | **Pagar con transferencia** | El total con el % OFF ya aplicado y cuánto ahorra | Al checkout con transferencia elegida |
 | **Tarjeta o Mercado Pago** | El total de lista y «Hasta N cuotas sin interés de $X» | Al checkout con Mercado Pago elegido |
 
-El envío se calcula en el checkout. Sale lo que esté prendido en Ajustes → Medios de pago, con el % y las cuotas de Ajustes.
+El envío se calcula en el checkout. Sale lo que esté prendido en Medios de pago, con el % y las cuotas de esa misma página.
 
 ## 3. Checkout de una página
 
@@ -82,6 +82,15 @@ Para hacer cambios sin que nadie compre en el medio. En **Ajustes → «Apagar l
 - **Qué sigue andando.** Los pedidos ya hechos: la página del pedido (`/pedido/…`), el seguimiento, el pago (los avisos de Mercado Pago y Talo se siguen aplicando), el botón de arrepentimiento, la opinión (`/opinar/…`) y las páginas legales (términos, privacidad, devoluciones). También todo el backoffice, los feeds de WhatsApp y Google y las rutas internas.
 - **Cómo se prende.** Con **Prender la tienda**, en la misma tarjeta o en el aviso amarillo fijo que el backoffice muestra en todas las pantallas mientras la tienda está apagada («La tienda está apagada: los clientes ven el aviso»). El cambio llega a la tienda en unos segundos (usa la misma invalidación que el resto de Ajustes; como mucho, 30 s si ese aviso se pierde). Cada cambio queda en **Auditoría**.
 - **Dónde está.** Ajuste `tiendaCerrada` (`{ activa, titulo, mensaje, vuelve }`, validado en `packages/shared`); el aviso sale de `apps/web/src/app/cerrada/route.ts` y lo dispara `apps/web/src/proxy.ts`.
+
+### Medios de pago (página propia)
+
+**Medios de pago** (menú, junto a Ajustes) tiene una tarjeta por medio: Mercado Pago (tarjeta y dinero en cuenta), Pago Fácil / Rapipago (sale por Mercado Pago), Transferencia y Pago al retirar en el local. Todos los roles ven el estado; sólo el dueño cambia algo, y todo queda en **Auditoría** como el resto de Ajustes.
+
+- **Qué muestra.** El estado de cada medio con texto: «Activo en la tienda», «Apagado» o «Falta configurar: …» (falta `MP_ACCESS_TOKEN` en Railway, faltan el CBU o el alias, no hay locales de retiro). Sin `MP_WEBHOOK_SECRET` el medio se ofrece igual, pero con un aviso: los pagos no se confirman solos. El estado sale de `GET /v1/admin/medios-pago`, que devuelve sólo sí/no, nunca una credencial.
+- **Sus ajustes** (antes en Ajustes): % OFF con transferencia, datos para transferir y transferencias que se confirman solas; cuotas sin interés; y el «Tiempo para pagar» de cada medio en su tarjeta. Mercado Pago no permite cobrar recargo por tarjeta: la tarjeta explica cómo cubrir la comisión (precio de lista y % OFF por transferencia).
+- **Cómo se apaga un medio.** Se destilda **Ofrecer en la tienda** y se guarda (ajuste `mediosPagoApagados`, de fábrica ninguno). Sale del carrito y del checkout; si alguien lo manda igual, cotizar o crear el pedido da 400 «Ese medio de pago no está disponible». No se pueden apagar todos: siempre queda al menos uno.
+- **Pedidos ya hechos.** Siguen su curso con el medio con que se crearon: se pagan, se confirma la transferencia y llegan los avisos de pago como siempre.
 
 ### Diseño
 

@@ -29,6 +29,7 @@ const ICONOS: Record<string, string> = {
   panel: "M4 13h6V4H4zm10 7h6v-9h-6zM4 20h6v-4H4zm10-11h6V4h-6z",
   pedidos: "M6 3h12l1 4H5zM5 7h14v13H5zM9 11h6",
   transferencias: "M4 9h13l-3-3M20 15H7l3 3",
+  medios: "M3 6h18v12H3zM3 10h18M7 15h4",
   envios: "M3 7h11v9H3zm11 3h4l3 3v3h-7zM7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
   clientes: "M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm10 9v-1a4 4 0 0 0-3-3.9M15 4.1a3 3 0 0 1 0 5.8",
   productos: "M8 4l4 2 4-2 4 3-2 4-2-1v10H8V10l-2 1-2-4z",
@@ -78,6 +79,8 @@ const GRUPOS: Array<{ titulo: string | null; items: Item[] }> = [
   ] },
   { titulo: "Administración", items: [
     { href: "/ajustes", texto: "Ajustes", rol: "dueno", icono: "ajustes" },
+    // Todos lo ven; sólo el dueño cambia algo (como Ajustes).
+    { href: "/medios-pago", texto: "Medios de pago", rol: "lectura", icono: "medios" },
     { href: "/usuarios", texto: "Usuarios", rol: "dueno", icono: "usuarios" },
     { href: "/auditoria", texto: "Auditoría", rol: "dueno", icono: "auditoria" },
   ] },

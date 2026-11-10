@@ -59,11 +59,13 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
     const forma = ConfigPublica.shape;
     // Medios de pago: sólo los que funcionan. Transferencia, si hay CBU o alias; online, si hay Mercado Pago.
     const t = filas.find((f) => f.clave === "datosTransferencia")?.valor as { cbu?: string; alias?: string } | undefined;
+    // Y menos los que el dueño apagó en Medios de pago.
+    const apagados = filas.find((f) => f.clave === "mediosPagoApagados")?.valor;
     salida.mediosPago = [
       ...(deps.pagoOnline ? ["mercadopago", "pagofacil"] : []),
       ...(t?.cbu || t?.alias ? ["transferencia"] : []),
       "local",
-    ];
+    ].filter((m) => !(Array.isArray(apagados) && apagados.includes(m)));
     for (const { clave, valor } of filas) {
       if (!(clave in forma)) continue;
       // Packs: también el formato viejo ([x2, x3, x4, x5]) mientras no corra la migración 0015.
