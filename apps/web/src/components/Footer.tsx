@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { CategoriaNodo, ConfigPublica } from "@isu/shared";
 import { SITIO } from "@/lib/sitio";
 import { telefonoLegible } from "@/lib/contacto";
+import { idGa } from "./Analytics";
+import { EnlaceCookies } from "./EnlaceCookies";
 
 export function Footer({ config, categorias }: { config: ConfigPublica; categorias: CategoriaNodo[] }) {
   return (
@@ -24,6 +26,7 @@ export function Footer({ config, categorias }: { config: ConfigPublica; categori
           <Link href="/devoluciones" className="block text-tinta-suave hover:text-marca">Cambios y devoluciones</Link>
           <Link href="/terminos" className="block text-tinta-suave hover:text-marca">Términos y condiciones</Link>
           <Link href="/privacidad" className="block text-tinta-suave hover:text-marca">Política de privacidad</Link>
+          {idGa() && <EnlaceCookies />}
           <Link href="/arrepentimiento" className="block font-bold text-tinta hover:text-marca">Botón de arrepentimiento</Link>
           <a href="https://www.argentina.gob.ar/produccion/defensadelconsumidor/formulario" target="_blank" rel="noopener noreferrer" className="block text-tinta-suave hover:text-marca">Defensa del consumidor</a>
         </nav>
