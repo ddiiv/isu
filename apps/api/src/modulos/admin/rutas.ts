@@ -12,6 +12,7 @@ import type { CacheCorta } from "../../lib/cache.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { ipDe } from "../../lib/cliente.js";
+import { leerTiendaCerrada } from "../../lib/tienda.js";
 import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
 import { rutasGuiasAdmin } from "./talles.js";
@@ -746,6 +747,11 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     // Etapa 11: ayudas para la dirección del checkout (Google con topes por día, Georef).
     direcciones: AjusteDirecciones,
   };
+  // Cualquier rol: el marco del backoffice avisa en todas las pantallas que la tienda está apagada. Se prende y apaga con PUT /v1/admin/ajustes (sólo el dueño).
+  api.get("/v1/admin/tienda", async (req) => {
+    await exigir(pool, req);
+    return { tiendaCerrada: await leerTiendaCerrada(pool) };
+  });
   api.get("/v1/admin/ajustes", async (req) => {
     await exigir(pool, req, "dueno");
     const { rows } = await pool.query("SELECT clave, valor, actualizado_por AS \"actualizadoPor\", actualizado_en AS \"actualizadoEn\" FROM tienda.ajustes WHERE clave = ANY($1::text[])", [Object.keys(AJUSTES)]);

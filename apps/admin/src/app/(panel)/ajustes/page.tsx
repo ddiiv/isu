@@ -4,6 +4,7 @@ import { EnlaceLocal, leerPacks, normalizarEnlace, PACK_TOPE, type AjusteDirecci
 import { api, fecha, useDatos } from "@/lib/api";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, EntradaPesos, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
 import { AjustesEnvios, type ValoresEnvios } from "@/components/AjustesEnvios";
+import { ApagarTienda } from "@/components/ApagarTienda";
 
 /* Ajustes de la tienda (sólo el dueño). Cada campo se valida en la API; los cambios quedan en la auditoría. */
 type Valores = Record<string, unknown> & {
@@ -63,6 +64,7 @@ export default function Ajustes() {
       <Titulo acciones={<Boton onClick={() => void guardar()}>Guardar ajustes</Boton>}>Ajustes</Titulo>
       <div className="mb-4 space-y-2"><aviso.Aviso />{ultima && <p className="text-xs text-tinta-tenue">Último cambio: {fecha(ultima.actualizadoEn)} · {ultima.actualizadoPor?.startsWith("migracion") ? "carga inicial" : ultima.actualizadoPor}</p>}</div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ApagarTienda />
         <Tarjeta titulo="Tienda">
           <div className="space-y-3">
             <Campo etiqueta="Anuncio (barra de arriba)" ayuda="Vacío = sin barra. Hasta 160 caracteres."><input maxLength={160} className={claseEntrada} value={v.anuncio ?? ""} onChange={(e) => poner("anuncio", e.target.value || null)} /></Campo>

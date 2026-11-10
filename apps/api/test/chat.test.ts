@@ -204,6 +204,21 @@ describe("con datos de verdad", () => {
     expect(r.tema).toBe("productos");
     expect(r.productos[0]).toMatchObject({ nombre: "Buzo Canguro Chat", url: "/producto/qa-buzo-chat", precio: 2500000 });
   });
+  it("con la tienda apagada no ofrece prendas para comprar y la IA sabe que no se vende", async () => {
+    await pool.query(`INSERT INTO tienda.ajustes (clave, valor) VALUES ('tiendaCerrada', $1) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor`,
+      [JSON.stringify({ activa: true, titulo: "Volvemos pronto", mensaje: "Hacemos cambios.", vuelve: "" })]);
+    await ajuste("chatbotIa", { activo: true, topeDiario: 50 });
+    try {
+      expect((await chat("tienen buzos canguro?")).productos).toBeUndefined();
+      await chat("cual es la capital de francia");
+      expect(iaRecibio.at(-1)!.contexto).toMatch(/TIENDA ESTÁ APAGADA[^]*Hacemos cambios/);
+    } finally {
+      await ajuste("chatbotIa", { activo: false, topeDiario: 2 });
+      await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'");
+      // La consulta con IA de arriba no cuenta para el tope del día de las pruebas que siguen.
+      await redis.del(`isu:chat-ia:${new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })}`);
+    }
+  });
   it("lo que no sabe: lo dice, ofrece WhatsApp y lo anota SIN datos personales", async () => {
     const r = await chat("soy juan@mail.com cel 1155551234, cual es el planeta mas grande");
     expect(r.tema).toBe("sin_respuesta");

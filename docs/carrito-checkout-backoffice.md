@@ -74,6 +74,15 @@ Pide confirmación y queda en la Auditoría.
 
 Un producto eliminado no se puede publicar ni editar hasta restaurarlo; la base de datos tampoco lo deja.
 
+### Apagar la tienda (Ajustes, arriba de todo)
+
+Para hacer cambios sin que nadie compre en el medio. En **Ajustes → «Apagar la tienda»** (sólo el dueño, como el resto de Ajustes) se escribe el título, el mensaje y, si se quiere, «cuándo vuelve» (texto libre: «Volvemos el lunes 9 hs»), y **Apagar la tienda** pide confirmación. De fábrica está prendida; el aviso de fábrica dice «Volvemos pronto».
+
+- **Qué hace.** Las páginas de compra (inicio, categorías, fichas, búsqueda, carrito, checkout, cuenta, etc.) muestran sólo el aviso, con el logo y sin menú ni carrito. Responde **503 con `Retry-After`** (y `noindex`): para Google es una parada temporal y no desindexa nada. La API rechaza con 503 (y el mismo mensaje) cotizar el carrito, pedir opciones de envío y crear pedidos nuevos, aunque alguien tenga el checkout abierto de antes. El asistente deja de ofrecer prendas.
+- **Qué sigue andando.** Los pedidos ya hechos: la página del pedido (`/pedido/…`), el seguimiento, el pago (los avisos de Mercado Pago y Talo se siguen aplicando), el botón de arrepentimiento, la opinión (`/opinar/…`) y las páginas legales (términos, privacidad, devoluciones). También todo el backoffice, los feeds de WhatsApp y Google y las rutas internas.
+- **Cómo se prende.** Con **Prender la tienda**, en la misma tarjeta o en el aviso amarillo fijo que el backoffice muestra en todas las pantallas mientras la tienda está apagada («La tienda está apagada: los clientes ven el aviso»). El cambio llega a la tienda en unos segundos (usa la misma invalidación que el resto de Ajustes; como mucho, 30 s si ese aviso se pierde). Cada cambio queda en **Auditoría**.
+- **Dónde está.** Ajuste `tiendaCerrada` (`{ activa, titulo, mensaje, vuelve }`, validado en `packages/shared`); el aviso sale de `apps/web/src/app/cerrada/route.ts` y lo dispara `apps/web/src/proxy.ts`.
+
 ### Diseño
 
 - **Menú lateral oscuro, agrupado:** Ventas, Catálogo, Promociones, Tienda y Administración, con íconos y la tarjeta del usuario abajo.

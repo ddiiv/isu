@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
-import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, EnlaceLocal, leerPacks, PACKS_POR_DEFECTO } from "@isu/shared";
+import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, EnlaceLocal, leerPacks, PACKS_POR_DEFECTO, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
 import type { CacheCorta } from "../../lib/cache.js";
 import { CON_STOCK, EN_LIQUIDACION } from "../productos/consultas.js";
@@ -36,6 +36,7 @@ const POR_DEFECTO: ConfigPublica = {
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
+  tiendaCerrada: TIENDA_CERRADA_DE_FABRICA,
 };
 
 /** Slugs de las categorías de arriba (Hombre, Mujer, Niños…) que tienen algún producto publicado que cumple `condicion`. */

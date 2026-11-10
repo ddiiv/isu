@@ -579,6 +579,24 @@ describe("ajustes (sólo el dueño)", () => {
     expect((await app.inject("/v1/config")).json().avisoUltimas).toBe(4);
     await req("PUT", "/v1/admin/ajustes", dueno, { avisoUltimas: 3 });
   });
+  it("apagar la tienda: se valida el aviso, queda en la auditoría y cualquier rol puede ver si está apagada", async () => {
+    const aviso = { activa: true, titulo: "Volvemos pronto", mensaje: "Estamos haciendo cambios.", vuelve: "Volvemos el lunes 9 hs" };
+    try {
+      for (const malo of [{ ...aviso, titulo: "" }, { ...aviso, titulo: "x".repeat(81) }, { ...aviso, mensaje: "  " }, { ...aviso, mensaje: "x".repeat(501) }, { ...aviso, vuelve: "x".repeat(81) }, { ...aviso, activa: "si" }, { ...aviso, otro: 1 }]) {
+        expect((await req("PUT", "/v1/admin/ajustes", dueno, { tiendaCerrada: malo })).statusCode, JSON.stringify(malo).slice(0, 60)).toBe(400);
+      }
+      expect((await req("PUT", "/v1/admin/ajustes", operador, { tiendaCerrada: aviso })).json().error).toBe("sin_permiso");
+      expect((await req("PUT", "/v1/admin/ajustes", dueno, { tiendaCerrada: aviso })).json()).toEqual({ ok: true, guardados: ["tiendaCerrada"] });
+      expect((await app.inject("/v1/config")).json().tiendaCerrada).toEqual(aviso);
+      expect((await req("GET", "/v1/admin/tienda", operador)).json().tiendaCerrada.activa).toBe(true);
+      expect((await req("GET", "/v1/admin/tienda")).statusCode).toBe(401);
+      const a = (await req("GET", "/v1/admin/auditoria?entidad=ajuste", dueno)).json().registros[0];
+      expect(a.accion).toBe("ajustes");
+      expect(a.detalle.tiendaCerrada).toEqual(aviso);
+    } finally {
+      await pool.query("DELETE FROM tienda.ajustes WHERE clave = 'tiendaCerrada'");
+    }
+  });
   it("el link de cada local: sólo https; uno viejo inválido no rompe la tienda (el local se ve sin link)", async () => {
     const original = (await pool.query("SELECT valor FROM tienda.ajustes WHERE clave = 'locales'")).rows[0]?.valor;
     const local = (mapa: string | null) => ({ nombre: "QA Local", direccion: "Bacacay 3231", localidad: "Flores, CABA", horario: "Lun a vie", mapa, retiro: true });

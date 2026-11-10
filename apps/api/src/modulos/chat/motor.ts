@@ -1,6 +1,6 @@
 import type pg from "pg";
 import type { Redis } from "ioredis";
-import { formatearPesos, NOMBRE_ESTADO_ENVIO, type MensajeChat, type RespuestaChat, type TemaChat } from "@isu/shared";
+import { formatearPesos, NOMBRE_ESTADO_ENVIO, TiendaCerrada, type MensajeChat, type RespuestaChat, type TemaChat } from "@isu/shared";
 import { firmaSeguimiento, type Transportes } from "@isu/envios";
 import type { CacheCorta } from "../../lib/cache.js";
 import type { Descuentos } from "../../lib/descuentos.js";
@@ -52,7 +52,7 @@ export function crearAsistente(d: DepsAsistente) {
       d.pool.query<Faq>("SELECT id, pregunta, respuesta, palabras, tema, enlace_texto, enlace_url, orden FROM tienda.faq WHERE activo ORDER BY orden, id"),
       d.pool.query<{ clave: string; valor: unknown }>(
         "SELECT clave, valor FROM tienda.ajustes WHERE clave = ANY($1::text[])",
-        [["chatbot", "chatbotIa", "descuentoTransferencia", "cuotasSinInteres", "envioGratisDesde", "whatsapp", "locales", "enviosEnElDia"]]),
+        [["chatbot", "chatbotIa", "descuentoTransferencia", "cuotasSinInteres", "envioGratisDesde", "whatsapp", "locales", "enviosEnElDia", "tiendaCerrada"]]),
     ]);
     const a = Object.fromEntries(aj.rows.map((r) => [r.clave, r.valor])) as Record<string, unknown>;
     const chatbot = (a.chatbot ?? { activo: false, saludo: "" }) as { activo: boolean; saludo: string };
@@ -70,9 +70,12 @@ export function crearAsistente(d: DepsAsistente) {
         ? locales.map((l) => `${l.nombre}: ${l.direccion}, ${l.localidad} (${l.horario}).`).join(" ")
         : "Por ahora vendemos sólo online.",
     };
+    const aviso = TiendaCerrada.safeParse(a.tiendaCerrada);
+    const cerrada = aviso.success && aviso.data.activa ? aviso.data : null;
     const indexadas = faqs.rows.map((f) => indexar(f));
     // Lo que sabe la IA: lo mismo que la tienda publica (y siempre en el mismo orden: se cachea).
     const contextoIa = [
+      ...(cerrada ? [`LA TIENDA ESTÁ APAGADA POR AHORA: no se puede comprar y no ofrezcas hacerlo. Aviso a los clientes: ${cerrada.titulo}. ${cerrada.mensaje}${cerrada.vuelve ? ` ${cerrada.vuelve}.` : ""} Los pedidos ya hechos siguen su curso.`] : []),
       `Medios de pago: Mercado Pago (tarjeta de crédito y débito, hasta ${vars.cuotas} cuotas sin interés), Pago Fácil / Rapipago, transferencia (${vars.descuento}% OFF) y pago al retirar en el local.`,
       `Envíos a todo el país con Correo Argentino, Andreani y OCA (domicilio o sucursal), Mercado Envíos y, en CABA, en el día. El precio sale del código postal en el checkout.${envioGratis ? ` Envío gratis desde ${envioGratis}.` : ""}`,
       `Locales: ${vars.locales}`,
@@ -81,7 +84,7 @@ export function crearAsistente(d: DepsAsistente) {
       "Preguntas frecuentes:",
       ...faqs.rows.map((f) => `P: ${f.pregunta}\nR: ${rellenar(f.respuesta, vars)}`),
     ].join("\n");
-    return { chatbot, chatbotIa, whatsapp, vars, faqs: indexadas, contextoIa };
+    return { chatbot, chatbotIa, whatsapp, vars, faqs: indexadas, contextoIa, cerrada: !!cerrada };
   });
 
   const enlaceWhatsapp = (numero: string, texto?: string) =>
@@ -194,8 +197,8 @@ export function crearAsistente(d: DepsAsistente) {
         };
       }
 
-      // "¿Tienen buzos negros?": el buscador de la tienda.
-      if (PRODUCTO.test(n) || cons.length <= 3) {
+      // "¿Tienen buzos negros?": el buscador de la tienda (con la tienda apagada no se ofrece nada para comprar).
+      if (!b.cerrada && (PRODUCTO.test(n) || cons.length <= 3)) {
         const q = n.replace(PRODUCTO, " ").split(" ").filter((p) => p.length > 2 && !/^(de|en|la|el|los|las|para|con|algun\w*|un\w*)$/.test(p)).map((p) => p.replace(/(es|s)$/, "")).join(" ");
         const filas = q ? await buscar(d.pool, q, 3).catch(() => []) : [];
         if (filas.length) {

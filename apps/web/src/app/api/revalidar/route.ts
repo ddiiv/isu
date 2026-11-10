@@ -2,6 +2,7 @@ import { revalidateTag } from "next/cache";
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { vencerRedirecciones } from "@/lib/redirecciones";
+import { vencerTienda } from "@/lib/tiendaCerrada";
 
 /*
  * POST /api/revalidar — lo llama el worker (por la red privada) cuando cambia
@@ -34,7 +35,8 @@ export async function POST(req: Request) {
   // Vence ya: el próximo que entra ve el stock nuevo (una prenda agotada no puede seguir a la venta).
   for (const e of new Set(r.data.etiquetas)) revalidateTag(e, { expire: 0 });
   // Un producto que se publica u oculta cambia a dónde va su dirección vieja; y el backoffice de redirecciones avisa por acá.
-  if (r.data.etiquetas.includes("catalogo")) vencerRedirecciones();
+  // También prender o apagar la tienda (Ajustes): el proxy vuelve a preguntar en la próxima visita.
+  if (r.data.etiquetas.includes("catalogo")) { vencerRedirecciones(); vencerTienda(); }
   return Response.json({ ok: true, etiquetas: r.data.etiquetas.length });
 }
 
