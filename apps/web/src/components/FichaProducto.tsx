@@ -76,6 +76,15 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
     `${SITIO.url}/producto/${p.slug}`,
   ].filter(Boolean).join("\n");
   const whatsapp = `https://wa.me/${config.whatsapp}?text=${encodeURIComponent(mensaje)}`;
+  /** Compartir: el menú del celular si existe; si no, WhatsApp. El link lleva UTM para ver cuánto trae. */
+  async function compartir() {
+    const url = `${SITIO.url}/producto/${p.slug}?utm_source=compartido&utm_medium=whatsapp`;
+    const texto = `Mirá esta prenda de Isuwaya: ${p.nombre} ${url}`;
+    const nativo = typeof navigator.share === "function";
+    evento("share", { method: nativo ? "nativo" : "whatsapp", content_type: "product", item_id: p.slug });
+    if (!nativo) { window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank", "noopener,noreferrer"); return; }
+    try { await navigator.share({ text: texto }); } catch { /* la persona cerró el menú */ }
+  }
   /** Agrega la prenda elegida; "Comprar ahora" la agrega y va directo al checkout. */
   function agregar(comprarYa: boolean) {
     if (conTalle && !talle) { setAvisoTalle(true); return; }
@@ -228,6 +237,9 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             </>
           )}
         </div>
+        <button type="button" onClick={compartir} className="boton mt-3 w-full border border-linea py-3 text-[15px] hover:border-tinta">
+          <IconoWhatsapp /> Compartir
+        </button>
         <BarraEnvioGratis desde={config.envioGratisDesde} className="mt-4" />
 
         <ul className="mt-7 divide-y divide-linea rounded-[var(--radius-foto)] border border-linea text-sm">

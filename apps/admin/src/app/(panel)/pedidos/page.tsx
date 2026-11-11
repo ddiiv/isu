@@ -5,7 +5,7 @@ import { Suspense, useState } from "react";
 import { ESTADOS, fecha, MEDIOS, pesos, useDatos } from "@/lib/api";
 import { Cargando, claseEntrada, Insignia, Mensaje, Paginador, Titulo } from "@/components/ui";
 
-interface Fila { numero: string; estado: string; medioPago: string; entrega: string; total: number; nombre: string; apellido: string; email: string; creadoEn: string; venceEn: string | null }
+interface Fila { numero: string; estado: string; medioPago: string; entrega: string; total: number; nombre: string; apellido: string; email: string; creadoEn: string; venceEn: string | null; origen: { fuente?: string; referido?: string } | null }
 
 function Pedidos() {
   const sp = useSearchParams();
@@ -34,9 +34,9 @@ function Pedidos() {
       {cargando && !datos ? <Cargando /> : datos && (
         <>
           <div className="overflow-x-auto rounded-2xl border border-linea bg-white">
-            <table className="tabla-apilada w-full min-w-[760px] text-left text-sm">
+            <table className="tabla-apilada w-full min-w-[820px] text-left text-sm">
               <thead className="border-b border-linea text-tinta-tenue"><tr>
-                <th className="px-4 py-3">Pedido</th><th className="px-4 py-3">Cliente</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Pago</th><th className="px-4 py-3">Entrega</th><th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3">Pedido</th><th className="px-4 py-3">Cliente</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Pago</th><th className="px-4 py-3">Entrega</th><th className="px-4 py-3">Origen</th><th className="px-4 py-3 text-right">Total</th>
               </tr></thead>
               <tbody className="divide-y divide-linea">
                 {datos.pedidos.map((p) => (
@@ -46,10 +46,11 @@ function Pedidos() {
                     <td className="px-4 py-3" data-etiqueta="Estado"><Insignia clase={ESTADOS[p.estado]?.[1]}>{ESTADOS[p.estado]?.[0] ?? p.estado}</Insignia></td>
                     <td className="px-4 py-3" data-etiqueta="Pago">{MEDIOS[p.medioPago] ?? p.medioPago}</td>
                     <td className="px-4 py-3" data-etiqueta="Entrega">{p.entrega === "envio" ? "Envío" : "Retiro"}</td>
+                    <td className="px-4 py-3 text-tinta-suave" data-etiqueta="Origen">{p.origen?.fuente ?? p.origen?.referido ?? "Directo"}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-bold" data-etiqueta="Total">{pesos(p.total)}</td>
                   </tr>
                 ))}
-                {!datos.pedidos.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-tinta-tenue">No hay pedidos con ese filtro.</td></tr>}
+                {!datos.pedidos.length && <tr><td colSpan={7} className="px-4 py-10 text-center text-tinta-tenue">No hay pedidos con ese filtro.</td></tr>}
               </tbody>
             </table>
           </div>

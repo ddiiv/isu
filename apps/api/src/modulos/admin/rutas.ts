@@ -99,7 +99,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     if (q) { params.push(`%${q.replace(/[%_\\]/g, "\\$&")}%`); filtro.push(`(numero ILIKE $${params.length} OR email ILIKE $${params.length} OR (nombre || ' ' || apellido) ILIKE $${params.length} OR dni ILIKE $${params.length})`); }
     params.push(POR_PAGINA, (pagina - 1) * POR_PAGINA);
     const { rows } = await pool.query(
-      `SELECT numero, estado, medio_pago AS "medioPago", entrega, total, nombre, apellido, email, creado_en AS "creadoEn", vence_en AS "venceEn", pagado_en AS "pagadoEn",
+      `SELECT numero, estado, medio_pago AS "medioPago", entrega, total, nombre, apellido, email, creado_en AS "creadoEn", vence_en AS "venceEn", pagado_en AS "pagadoEn", origen,
               count(*) OVER()::int AS "totalFilas"
          FROM tienda.pedidos WHERE ${filtro.join(" AND ")} ORDER BY creado_en DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     return { pedidos: rows.map(({ totalFilas: _t, ...r }) => r), total: rows[0]?.totalFilas ?? 0, porPagina: POR_PAGINA };

@@ -7,6 +7,7 @@ import { BotonWhatsapp } from "@/components/BotonWhatsapp";
 import { BotonAsistente } from "@/components/chat/BotonAsistente";
 import { Analytics, ConsentimientoGa, idGa } from "@/components/Analytics";
 import { AvisoCookies } from "@/components/AvisoCookies";
+import { OrigenYCupon } from "@/components/OrigenYCupon";
 import { WebVitals } from "@/components/WebVitals";
 import { Hidratado } from "@/components/Hidratado";
 import { ProveedorCarrito } from "@/components/carrito/Carrito";
@@ -54,6 +55,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <Anuncio texto={config.anuncio} envioGratisDesde={config.envioGratisDesde} />
           <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, packsEn: config.packsEn, hayLiquidacion: config.hayLiquidacion, liquidacionEn: config.liquidacionEn, fotos }} />
           <main id="contenido">{children}</main>
+          <OrigenYCupon />
           <Footer config={config} categorias={categorias} />
           {/* Con el asistente prendido, la burbuja es el chat (con WhatsApp adentro); si no, WhatsApp directo. */}
           {config.chatbot.activo ? <BotonAsistente saludo={config.chatbot.saludo} whatsapp={config.whatsapp} /> : <BotonWhatsapp numero={config.whatsapp} />}

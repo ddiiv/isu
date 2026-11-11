@@ -315,6 +315,21 @@ describe("pedidos", () => {
     expect(mails("pedido_recibido").at(-1)?.datos.numero).toBe(numero);
   });
 
+  it("origen: válido se guarda; inválido o gigante se ignora sin romper el pedido; sin origen sigue igual", async () => {
+    const guardado = async (n: string) => (await pool.query("SELECT origen FROM tienda.pedidos WHERE numero = $1", [n])).rows[0].origen;
+    const ok = await post("/v1/pedidos", { ...pedido("or1", { items: [{ sku: "QA-C-M", cantidad: 1 }] }), origen: { fuente: "instagram", medio: "bio", campana: "lanzamiento", gclid: true } });
+    expect(ok.statusCode).toBe(201);
+    expect(await guardado(ok.json().numero)).toEqual({ fuente: "instagram", medio: "bio", campana: "lanzamiento", gclid: true });
+    for (const [i, malo] of [{ fuente: "Ins ta<b>" }, { gclid: "valor-secreto" }, { fuente: "x".repeat(5_000) }].entries()) {
+      const r = await post("/v1/pedidos", { ...pedido(`or${i + 2}`, { items: [{ sku: "QA-C-M", cantidad: 1 }] }), origen: malo });
+      expect(r.statusCode).toBe(201);
+      expect(await guardado(r.json().numero)).toBeNull();
+    }
+    const sin = await post("/v1/pedidos", pedido("or9", { items: [{ sku: "QA-C-M", cantidad: 1 }] }));
+    expect(sin.statusCode).toBe(201);
+    expect(await guardado(sin.json().numero)).toBeNull();
+  });
+
   it("retiro: el pedido y el mail traen el link del local (Ajustes → Locales)", async () => {
     const original = (await pool.query("SELECT valor FROM tienda.ajustes WHERE clave = 'locales'")).rows[0]?.valor as Array<Record<string, unknown>>;
     try {

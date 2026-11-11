@@ -76,6 +76,14 @@ export type Contacto = z.infer<typeof Contacto>;
 /* Lo que escribe el cliente; la API lo normaliza (mayúsculas, sin espacios) y lo valida. */
 export const CodigoCupon = z.string().trim().max(40);
 
+/* De dónde llegó la compra (UTM, sitio). Ver origen.ts; sin datos personales. */
+const TextoOrigen = z.string().max(60).regex(/^[a-z0-9._-]+$/);
+export const OrigenPedido = z.object({
+  fuente: TextoOrigen.optional(), medio: TextoOrigen.optional(), campana: TextoOrigen.optional(),
+  contenido: TextoOrigen.optional(), referido: TextoOrigen.optional(), gclid: z.boolean().optional(),
+}).strict();
+export type OrigenPedido = z.infer<typeof OrigenPedido>;
+
 export const PedidoNuevo = z.object({
   items: Items,
   cupon: CodigoCupon.optional(),
@@ -85,6 +93,8 @@ export const PedidoNuevo = z.object({
   notas: z.string().trim().max(500).optional(),
   // Avisos del envío por WhatsApp (además del email). Opcional: se pide permiso.
   avisosWhatsapp: z.boolean().optional().default(false),
+  // Se valida aparte con OrigenPedido y, si no sirve, se ignora: el origen nunca tumba un pedido.
+  origen: z.unknown().optional(),
   aceptaTerminos: z.literal(true, { error: "Tenés que aceptar los términos y condiciones" }),
 }).strict();
 export type PedidoNuevo = z.infer<typeof PedidoNuevo>;

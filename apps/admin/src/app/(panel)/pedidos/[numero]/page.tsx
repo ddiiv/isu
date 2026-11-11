@@ -11,6 +11,7 @@ interface Detalle {
     numero: string; estado: string; medio_pago: string; entrega: string; total: number; subtotal: number; descuento: number; envio: number;
     cupon_codigo: string | null; cupon_nombre: string | null; descuento_cupon: number; envio_bonificado: number;
     nombre: string; apellido: string; email: string; telefono: string; dni: string; direccion: Record<string, string> | null; local_retiro: string | null;
+    origen: { fuente?: string; medio?: string; campana?: string; contenido?: string; referido?: string; gclid?: boolean } | null;
     notas: string | null; notas_internas: string | null; creado_en: string; vence_en: string | null; pagado_en: string | null;
   };
   items: Array<{ sku: string; nombre: string; color: string | null; talle: string | null; precio: number; precioLista: number | null; cantidad: number }>;
@@ -103,7 +104,8 @@ export default function Pedido({ params }: { params: Promise<{ numero: string }>
               {p.entrega === "envio" && p.direccion ? `${p.direccion.calle} ${p.direccion.numero}${p.direccion.piso ? ` ${p.direccion.piso}` : ""}, ${p.direccion.localidad}, ${p.direccion.provincia} (${p.direccion.cp})` : p.local_retiro}</p>
             {p.entrega === "envio" && p.direccion?.indicaciones && <p className="text-sm text-tinta-suave">{p.direccion.indicaciones}</p>}
             {p.notas && <p className="mt-3 rounded-xl bg-fondo-suave p-3 text-sm">“{p.notas}”</p>}
-            <p className="mt-3 text-xs text-tinta-tenue">Pago: {MEDIOS[p.medio_pago]} · Creado {fecha(p.creado_en)}{p.vence_en && PENDIENTES.includes(p.estado) ? ` · Vence ${fecha(p.vence_en)}` : ""}</p>
+            <p className="mt-3 text-xs text-tinta-tenue">Origen: {p.origen ? ([p.origen.fuente ?? p.origen.referido, p.origen.medio, p.origen.campana, p.origen.contenido].filter(Boolean).join(" / ") || "Anuncio (sin UTM)") : "Directo"}</p>
+            <p className="mt-1 text-xs text-tinta-tenue">Pago: {MEDIOS[p.medio_pago]} · Creado {fecha(p.creado_en)}{p.vence_en && PENDIENTES.includes(p.estado) ? ` · Vence ${fecha(p.vence_en)}` : ""}</p>
           </Tarjeta>
 
           {p.entrega === "envio" && <CajaEnvio numero={p.numero} pedido={p} />}
