@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState, type DragEvent } from "react";
 import { api, fotoUrl, pesos, useDatos } from "@/lib/api";
 import { arbol, type Categoria, type GuiaResumen } from "@/lib/catalogo";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, Insignia, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
@@ -290,22 +290,56 @@ function Fotos({ d, operador, recargar, aviso }: { d: Detalle; operador: boolean
     await recargar();
   }
   const elegir = (tipo: "color" | "exhibicion", color: number | null) => { destino.current = { tipo, color }; entrada.current?.click(); };
-  async function mover(grupo: Detalle["fotos"], i: number, delta: number) {
-    const ids = grupo.map((f) => f.id);
-    const j = i + delta;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j]!, ids[i]!];
-    try { await api(`productos/${d.producto.id}/fotos/orden`, { cuerpo: { ids } }); await recargar(); } catch (e) { aviso.error(e); }
+  /*
+   * Suelta la foto `id` en el grupo `g`, antes de la foto `antesDe` (o al final).
+   * Si cambia de grupo se le cambia el color; a "Generales" va como exhibición sin
+   * color. El orden se guarda para el producto entero, grupo por grupo.
+   */
+  async function soltar(id: number, g: Grupo, antesDe: number | null) {
+    const f = d.fotos.find((x) => x.id === id);
+    if (!f || id === antesDe) return;
+    const listas = grupos.map((x) => ({ color: x.color, ids: x.fotos.map((y) => y.id).filter((y) => y !== id) }));
+    const lista = listas.find((x) => x.color === g.color)!.ids;
+    const en = antesDe === null ? -1 : lista.indexOf(antesDe);
+    lista.splice(en < 0 ? lista.length : en, 0, id);
+    try {
+      if (!g.fotos.includes(f)) {
+        await api(`fotos/${id}`, { metodo: "PATCH", cuerpo: g.color === null ? { colorId: null, tipo: "exhibicion" } : { colorId: g.color } });
+      }
+      await api(`productos/${d.producto.id}/fotos/orden`, { cuerpo: { ids: listas.flatMap((x) => x.ids) } });
+    } catch (e) { aviso.error(e); }
+    await recargar();
   }
+  const mover = (g: Grupo, i: number, delta: number) => {
+    const j = i + delta;
+    if (j < 0 || j >= g.fotos.length) return;
+    // Hacia adelante hay que caer después del vecino: o sea, antes del que le sigue.
+    void soltar(g.fotos[i]!.id, g, delta < 0 ? g.fotos[j]!.id : g.fotos[j + 1]?.id ?? null);
+  };
   const borrar = async (id: number) => {
     if (!confirm("¿Borrar esta foto?")) return;
     try { await api(`fotos/${id}`, { metodo: "DELETE" }); await recargar(); } catch (e) { aviso.error(e); }
   };
 
-  const grupos: Array<{ titulo: string; tipo: "color" | "exhibicion"; color: number | null; fotos: Detalle["fotos"]; max: number }> = [
-    ...d.colores.filter((c) => c.activo).map((c) => ({ titulo: `Color ${c.nombre}`, tipo: "color" as const, color: c.id, fotos: d.fotos.filter((f) => f.tipo === "color" && f.colorId === c.id), max: 5 })),
-    { titulo: "Exhibición (con modelo)", tipo: "exhibicion", color: null, fotos: d.fotos.filter((f) => f.tipo === "exhibicion"), max: d.topeFotos },
+  // Un grupo por color (con TODAS sus fotos, de prenda sola o con modelo) y uno de generales, sin color.
+  type Grupo = { titulo: string; tipo: "color" | "exhibicion"; color: number | null; fotos: Detalle["fotos"]; lleno: boolean };
+  const enOrden = [...d.fotos].sort((a, b) => a.orden - b.orden || a.id - b.id);
+  const activos = d.colores.filter((c) => c.activo);
+  const grupos: Grupo[] = [
+    { titulo: "Generales (sin color)", tipo: "exhibicion", color: null, fotos: enOrden.filter((f) => f.colorId === null || !activos.some((c) => c.id === f.colorId)), lleno: false },
+    ...activos.map((c) => {
+      const fotos = enOrden.filter((f) => f.colorId === c.id);
+      return { titulo: `Color ${c.nombre}`, tipo: "color" as const, color: c.id, fotos, lleno: fotos.filter((f) => f.tipo === "color").length >= 5 };
+    }),
   ];
+  const [arrastrada, setArrastrada] = useState<number | null>(null);
+  const [sobre, setSobre] = useState<string | null>(null);
+  const alSoltar = (e: DragEvent, g: Grupo, antesDe: number | null) => {
+    e.preventDefault(); e.stopPropagation();
+    const id = arrastrada;
+    setArrastrada(null); setSobre(null);
+    if (id !== null) void soltar(id, g, antesDe);
+  };
 
   return (
     <Tarjeta titulo="Fotos" acciones={<Insignia clase={total >= d.topeFotos ? "bg-amber-50 text-amber-800" : undefined}>{total} de {d.topeFotos}</Insignia>}>
@@ -313,32 +347,36 @@ function Fotos({ d, operador, recargar, aviso }: { d: Detalle; operador: boolean
       {subiendo && <p className="mb-3 text-sm font-bold text-marca" role="status">{subiendo}</p>}
       <div className="space-y-5">
         {grupos.map((g) => (
-          <div key={g.titulo}>
+          <div key={g.titulo} className={`rounded-lg p-2 ${arrastrada !== null ? "outline-dashed outline-1 outline-gray-300" : ""} ${sobre === g.titulo ? "bg-fondo-suave" : ""}`}
+            onDragOver={(e) => { if (arrastrada !== null) { e.preventDefault(); setSobre(g.titulo); } }} onDrop={(e) => alSoltar(e, g, null)}>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-bold">{g.titulo} <span className="font-normal text-tinta-tenue">({g.fotos.length}{g.tipo === "color" ? "/5" : ""})</span></h3>
-              {operador && <Boton variante="borde" className="py-1.5" disabled={!!subiendo || total >= d.topeFotos || g.fotos.length >= g.max} onClick={() => elegir(g.tipo, g.color)}>+ Subir</Boton>}
+              <h3 className="text-sm font-bold">{g.titulo} <span className="font-normal text-tinta-tenue">({g.fotos.length})</span></h3>
+              {operador && <Boton variante="borde" className="py-1.5" disabled={!!subiendo || total >= d.topeFotos || g.lleno} onClick={() => elegir(g.tipo, g.color)}>+ Subir</Boton>}
             </div>
             {g.fotos.length ? (
               <ul className="grid grid-cols-3 gap-2 sm:grid-cols-5">
                 {g.fotos.map((f, i) => (
-                  <li key={f.id} className="group relative aspect-[4/5] overflow-hidden rounded-lg bg-fondo-suave">
-                    <img src={fotoUrl(f.clave)} alt={f.alt ?? ""} className="size-full object-cover" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                  <li key={f.id} draggable={operador} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setArrastrada(f.id); }} onDragEnd={() => { setArrastrada(null); setSobre(null); }}
+                    onDrop={(e) => alSoltar(e, g, f.id)}
+                    className={`group relative aspect-[4/5] overflow-hidden rounded-lg bg-fondo-suave ${operador ? "cursor-grab" : ""} ${arrastrada === f.id ? "opacity-40" : ""}`}>
+                    <img src={fotoUrl(f.clave)} alt={f.alt ?? ""} draggable={false} className="size-full object-cover" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
                     {operador && (
                       <div className="absolute inset-x-0 bottom-0 flex justify-between bg-black/55 p-1 text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                        <button type="button" className="px-1.5" aria-label="Mover antes" disabled={i === 0} onClick={() => void mover(g.fotos, i, -1)}>←</button>
+                        <button type="button" className="px-1.5" aria-label="Mover antes" disabled={i === 0} onClick={() => mover(g, i, -1)}>←</button>
                         <button type="button" className="px-1.5 text-xs font-bold" onClick={() => void borrar(f.id)}>Borrar</button>
-                        <button type="button" className="px-1.5" aria-label="Mover después" disabled={i === g.fotos.length - 1} onClick={() => void mover(g.fotos, i, 1)}>→</button>
+                        <button type="button" className="px-1.5" aria-label="Mover después" disabled={i === g.fotos.length - 1} onClick={() => mover(g, i, 1)}>→</button>
                       </div>
                     )}
                     {i === 0 && <span className="absolute left-1 top-1 rounded bg-white/90 px-1.5 text-[10px] font-bold">Principal</span>}
                   </li>
                 ))}
               </ul>
-            ) : <p className="text-xs text-tinta-tenue">Sin fotos.</p>}
+            ) : <p className="text-xs text-tinta-tenue">{arrastrada !== null ? "Soltala acá." : "Sin fotos."}</p>}
           </div>
         ))}
       </div>
-      <p className="mt-4 text-xs text-tinta-tenue">JPG, PNG, WEBP o HEIC (del iPhone) de hasta 25 MB. Se convierten solas a los tamaños de la tienda.</p>
+      {operador && <p className="mt-4 text-xs text-tinta-tenue">Arrastrá una foto para cambiarla de lugar o pasarla a otro color. En el celular, usá las flechas.</p>}
+      <p className="mt-1 text-xs text-tinta-tenue">JPG, PNG, WEBP o HEIC (del iPhone) de hasta 25 MB. Se convierten solas a los tamaños de la tienda.</p>
     </Tarjeta>
   );
 }

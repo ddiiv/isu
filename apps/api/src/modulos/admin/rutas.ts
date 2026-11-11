@@ -545,11 +545,13 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     return { ok: true };
   });
 
-  api.patch("/v1/admin/fotos/:id", { schema: { params: z.object({ id: Id }), body: z.object({ alt: z.string().trim().max(160).optional(), colorId: Id.nullable().optional() }).strict() } }, async (req) => {
+  api.patch("/v1/admin/fotos/:id", { schema: { params: z.object({ id: Id }), body: z.object({ alt: z.string().trim().max(160).optional(), colorId: Id.nullable().optional(), tipo: z.enum(["color", "exhibicion"]).optional() }).strict() } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const sets: string[] = []; const params: unknown[] = [req.params.id];
     if (req.body.alt !== undefined) { params.push(req.body.alt || null); sets.push(`alt = $${params.length}`); }
     if (req.body.colorId !== undefined) { params.push(req.body.colorId); sets.push(`color_id = $${params.length}`); }
+    // Al sacarle el color a una foto de tipo "color" hay que pasarla a exhibición: la base no admite color sin color_id.
+    if (req.body.tipo !== undefined) { params.push(req.body.tipo); sets.push(`tipo = $${params.length}`); }
     if (!sets.length) return { ok: true };
     let r;
     try { r = await pool.query<{ producto_id: number }>(`UPDATE tienda.fotos SET ${sets.join(", ")} WHERE id = $1 RETURNING producto_id`, params); } catch (e) {
