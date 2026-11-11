@@ -21,7 +21,7 @@ export async function GET() {
   // De a 8, para no pedirle a la API cientos de fichas a la vez.
   for (let i = 0; i < slugs.length; i += 8) {
     const fichas = await Promise.all(slugs.slice(i, i + 8).map((s) => obtenerProducto(s.slug).catch(() => null)));
-    for (const p of fichas) if (p) items.push(...itemsFeed(p, ctx, descripcionProducto(p, ctx)));
+    for (const p of fichas) if (p) items.push(...itemsFeed(p, ctx, descripcionProducto(p, ctx), { exigirColor: true }));
   }
   return new Response(feedXml(items, ctx), {
     headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=900, s-maxage=3600" },
