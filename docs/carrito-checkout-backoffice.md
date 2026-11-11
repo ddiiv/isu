@@ -138,3 +138,10 @@ A la tienda llegan sólo los **productos padre**.
 **El filtro extra de la tienda:** si algún producto llegara marcado como evento, pack o combo (`esFeria`, `esEvento`, `esPack`, `esCombo`, `definicionCombo` o un `tipo` que no sea de producto común), se descarta, y si ya estaba, se da de baja. Lo mismo con una variante marcada como pack o combo.
 
 **Los packs de la tienda** se arman sobre la prenda padre: a Stocker sólo le llegan SKU de variantes comunes.
+
+## De dónde vino cada compra, cupón por link y compartir
+
+- **Origen.** `OrigenYCupon` (layout raíz) guarda en `localStorage` `isu:origen` los `utm_source/medium/campaign/content` de la URL (el último con campaña gana; vence a los 30 días). De `gclid`/`fbclid` sólo se guarda `gclid: true`, nunca el valor. Sin campaña y en la primera visita, el `referido` es el hostname del sitio de donde vino («instagram.com»). Todo en minúsculas, sólo `[a-z0-9._-]`, hasta 60 caracteres (`packages/shared/src/origen.ts`).
+- **Pedido.** El checkout manda `origen` en `POST /v1/pedidos`. La API lo valida con `OrigenPedido` y lo guarda en `tienda.pedidos.origen` (jsonb, migración 0025). Si no sirve, se ignora: nunca tumba el pedido. El backoffice lo muestra en el detalle («Origen: instagram / bio / lanzamiento» o «Directo») y en la lista (fuente o referido).
+- **Cupón por link.** `?cupon=CODIGO` (3 a 40 caracteres `A-Za-z0-9_-`) se pasa a `ponerCupon` del carrito, que lo normaliza y valida como siempre; el del link pisa al que estuviera guardado. Se limpia el parámetro de la URL y se avisa unos segundos («Te guardamos el cupón…»), sin prometer descuento.
+- **Compartir.** En la ficha, «Compartir» usa `navigator.share` y, si no existe, abre `wa.me/?text=…`; el link lleva `utm_source=compartido&utm_medium=whatsapp`. Evento GA4 `share` (`method`, `content_type`, `item_id`).

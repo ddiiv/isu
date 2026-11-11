@@ -12,4 +12,5 @@ export * from "./packs.js";
 export * from "./talles.js";
 export * from "./constantes.js";
 export * from "./seo-datos.js";
+export * from "./origen.js";
 export type * from "./index.js";

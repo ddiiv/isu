@@ -515,6 +515,15 @@ describe("pedidos", () => {
     expect(d.eventos.map((e: { estado: string }) => e.estado)).toEqual(["pagado", "retirado"]);
     expect(d.pedido.acceso_hash).toBeUndefined();
   });
+  it("el origen del pedido sale en el detalle y en la lista (sin origen: null)", async () => {
+    const n = await crear("a_pagar_en_local");
+    const m = await crear("a_pagar_en_local");
+    await pool.query("UPDATE tienda.pedidos SET origen = $2 WHERE numero = $1", [n, JSON.stringify({ fuente: "instagram", medio: "bio", campana: "lanzamiento" })]);
+    expect((await req("GET", `/v1/admin/pedidos/${n}`, operador)).json().pedido.origen).toEqual({ fuente: "instagram", medio: "bio", campana: "lanzamiento" });
+    const lista = (await req("GET", "/v1/admin/pedidos?q=qa-adm-cli", operador)).json().pedidos as Array<{ numero: string; origen: unknown }>;
+    expect(lista.find((x) => x.numero === n)?.origen).toMatchObject({ fuente: "instagram" });
+    expect(lista.find((x) => x.numero === m)?.origen).toBeNull();
+  });
   it("cancelar uno pendiente devuelve lo apartado en Stocker", async () => {
     const n = await crear("esperando_transferencia", "transferencia");
     const r = await req("POST", `/v1/admin/pedidos/${n}/cancelar`, operador, { motivo: "Lo pidió la clienta" });

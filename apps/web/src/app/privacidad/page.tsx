@@ -13,7 +13,7 @@ export default function Privacidad() {
         <li><strong>Datos del pedido:</strong> nombre, DNI o CUIT, email, teléfono, dirección de entrega y los productos que compraste.</li>
         <li><strong>Datos de pago:</strong> los procesa Mercado Pago. Nosotros no vemos ni guardamos los números de tu tarjeta.</li>
         <li><strong>Consultas al asistente de la tienda:</strong> la conversación no se guarda (queda sólo en tu navegador mientras la pestaña está abierta). Las preguntas que no supo responder se guardan sin datos personales (se borran emails, teléfonos y números) hasta 90 días, para mejorar las respuestas. Para ver un pedido desde el asistente se usan el número de pedido y el email, y no se guardan.</li>
-        <li><strong>Datos de navegación:</strong> dirección IP, tipo de navegador y páginas visitadas, mediante cookies y Google Analytics.</li>
+        <li><strong>Datos de navegación:</strong> dirección IP, tipo de navegador y páginas visitadas, mediante cookies y Google Analytics. Con cada pedido guardamos de qué enlace o sitio llegaste (por ejemplo «instagram»), sin datos personales.</li>
       </ul>
 
       <h2>Para qué los usamos</h2>

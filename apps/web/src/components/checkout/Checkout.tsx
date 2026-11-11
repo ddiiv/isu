@@ -8,6 +8,7 @@ import { Foto } from "../Foto";
 import { CampoCupon, LineaCupon } from "../carrito/LineasCarrito";
 import { api, guardarAcceso, type ErrorApi } from "@/lib/cliente-api";
 import { evento, pesos } from "@/lib/ga";
+import { leerOrigen } from "../OrigenYCupon";
 import { OpcionesEnvio, type EleccionEnvio } from "./OpcionesEnvio";
 import { AvisoCP, AvisoDireccion, CampoCalle, CampoLocalidad } from "./Direccion";
 
@@ -134,7 +135,7 @@ export function Checkout({ config }: { config: ConfigPublica }) {
     setEnviando(true);
     evento("add_payment_info", { currency: "ARS", value: pesos(cotizacion?.total ?? 0), payment_type: medio });
     try {
-      const r = await api<{ numero: string; acceso: string; estado: string; redirigir: string | null }>("pedidos", { cuerpo: v.data });
+      const r = await api<{ numero: string; acceso: string; estado: string; redirigir: string | null }>("pedidos", { cuerpo: { ...v.data, origen: leerOrigen() } });
       guardarAcceso(r.numero, r.acceso);
       vaciar();
       if (r.redirigir && /^https?:\/\//.test(r.redirigir)) window.location.assign(r.redirigir);

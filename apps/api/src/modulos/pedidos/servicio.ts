@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
 import { CLAVE_CURSOR_NOVEDADES, HORAS_MAXIMAS_PAGO, NOMBRE_TRANSPORTE } from "@isu/shared";
-import { CP, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
+import { CP, OrigenPedido, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
 import { firmaOpinar, type Paquete, type Transportes } from "@isu/envios";
 import type { CotizadorEnvios } from "../envios/cotizador.js";
 import { hoyA } from "../envios/cotizador.js";
@@ -156,6 +156,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
   async function crear(datos: PedidoNuevo, ctx: { clienteId: number | null; ip: string }) {
     const a = await leerAjustes(pool);
     const { entrega, medioPago, contacto } = datos;
+    // Inválido o gigante: se ignora, nunca tumba el pedido.
+    const origen = OrigenPedido.safeParse(datos.origen).data;
     if (medioPago === "local" && entrega.tipo !== "retiro") throw new ErrorHttp(400, "validacion", "El pago en el local es sólo para retirar en el local.");
     if (entrega.tipo === "retiro" && !a.locales.some((l) => l.retiro && l.nombre === entrega.local)) {
       throw new ErrorHttp(400, "validacion", "Elegí un local de retiro de la lista.");
@@ -236,14 +238,14 @@ export function crearServicioPedidos(deps: DepsPedidos) {
         `INSERT INTO tienda.pedidos (acceso_hash, cliente_id, email, nombre, apellido, telefono, dni, entrega, direccion, local_retiro,
                                      medio_pago, subtotal, descuento, envio, total, estado, notas, ip,
                                      transporte, servicio_envio, sucursal_envio, avisos_whatsapp, paquete_envio,
-                                     cupon_id, cupon_codigo, cupon_nombre, descuento_cupon, envio_bonificado)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'reservando',$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING *`,
+                                     cupon_id, cupon_codigo, cupon_nombre, descuento_cupon, envio_bonificado, origen)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'reservando',$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
         [sha256(acceso), clienteId, contacto.email, contacto.nombre, contacto.apellido, contacto.telefono, contacto.dni,
           entrega.tipo, entrega.tipo === "envio" ? JSON.stringify(entrega.direccion) : null, entrega.tipo === "retiro" ? entrega.local : null,
           medioPago, c.subtotal, c.descuento, c.envio, c.total, datos.notas ?? null, ctx.ip,
           entrega.tipo === "envio" ? (opcion?.transporte ?? "estandar") : null, entrega.tipo === "envio" ? (opcion?.servicio ?? "domicilio") : null,
           sucursal ? JSON.stringify(sucursal) : null, datos.avisosWhatsapp ?? false, paqueteEnvio ? JSON.stringify(paqueteEnvio) : null,
-          c.aplicado?.cupon.id ?? null, c.aplicado?.cupon.codigo ?? null, c.aplicado?.cupon.nombre ?? null, c.descuentoCupon ?? 0, c.envioBonificado],
+          c.aplicado?.cupon.id ?? null, c.aplicado?.cupon.codigo ?? null, c.aplicado?.cupon.nombre ?? null, c.descuentoCupon ?? 0, c.envioBonificado, origen ? JSON.stringify(origen) : null],
       )).rows[0]!;
       for (const l of c.lineas) {
         // Las prendas de un pack llevan "(Pack xN)" en el nombre: así se ven en el mail, la página del pedido, Mercado Pago y el backoffice.
