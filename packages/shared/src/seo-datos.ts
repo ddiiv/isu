@@ -41,6 +41,20 @@ export function publicoDe(rutas: string[]): { genero: "male" | "female" | "unise
   return { genero: "unisex", edad: "adult" };
 }
 
+/**
+ * Categoría de Google (taxonomy-with-ids) según el nombre de la prenda; lo que no se reconoce queda en 1604 (Ropa).
+ * buzo, sweater y pulover quedan en 1604: Google los pone bajo Shirts & Tops y no bajo Coats & Jackets, y no hay un id verificado propio.
+ */
+export function categoriaGoogle(nombre: string): string {
+  const n = sinTildes(nombre);
+  if (/\b(remera|top|musculosa|blus)/.test(n)) return "212";
+  if (/\b(pantal|calza|jogger)/.test(n)) return "204";
+  if (/\b(short|bermuda)/.test(n)) return "207";
+  if (/\bchaleco/.test(n)) return "1831";
+  if (/\b(campera|abrigo)/.test(n)) return "5598";
+  return "1604";
+}
+
 /** Políticas que Google muestra junto al precio ("Envío $X · Devolución gratis 30 días"). */
 export function envioYDevolucion(ctx: ContextoSeo, precioPrenda?: number) {
   // Si la prenda sola ya llega al envío gratis, se publica gratis.
@@ -332,16 +346,22 @@ export interface ItemFeed {
 }
 
 /** Una fila por variante (talle × color), agrupadas por producto. Sin foto no se publica: Google la rechaza. */
-export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string, opciones: { soloFotosDelColor?: boolean; sinFoto?: string } = {}): ItemFeed[] {
+export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: string, opciones: { soloFotosDelColor?: boolean; sinFoto?: string; exigirColor?: boolean } = {}): ItemFeed[] {
   const nombreColor = new Map(p.colores.map((c) => [c.clave, sinUnico(c.nombre)]));
   const publico = publicoDe(p.migas.map((m) => m.ruta));
+  // El nombre afina el público: "unisex" manda; en niños, "Niña" es mujer.
+  const n = sinTildes(p.nombre);
+  if (/\bunisex\b/.test(n)) publico.genero = "unisex";
+  else if (publico.edad === "kids" && /\bnina/.test(n)) publico.genero = "female";
   const pesos = (c: number) => `${precio(c)} ARS`;
   const items: ItemFeed[] = [];
   for (const v of p.variantes) {
     const fotos = opciones.soloFotosDelColor ? fotosDelColor(p, v.color) : fotosDe(p, v.color);
     if (!fotos.length && !opciones.sinFoto) continue;
     const color = v.color ? nombreColor.get(v.color) ?? null : null;
-    const talle = sinUnico(v.talle);
+    // Merchant Center rechaza la ropa sin color: no se inventa, el ítem espera a que lo carguen.
+    if (opciones.exigirColor && !color) continue;
+    const talle = sinUnico(v.talle)?.toUpperCase() ?? null;
     const rebajado = !!v.precioLista && v.precioLista > v.precio;
     items.push({
       id: v.sku,
@@ -360,8 +380,7 @@ export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: str
       size: talle ?? (v.talle ? "Único" : null),
       gender: publico.genero,
       age_group: publico.edad,
-      // 1604 = Indumentaria y accesorios > Ropa (taxonomía de Google).
-      google_product_category: "1604",
+      google_product_category: categoriaGoogle(p.nombre),
       product_type: p.migas.map((m) => m.nombre).join(" > ") || "Ropa",
       identifier_exists: "no",
       shipping_price: ctx.costoEnvio !== null ? pesos(ctx.envioGratisDesde !== null && v.precio >= ctx.envioGratisDesde ? 0 : ctx.costoEnvio) : null,

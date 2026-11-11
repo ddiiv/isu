@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, categoriaGoogle, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -164,6 +164,22 @@ describe("feed de Google Shopping", () => {
     expect(xml).toContain('xmlns:g="http://base.google.com/ns/1.0"');
     expect(xml).toContain("Descripción &lt;con&gt; &amp; cosas");
     expect(xml.match(/<item>/g)).toHaveLength(3);
+  });
+  it("categoría de Google por nombre; lo dudoso queda en 1604", () => {
+    const c = categoriaGoogle;
+    expect([c("Queen Short Sastrero Dama"), c("Scout Bermuda"), c("Abel Pantalón"), c("Visa Remera baby tee rayada")]).toEqual(["207", "207", "204", "212"]);
+    expect([c("Loix Campera Mujer"), c("Chaleco Puffer"), c("Monaco Buzo con capucha"), c("Stop Cinturón")]).toEqual(["5598", "1831", "1604", "1604"]);
+  });
+  it("talle en mayúsculas, público por nombre y sin color sólo si Google lo exige", () => {
+    const p = producto({ nombre: "Kids Remera Niña", migas: [{ nombre: "Niños", ruta: "/ninos" }], variantes: [
+      { sku: "A", color: "negro", talle: "3Xl", precio: 1, precioLista: null, stock: 1 }, { sku: "B", color: "negro", talle: "10", precio: 1, precioLista: null, stock: 1 },
+      { sku: "C", color: "negro", talle: "Único", precio: 1, precioLista: null, stock: 1 }, { sku: "D", color: null, talle: "S", precio: 1, precioLista: null, stock: 1 },
+    ] });
+    const items = itemsFeed(p, ctx, "d", { exigirColor: true });
+    expect(items.map((i) => i.size)).toEqual(["3XL", "10", "Único"]);
+    expect(items[0]).toMatchObject({ gender: "female", age_group: "kids", google_product_category: "212" });
+    expect(itemsFeed(p, ctx, "d")).toHaveLength(4);
+    expect(itemsFeed(producto({ nombre: "Abel Pantalón Unisex" }), ctx, "d")[0]!.gender).toBe("unisex");
   });
   it("sin fotos no se publica (Merchant Center la rechaza)", () => {
     expect(itemsFeed(producto({ exhibicion: [], colores: [{ clave: "negro", nombre: "Negro", hex: null, fotos: [] }] }), ctx, "d")).toEqual([]);
