@@ -31,7 +31,18 @@ import { AjusteChatbot, AjusteDirecciones, AjusteChatbotIa, AjusteTransportes, E
 export interface DepsAdmin {
   pool: pg.Pool; redis: Redis; env: Entorno; colas: Colas; cache: CacheCorta; servicio: ServicioPedidos;
   fotos: Almacen | null; comprobantes: Almacen | null; canalInvalidar: string;
+  /** Videos de producto: el mismo lugar público que las fotos (FOTOS_DIR o R2). */
+  videos?: Almacen | null;
 }
+
+/** null si es un MP4 que los navegadores reproducen; si no, por qué no se acepta. */
+export function videoInvalido(b: Buffer): string | null {
+  if (b.length < 12 || b.toString("latin1", 4, 8) !== "ftyp") return "Subí un video MP4.";
+  if (b.toString("latin1", 8, 12) === "qt  ") return "Es un video .mov (QuickTime): exportalo como MP4 (H.264).";
+  if (!b.includes("avc1") && (b.includes("hvc1") || b.includes("hev1"))) return "El video está en HEVC (H.265), que muchos navegadores no reproducen: exportalo en H.264.";
+  return null;
+}
+const MAX_VIDEO = 50 * 1024 * 1024;
 
 const Id = z.coerce.number().int().positive().max(2_147_483_647);
 const NUMERO = z.string().regex(/^ISU-\d{4,10}$/);
@@ -275,6 +286,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         guiaTallesId: p.guia_talles_id, parteOutfit: p.parte_outfit, parteOutfitSugerida: parteDe(p.stocker_categoria, p.nombre),
         pack: p.pack, packOrden: p.pack_orden, composicion: p.composicion, eliminadoEn: p.eliminado_en, eliminadoPor: p.eliminado_por,
         resenas: { cantidad: p.resenas_cantidad, promedio: p.resenas_promedio === null ? null : Number(p.resenas_promedio) },
+        video: p.video_clave ? { clave: p.video_clave as string, publicado: p.video_publicado as boolean } : null,
       },
       colores: colores.rows, fotos: fotos.rows, variantes: variantes.rows,
       // El tope del padre sale solo: 5 por cada color.
@@ -573,6 +585,67 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     await auditar(pool, a, "ordenar_fotos", "producto", req.params.id, { ids: req.body.ids }, ip(req));
     await invalidar(await slugsDe([req.params.id]));
     return { ok: true, ordenadas: r.rowCount };
+  });
+
+  // ── Video del producto: uno por producto, entra como borrador y se publica a mano ──
+  await app.register(async (sub) => {
+    sub.addContentTypeParser("video/mp4", { parseAs: "buffer", bodyLimit: MAX_VIDEO }, (_r, cuerpo, hecho) => hecho(null, cuerpo));
+    sub.withTypeProvider<ZodTypeProvider>().post("/v1/admin/productos/:id/video", { bodyLimit: MAX_VIDEO, schema: { params: z.object({ id: Id }) } }, async (req, reply) => {
+      const a = await exigir(pool, req, "operador");
+      if (!deps.videos) throw new ErrorHttp(503, "sin_almacen", "No hay dónde guardar videos (FOTOS_DIR o R2).");
+      const datos = req.body as Buffer;
+      const malo = videoInvalido(datos);
+      if (malo) throw new ErrorHttp(400, "video_invalido", malo);
+      if (!(await pool.query("SELECT 1 FROM tienda.productos WHERE id = $1", [req.params.id])).rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+      // Primero el archivo y después la fila: si la fila falla, se borra el archivo.
+      const clave = `${claveNueva("v")}.mp4`;
+      await deps.videos.guardar(clave, datos, "video/mp4");
+      let vieja: string | null;
+      try {
+        vieja = (await pool.query<{ vieja: string | null }>(
+          `UPDATE tienda.productos p SET video_clave = $2, video_publicado = false FROM tienda.productos antes
+            WHERE p.id = $1 AND antes.id = p.id RETURNING antes.video_clave AS vieja`, [req.params.id, clave])).rows[0]?.vieja ?? null;
+      } catch (e) {
+        await deps.videos.borrar(clave).catch(() => {});
+        throw e;
+      }
+      await auditar(pool, a, "subir_video", "producto", req.params.id, { bytes: datos.length }, ip(req));
+      await invalidar(await slugsDe([req.params.id]));
+      // El anterior se borra después de regenerar las páginas (nunca se ve un video roto).
+      if (vieja) setTimeout(() => void deps.videos?.borrar(vieja).catch(() => {}), 60_000).unref();
+      return reply.code(201).send({ clave, publicado: false });
+    });
+  });
+
+  api.patch("/v1/admin/productos/:id/video", { schema: { params: z.object({ id: Id }), body: z.object({ publicado: z.boolean() }).strict() } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const r = await pool.query("UPDATE tienda.productos SET video_publicado = $2 WHERE id = $1 AND video_clave IS NOT NULL", [req.params.id, req.body.publicado]);
+    if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "Este producto no tiene video.");
+    await auditar(pool, a, req.body.publicado ? "publicar_video" : "ocultar_video", "producto", req.params.id, {}, ip(req));
+    await invalidar(await slugsDe([req.params.id]));
+    return { ok: true };
+  });
+
+  api.delete("/v1/admin/productos/:id/video", { schema: { params: z.object({ id: Id }) } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const { rows } = await pool.query<{ vieja: string | null }>(
+      `UPDATE tienda.productos p SET video_clave = NULL, video_publicado = false FROM tienda.productos antes
+        WHERE p.id = $1 AND antes.id = p.id AND antes.video_clave IS NOT NULL RETURNING antes.video_clave AS vieja`, [req.params.id]);
+    const vieja = rows[0]?.vieja;
+    if (!vieja) throw new ErrorHttp(404, "no_encontrado", "Este producto no tiene video.");
+    await auditar(pool, a, "borrar_video", "producto", req.params.id, {}, ip(req));
+    await invalidar(await slugsDe([req.params.id]));
+    setTimeout(() => void deps.videos?.borrar(vieja).catch(() => {}), 60_000).unref();
+    return { ok: true };
+  });
+
+  // Descarga como adjunto, con el nombre del producto (el backoffice la pasa tal cual).
+  api.get("/v1/admin/productos/:id/video/descarga", { schema: { params: z.object({ id: Id }) } }, async (req, reply) => {
+    await exigir(pool, req);
+    const { rows } = await pool.query<{ slug: string; video_clave: string | null }>("SELECT slug, video_clave FROM tienda.productos WHERE id = $1", [req.params.id]);
+    const datos = rows[0]?.video_clave && deps.videos ? await deps.videos.leer(rows[0].video_clave) : null;
+    if (!datos) throw new ErrorHttp(404, "no_encontrado", "Este producto no tiene video.");
+    return reply.header("content-type", "video/mp4").header("content-disposition", `attachment; filename="${rows[0]!.slug}.mp4"`).send(datos);
   });
 
   // ── Categorías ───────────────────────────────────────────────────

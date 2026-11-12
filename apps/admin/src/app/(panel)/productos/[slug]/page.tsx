@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, type DragEvent } from "react";
-import { api, fotoUrl, pesos, useDatos } from "@/lib/api";
+import { api, fotoUrl, pesos, useDatos, videoUrl } from "@/lib/api";
 import { arbol, type Categoria, type GuiaResumen } from "@/lib/catalogo";
 import { Boton, Campo, Cargando, Casilla, claseEntrada, Insignia, Mensaje, Tarjeta, Titulo, useAviso } from "@/components/ui";
 import { puede, useYo } from "@/components/Marco";
@@ -17,6 +17,7 @@ interface Detalle {
     pesoGramos: number | null; altoCm: number | null; anchoCm: number | null; largoCm: number | null;
     pack: boolean; packOrden: number; composicion: string | null; resenas: { cantidad: number; promedio: number | null };
     eliminadoEn: string | null; eliminadoPor: string | null;
+    video: { clave: string; publicado: boolean } | null;
   };
   colores: Array<{ id: number; clave: string; nombre: string; hex: string | null; orden: number; activo: boolean; nombreFijo: boolean }>;
   fotos: Array<{ id: number; tipo: "color" | "exhibicion"; colorId: number | null; orden: number; clave: string; ancho: number; alto: number; alt: string | null }>;
@@ -120,6 +121,8 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
           </Tarjeta>
 
           <Fotos d={d} operador={operador} recargar={recargar} aviso={aviso} />
+
+          <Video d={d} operador={operador} recargar={recargar} aviso={aviso} />
 
           <Tarjeta titulo="Variantes (de Stocker)">
             <div className="overflow-x-auto">
@@ -233,6 +236,48 @@ export default function EditarProducto({ params }: { params: Promise<{ slug: str
 }
 
 type Aviso = ReturnType<typeof useAviso>;
+
+/*
+ * Video vertical del producto (uno). Entra como borrador: en la tienda se ve recién al publicarlo,
+ * así se mira antes que la prenda sea la misma (los hechos con IA pueden cambiarla).
+ */
+function Video({ d, operador, recargar, aviso }: { d: Detalle; operador: boolean; recargar: () => Promise<void>; aviso: Aviso }) {
+  const entrada = useRef<HTMLInputElement>(null);
+  const [ocupado, setOcupado] = useState<string | null>(null);
+  const v = d.producto.video;
+  const ruta = `productos/${d.producto.id}/video`;
+  async function hacer(texto: string, accion: () => Promise<unknown>, ok: string) {
+    setOcupado(texto);
+    try { await accion(); aviso.ok(ok); await recargar(); } catch (e) { aviso.error(e); }
+    setOcupado(null);
+    if (entrada.current) entrada.current.value = "";
+  }
+  const subir = (a: File | undefined) => a && void hacer("Subiendo el video…", () => api(ruta, { archivo: a }), "Video subido como borrador: miralo y publicalo cuando esté bien.");
+  return (
+    <Tarjeta titulo="Video" acciones={v && <Insignia clase={v.publicado ? "bg-ahorro-claro text-ahorro" : "bg-amber-50 text-amber-800"}>{v.publicado ? "Publicado" : "Borrador"}</Insignia>}>
+      <input ref={entrada} type="file" accept="video/mp4" hidden onChange={(e) => subir(e.target.files?.[0])} />
+      {ocupado && <p className="mb-3 text-sm font-bold text-marca" role="status">{ocupado}</p>}
+      {v ? (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <video key={v.clave} src={videoUrl(v.clave)} controls muted playsInline preload="metadata" aria-label={`Video de ${d.producto.nombre}`}
+            className="aspect-[9/16] w-44 shrink-0 rounded-lg bg-black object-contain" />
+          <div className="flex flex-wrap gap-2">
+            {operador && (v.publicado
+              ? <Boton variante="borde" disabled={!!ocupado} onClick={() => void hacer("Guardando…", () => api(ruta, { metodo: "PATCH", cuerpo: { publicado: false } }), "Video oculto: ya no se ve en la tienda.")}>Ocultar de la tienda</Boton>
+              : <Boton disabled={!!ocupado} onClick={() => void hacer("Guardando…", () => api(ruta, { metodo: "PATCH", cuerpo: { publicado: true } }), "Video publicado. La tienda se actualiza en unos segundos.")}>Publicar en la tienda</Boton>)}
+            <a href={`/api/a/${ruta}/descarga`} download className="inline-flex items-center rounded-xl border border-linea bg-white px-4 py-2 text-sm font-bold shadow-sm hover:border-tinta">Descargar</a>
+            {operador && <Boton variante="borde" disabled={!!ocupado} onClick={() => entrada.current?.click()}>Cambiar video</Boton>}
+            {operador && <Boton variante="peligro" disabled={!!ocupado}
+              onClick={() => window.confirm("¿Borrar el video? Sale de la tienda y no se puede recuperar (descargalo antes si lo querés guardar).") && void hacer("Borrando…", () => api(ruta, { metodo: "DELETE" }), "Video borrado.")}>Borrar</Boton>}
+          </div>
+        </div>
+      ) : operador ? (
+        <Boton variante="borde" disabled={!!ocupado} onClick={() => entrada.current?.click()}>+ Subir video</Boton>
+      ) : <p className="text-sm text-tinta-tenue">Sin video.</p>}
+      <p className="mt-3 text-xs text-tinta-tenue">MP4 vertical (9:16), de hasta 50 MB. Al subir o cambiar el video queda como borrador hasta que lo publiques. Va segundo en las fotos de la tienda, sin sonido.</p>
+    </Tarjeta>
+  );
+}
 
 function Colores({ d, operador, recargar, aviso }: { d: Detalle; operador: boolean; recargar: () => Promise<void>; aviso: Aviso }) {
   return (

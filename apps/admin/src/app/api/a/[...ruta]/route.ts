@@ -12,6 +12,9 @@ const FOTOS = /^(productos\/\d{1,10}\/fotos|banners\/\d{1,10}\/foto)$/;
 const IMAGENES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif"]);
 const MAX_JSON = 256 * 1024;
 const MAX_FOTO = 25 * 1024 * 1024;
+// Video del producto: MP4, hasta 50 MB (la API revisa que sea un MP4 que se pueda ver).
+const VIDEO = /^productos\/\d{1,10}\/video$/;
+const MAX_VIDEO = 50 * 1024 * 1024;
 // Etapa 10: guías de talles desde Excel.
 const EXCEL = "guias-talles/excel";
 const TIPO_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -40,6 +43,12 @@ async function pasar(req: NextRequest, ctx: { params: Promise<{ ruta: string[] }
       if (Number(req.headers.get("content-length") ?? 0) > MAX_FOTO) return error(413, "demasiado_grande", "La foto pesa más de 25 MB.");
       const buf = Buffer.from(await req.arrayBuffer());
       if (buf.length > MAX_FOTO) return error(413, "demasiado_grande", "La foto pesa más de 25 MB.");
+      cuerpo = buf; tipo = ct;
+    } else if (VIDEO.test(ruta) && req.method === "POST") {
+      if (ct !== "video/mp4") return error(415, "tipo", "Subí un video MP4.");
+      if (Number(req.headers.get("content-length") ?? 0) > MAX_VIDEO) return error(413, "demasiado_grande", "El video pesa más de 50 MB.");
+      const buf = Buffer.from(await req.arrayBuffer());
+      if (buf.length > MAX_VIDEO) return error(413, "demasiado_grande", "El video pesa más de 50 MB.");
       cuerpo = buf; tipo = ct;
     } else if (ruta === EXCEL && req.method === "POST") {
       if (ct !== TIPO_XLSX && ct !== "application/octet-stream") return error(415, "tipo", "Subí un archivo de Excel (.xlsx).");

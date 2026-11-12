@@ -28,8 +28,10 @@ export interface Almacen {
  */
 export const PATRON_FOTOS = /^p\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(400|800|1200)\.webp$/;
 export const PATRON_BANNERS = /^b\/(\d{1,9}|[a-f0-9]{12})\/[a-z0-9]{8,40}-(800|1600|2400)\.webp$/;
-/** Una clave nueva para una foto ("p") o un banner ("b"): sin ids, todo al azar. */
-export const claveNueva = (tipo: "p" | "b") => `${tipo}/${randomBytes(6).toString("hex")}/${randomBytes(8).toString("hex")}`;
+/** Videos de producto (MP4 vertical), en el mismo lugar público que las fotos. */
+export const PATRON_VIDEOS = /^v\/[a-f0-9]{12}\/[a-f0-9]{16}\.mp4$/;
+/** Una clave nueva para una foto ("p"), un banner ("b") o un video ("v", más ".mp4"): sin ids, todo al azar. */
+export const claveNueva = (tipo: "p" | "b" | "v") => `${tipo}/${randomBytes(6).toString("hex")}/${randomBytes(8).toString("hex")}`;
 export const PATRON_COMPROBANTES = /^c\/\d{1,9}\/[a-z0-9]{16,40}\.(webp|pdf)$/;
 export const PATRON_ETIQUETAS = /^e\/\d{1,9}\/[a-z0-9]{16,40}\.pdf$/;
 
@@ -80,7 +82,8 @@ export function almacenR2(o: { cuenta: string; bucket: string; id: string; secre
     return cliente.fetch(`${base}/${archivo}`, {
       method: metodo,
       // Con tope (cubre también los reintentos de aws4fetch): si R2 se cuelga, el pedido o el trabajo de la cola fallan en vez de quedar esperando.
-      signal: AbortSignal.timeout(metodo === "PUT" ? 30_000 : 10_000),
+      // Los videos pesan hasta 50 MB: más tiempo (≈1 MB por segundo como mínimo).
+      signal: AbortSignal.timeout(metodo === "PUT" ? Math.max(30_000, (cuerpo?.length ?? 0) / 1000) : archivo.endsWith(".mp4") ? 60_000 : 10_000),
       body: cuerpo ? new Uint8Array(cuerpo) : undefined,
       headers: cuerpo ? { "content-type": tipo ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable" } : {},
     });
@@ -113,11 +116,15 @@ export function almacenDeFotos(env: NodeJS.ProcessEnv = process.env): Almacen {
 }
 
 /** Banners de la portada: el mismo lugar público que las fotos, con su propio patrón (b/…). */
-export function almacenDeBanners(env: NodeJS.ProcessEnv = process.env): Almacen {
+export const almacenDeBanners = (env: NodeJS.ProcessEnv = process.env) => almacenPublico(env, PATRON_BANNERS);
+/** Videos de producto: el mismo lugar público que las fotos, con su propio patrón (v/…). */
+export const almacenDeVideos = (env: NodeJS.ProcessEnv = process.env) => almacenPublico(env, PATRON_VIDEOS);
+
+function almacenPublico(env: NodeJS.ProcessEnv, patron: RegExp): Almacen {
   if (env.R2_CUENTA && env.R2_BUCKET && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
-    return almacenR2({ cuenta: env.R2_CUENTA, bucket: env.R2_BUCKET, id: env.R2_ACCESS_KEY_ID, secreto: env.R2_SECRET_ACCESS_KEY }, PATRON_BANNERS);
+    return almacenR2({ cuenta: env.R2_CUENTA, bucket: env.R2_BUCKET, id: env.R2_ACCESS_KEY_ID, secreto: env.R2_SECRET_ACCESS_KEY }, patron);
   }
-  if (env.FOTOS_DIR) return almacenEnDisco(env.FOTOS_DIR, PATRON_BANNERS);
+  if (env.FOTOS_DIR) return almacenEnDisco(env.FOTOS_DIR, patron);
   throw new Error("Configurá dónde guardar las fotos: FOTOS_DIR (desarrollo) o R2_CUENTA/R2_BUCKET/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY");
 }
 

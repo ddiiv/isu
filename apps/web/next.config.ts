@@ -29,6 +29,8 @@ const csp = [
   `script-src 'self' 'unsafe-inline' ${dev ? "'unsafe-eval'" : ""} ${GA[0]}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src 'self' data: blob: ${[...GA, ...FUENTES_IMAGENES].join(" ")}`,
+  // Los videos de producto salen del mismo lugar que las fotos.
+  `media-src 'self' ${FUENTES_IMAGENES.join(" ")}`,
   "font-src 'self'",
   `connect-src 'self' ${GA.join(" ")} ${process.env.NEXT_PUBLIC_API_URL ?? ""}`,
   "frame-src 'none'",

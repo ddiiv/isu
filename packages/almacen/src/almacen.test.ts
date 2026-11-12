@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { almacenEnDisco, almacenR2, PATRON_COMPROBANTES, PATRON_FOTOS } from "./index.js";
+import { almacenEnDisco, almacenR2, claveNueva, PATRON_COMPROBANTES, PATRON_FOTOS, PATRON_VIDEOS } from "./index.js";
 
 describe("almacén en disco", () => {
   it("fotos: no sale de su carpeta ni acepta otros nombres", async () => {
@@ -16,6 +16,11 @@ describe("almacén en disco", () => {
     expect((await a.leer("p/1/abcdefgh-400.webp"))?.toString()).toBe("x");
     expect(await a.leer("p/1/noexiste1-400.webp")).toBeNull();
   });
+  it("videos: sólo mp4 con la clave al azar", () => {
+    expect(PATRON_VIDEOS.test(`${claveNueva("v")}.mp4`)).toBe(true);
+    for (const malo of [claveNueva("v"), `${claveNueva("v")}.mov`, `${claveNueva("p")}.mp4`, "v/../x.mp4"]) expect(PATRON_VIDEOS.test(malo)).toBe(false);
+  });
+
   it("comprobantes: sólo webp y pdf con nombre al azar", async () => {
     const a = almacenEnDisco(await mkdtemp(path.join(os.tmpdir(), "comp-")), PATRON_COMPROBANTES);
     await a.guardar("c/12/abcdef0123456789.pdf", Buffer.from("%PDF"), "application/pdf");
