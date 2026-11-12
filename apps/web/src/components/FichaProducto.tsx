@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type ProductoDetalle } from "@isu/shared/puro";
+import { conDescuento, centavos, descripcionAutomatica, esClaro, formatearPesos, maxPorcentajePack, normalizarTalle, rutaPack, type ConfigPublica, type FotoPublica, type ProductoDetalle } from "@isu/shared/puro";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ResumenEstrellas } from "./Estrellas";
@@ -12,6 +12,7 @@ import { evento, item } from "@/lib/ga";
 import { useCarrito } from "./carrito/Carrito";
 import { SITIO } from "@/lib/sitio";
 import { BarraEnvioGratis } from "./BarraEnvioGratis";
+import { src, srcVideo } from "@/lib/fotos";
 
 /*
  * Ficha de producto: galería, color (con la foto de la prenda sola), talle,
@@ -63,6 +64,9 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
     return [...p.exhibicion, ...(p.colores.find((c) => c.fotos.length)?.fotos ?? [])];
   }, [p.exhibicion, p.colores, colorActual, color]);
 
+  // El video (si está publicado) va segundo, después de la foto principal.
+  const piezas: Array<FotoPublica | { video: string }> = p.video && fotos.length ? [fotos[0]!, { video: p.video }, ...fotos.slice(1)] : fotos;
+
   const base = delColor.length ? delColor : p.variantes;
   const precio = variante?.precio ?? Math.min(...base.map((v) => v.precio));
   const precioLista = variante ? variante.precioLista : p.descuento ? Math.min(...base.map((v) => v.precioLista ?? v.precio)) : null;
@@ -109,7 +113,11 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             const ancho = (el.firstElementChild as HTMLElement | null)?.offsetWidth ?? el.clientWidth;
             setFotoVista(Math.round(el.scrollLeft / Math.max(1, ancho + 8)));
           }}>
-          {fotos.length ? fotos.map((f, i) => (
+          {piezas.length ? piezas.map((f, i) => "video" in f ? (
+            <li key={f.video} className="relative aspect-[4/5] w-[85%] shrink-0 snap-center overflow-hidden rounded-[var(--radius-foto)] bg-fondo-suave sm:w-[60%] lg:w-auto">
+              <VideoProducto clave={f.video} poster={src(fotos[0]!, 800)} nombre={p.nombre} />
+            </li>
+          ) : (
             <li key={f.clave} className={`group/foto aspect-[4/5] w-[85%] shrink-0 snap-center overflow-hidden rounded-[var(--radius-foto)] bg-fondo-suave sm:w-[60%] lg:w-auto ${i === 0 ? "lg:col-span-2" : ""} ${cambioColor ? "animate-fundido" : ""}`}>
               <Foto foto={f} alt={`${p.nombre}${colorActual ? ` ${colorActual.nombre}` : ""}`} sizes={i === 0 ? "(min-width:1024px) 55vw, 85vw" : "(min-width:1024px) 28vw, 85vw"} prioridad={i === 0}
                 className="transition-transform duration-700 ease-suave group-hover/foto:scale-[1.03]" />
@@ -119,10 +127,10 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
           )}
         </ul>
         {/* En el celular, qué foto se ve (en la compu están todas a la vista). */}
-        {fotos.length > 1 && (
+        {piezas.length > 1 && (
           <div aria-hidden="true" className="mt-3 flex justify-center gap-1.5 lg:hidden">
-            {fotos.map((f, i) => (
-              <span key={f.clave} className={`h-1.5 rounded-full transition-all duration-300 ease-suave ${i === Math.min(fotoVista, fotos.length - 1) ? "w-5 bg-tinta" : "w-1.5 bg-linea"}`} />
+            {piezas.map((f, i) => (
+              <span key={"video" in f ? f.video : f.clave} className={`h-1.5 rounded-full transition-all duration-300 ease-suave ${i === Math.min(fotoVista, piezas.length - 1) ? "w-5 bg-tinta" : "w-1.5 bg-linea"}`} />
             ))}
           </div>
         )}
@@ -287,5 +295,44 @@ function Acordeon({ titulo, abierto = false, children }: { titulo: string; abier
       </summary>
       <div className="pb-4 leading-relaxed text-tinta-suave">{children}</div>
     </details>
+  );
+}
+
+/*
+ * El video del producto: sin sonido, en bucle y sólo mientras se ve (fuera de pantalla no gasta datos).
+ * Con «reducir movimiento» no arranca solo. El botón lo pausa o lo sigue; si la persona lo pausó, no vuelve a arrancar solo.
+ */
+function VideoProducto({ clave, poster, nombre }: { clave: string; poster: string; nombre: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const pausadoAMano = useRef(false);
+  const [andando, setAndando] = useState(false);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) return;
+    const obs = new IntersectionObserver(([e]) => {
+      if (e?.isIntersecting && !pausadoAMano.current) v.play().catch(() => {});
+      else v.pause();
+    }, { threshold: 0.5 });
+    obs.observe(v);
+    return () => obs.disconnect();
+  }, []);
+  function alternar() {
+    const v = ref.current;
+    if (!v) return;
+    pausadoAMano.current = !v.paused;
+    if (v.paused) v.play().catch(() => {});
+    else v.pause();
+  }
+  return (
+    <>
+      <video ref={ref} src={srcVideo(clave)} poster={poster} muted loop playsInline preload="none" aria-label={`Video de ${nombre}`}
+        onPlay={() => setAndando(true)} onPause={() => setAndando(false)} className="size-full object-contain" />
+      <button type="button" onClick={alternar} aria-label={andando ? "Pausar el video" : "Reproducir el video"}
+        className="absolute bottom-3 right-3 grid size-11 place-items-center rounded-full bg-white/90 text-tinta shadow-md ring-1 ring-black/10 transition hover:bg-white focus-visible:outline-2 focus-visible:outline-tinta">
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5" fill="currentColor">
+          {andando ? <path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" /> : <path d="M8 5.5v13l11-6.5z" />}
+        </svg>
+      </button>
+    </>
   );
 }

@@ -95,6 +95,8 @@ export const ProductoDetalle = z.object({
   liquidacion: z.boolean().default(false),
   composicion: z.string().nullable().default(null),
   resenas: ResumenResenas.default({ promedio: null, cantidad: 0 }),
+  /** El video vertical publicado (v/….mp4), si hay. */
+  video: z.string().regex(/^v\/[a-f0-9]{12}\/[a-f0-9]{16}\.mp4$/).nullable().default(null),
 });
 export type ProductoDetalle = z.infer<typeof ProductoDetalle>;
 

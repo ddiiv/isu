@@ -238,9 +238,11 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     stocker_padre: string; categoria_id: number | null; actualizado_en: Date;
     guia: Record<string, unknown> | null; guia_en: Date | null;
     pack: boolean; liquidacion: boolean; composicion: string | null; resenas_cantidad: number; resenas_promedio: string | null;
+    video: string | null;
   }>(
     `SELECT p.id, p.slug, p.nombre, COALESCE(p.descripcion, p.stocker_descripcion) AS descripcion, p.seo_titulo, p.seo_descripcion,
             p.stocker_padre, p.categoria_id, p.actualizado_en, p.pack, ${EN_LIQUIDACION} AS liquidacion, p.composicion, p.resenas_cantidad, p.resenas_promedio,
+            CASE WHEN p.video_publicado THEN p.video_clave END AS video,
             CASE WHEN g.id IS NULL THEN NULL ELSE jsonb_build_object('nombre', g.nombre, 'tipo', g.tipo, 'medidas', g.medidas, 'filas', g.filas, 'nota', g.nota) END AS guia,
             g.actualizado_en AS guia_en
        FROM tienda.productos p LEFT JOIN tienda.guias_talles g ON g.id = p.guia_talles_id
@@ -312,6 +314,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     liquidacion: p.liquidacion,
     composicion: p.composicion,
     resenas: resumen(p),
+    video: p.video,
   };
 }
 

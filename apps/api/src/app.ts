@@ -26,7 +26,7 @@ import { crearColas, type Colas } from "./lib/colas.js";
 import { crearMercadoPago } from "./lib/mercadopago.js";
 import { crearTalo } from "./lib/talo.js";
 import { crearClienteStocker } from "@isu/stocker";
-import { almacenDeBanners, almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, type Almacen } from "@isu/almacen";
+import { almacenDeBanners, almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, almacenDeVideos, type Almacen } from "@isu/almacen";
 import { rutasEnviosAdmin } from "./modulos/admin/envios.js";
 import { crearAsistente } from "./modulos/chat/motor.js";
 import { crearIa, type Ia } from "./modulos/chat/ia.js";
@@ -150,7 +150,8 @@ export async function construirApp(deps: Dependencias) {
   // Sin FOTOS_DIR ni R2 el backoffice funciona igual, pero no deja subir fotos.
   const fotos: Almacen | null = (() => { try { return almacenDeFotos({ ...process.env, FOTOS_DIR: env.FOTOS_DIR }); } catch { return null; } })();
   await rutasIngresoAdmin(app, { pool, redis, env });
-  await rutasAdmin(app, { pool, redis, env, colas, cache, servicio, fotos, comprobantes, canalInvalidar: CANAL_INVALIDAR });
+  const videos: Almacen | null = (() => { try { return almacenDeVideos({ ...process.env, FOTOS_DIR: env.FOTOS_DIR }); } catch { return null; } })();
+  await rutasAdmin(app, { pool, redis, env, colas, cache, servicio, fotos, videos, comprobantes, canalInvalidar: CANAL_INVALIDAR });
 
   // ── Etapa 4: backoffice de envíos ──
   const etiquetas = almacenDeEtiquetas({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });

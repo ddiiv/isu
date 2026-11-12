@@ -21,6 +21,7 @@ const csp = [
   `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src 'self' data: blob: ${IMAGENES.join(" ")}`,
+  `media-src 'self' ${IMAGENES.join(" ")}`,
   "font-src 'self'",
   // Todo pasa por /api/a (mismo origen): el navegador no habla con la API directo.
   "connect-src 'self'",

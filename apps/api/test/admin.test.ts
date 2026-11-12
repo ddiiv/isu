@@ -354,6 +354,44 @@ describe("fotos", () => {
   });
 });
 
+describe("video del producto", () => {
+  // Lo mínimo de un MP4: la caja ftyp con su marca y el códec en algún lado.
+  const mp4 = (marca = "isom", codec = "avc1") => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from(`ftyp${marca}`), Buffer.alloc(12), Buffer.from(`moov${codec}`), Buffer.alloc(2000, 7)]);
+  const subir = (id: number, cuerpo: Buffer) =>
+    app.inject({ method: "POST", url: `/v1/admin/productos/${id}/video`, headers: { ...IP, "x-isu-admin": operador, "content-type": "video/mp4" }, payload: cuerpo });
+  const publico = async () => (await app.inject("/v1/productos/qa-adm-2")).json().video;
+
+  it("entra como borrador, se publica, se sirve por partes, se descarga y se borra", async () => {
+    const id = ids["qa-adm-2"]!;
+    for (const malo of [Buffer.from("no es un video"), mp4("qt  "), mp4("isom", "hvc1")]) expect((await subir(id, malo)).json().error).toBe("video_invalido");
+    const r = await subir(id, mp4());
+    expect(r.statusCode, r.body).toBe(201);
+    const clave = r.json().clave as string;
+    expect(clave).toMatch(/^v\/[a-f0-9]{12}\/[a-f0-9]{16}\.mp4$/);
+    // Borrador: el backoffice lo ve, la tienda no.
+    expect((await req("GET", `/v1/admin/productos/${id}`, operador)).json().producto.video).toEqual({ clave, publicado: false });
+    expect(await publico()).toBeNull();
+    expect((await req("PATCH", `/v1/admin/productos/${id}/video`, operador, { publicado: true })).statusCode).toBe(200);
+    expect(await publico()).toBe(clave);
+    // Por partes (Safari no reproduce sin eso).
+    const parte = await app.inject({ url: `/fotos/${clave}`, headers: { range: "bytes=0-9" } });
+    expect(parte.statusCode).toBe(206);
+    expect(parte.headers["content-range"]).toBe(`bytes 0-9/${mp4().length}`);
+    expect(parte.rawPayload.length).toBe(10);
+    expect((await app.inject({ url: `/fotos/${clave}`, headers: { range: "bytes=999999-" } })).statusCode).toBe(416);
+    // La descarga lleva el nombre del producto.
+    const d = await req("GET", `/v1/admin/productos/${id}/video/descarga`, operador);
+    expect(d.statusCode).toBe(200);
+    expect(d.headers["content-disposition"]).toBe('attachment; filename="qa-adm-2.mp4"');
+    // Cambiarlo lo vuelve a borrador.
+    expect((await subir(id, mp4())).json().clave).not.toBe(clave);
+    expect(await publico()).toBeNull();
+    expect((await req("DELETE", `/v1/admin/productos/${id}/video`, operador)).statusCode).toBe(200);
+    expect((await req("DELETE", `/v1/admin/productos/${id}/video`, operador)).statusCode).toBe(404);
+    expect((await req("PATCH", `/v1/admin/productos/${id}/video`, operador, { publicado: true })).statusCode).toBe(404);
+  });
+});
+
 describe("categorías y descuentos", () => {
   it("categorías: alta, dos niveles como máximo, no se borra con productos", async () => {
     const mujer = (await pool.query("SELECT id FROM tienda.categorias WHERE slug = 'mujer' AND padre_id IS NULL")).rows[0].id;

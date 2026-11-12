@@ -8,6 +8,9 @@ export function srcSet(f: FotoPublica): string {
 }
 export const src = (f: FotoPublica, ancho: 400 | 800 | 1200 = 800) => urlFoto(CDN, f.clave, ancho);
 
+/* Video de producto (v/….mp4): el archivo tal cual, sin tamaños. */
+export const srcVideo = (clave: string) => `${CDN.replace(/\/+$/, "")}/${clave}`;
+
 /* Banners de la portada (etapa 8): 800, 1600 y 2400 px. */
 export const srcSetBanner = (clave: string) => ANCHOS_BANNER.map((w) => `${urlFoto(CDN, clave, w)} ${w}w`).join(", ");
 export const srcBanner = (clave: string, ancho: (typeof ANCHOS_BANNER)[number] = 1600) => urlFoto(CDN, clave, ancho);
