@@ -13,6 +13,7 @@ import { construirApp } from "../src/app.js";
 import { leerEntorno } from "../src/entorno.js";
 import type { Colas } from "../src/lib/colas.js";
 import { crearSesionAdmin } from "../src/modulos/admin/sesion.js";
+import { tipoAviso } from "../src/modulos/admin/envios.js";
 import { ahoraEnArgentina } from "../src/modulos/envios/cotizador.js";
 import { conEnvio, type Cotizado } from "../src/modulos/pedidos/cotizar.js";
 
@@ -491,6 +492,34 @@ describe("backoffice de envíos", () => {
     const a = await pool.query("SELECT 1 FROM tienda.auditoria WHERE accion = 'descartar_envio' AND detalle->>'numero' = $1", [numero]);
     expect(a.rowCount).toBe(1);
     expect((await post(`/v1/admin/envios/${numero}/descartar`, { motivo: "otra vez" }, adm(adminOperador))).statusCode).toBe(409);
+  });
+  it("WhatsApp: «pago recibido» sale solo al cobrarse y el botón de la ficha manda el aviso del estado", async () => {
+    // Sin el tilde del cliente: ni automático ni a mano.
+    expect((await post(`/v1/admin/envios/${numero}/whatsapp`, {}, adm(adminOperador))).json().error).toBe("sin_permiso");
+    const r = await post("/v1/pedidos", pedido("wa", { opcion: "andreani:domicilio" }, { avisosWhatsapp: true }));
+    const n = r.json().numero as string;
+    expect((await post(`/v1/admin/envios/${n}/whatsapp`, {}, adm(adminOperador))).json().error).toBe("sin_aviso"); // sin pagar
+    const { rows } = await pool.query("SELECT total FROM tienda.pedidos WHERE numero = $1", [n]);
+    await post(`/v1/admin/pedidos/${n}/pago`, { medio: "transferencia", monto: rows[0].total, referencia: "QA-TRF-WA" }, adm(adminOperador));
+    expect(enviados.some((e) => e.nombre === "avisar" && e.datos.numero === n && e.datos.tipo === "pago_recibido" && !e.datos.quien)).toBe(true);
+    expect(enviados.some((e) => e.nombre === "avisar" && e.datos.numero === numero)).toBe(false);
+    expect((await post(`/v1/admin/envios/${n}/whatsapp`, {}, adm(adminLectura))).statusCode).toBe(403);
+    const m = await post(`/v1/admin/envios/${n}/whatsapp`, {}, adm(adminOperador));
+    expect(m.statusCode, m.body).toBe(200);
+    expect(m.json().tipo).toBe("pago_recibido");
+    expect(enviados.some((e) => e.nombre === "avisar" && e.datos.numero === n && e.datos.quien)).toBe(true);
+    expect((await pool.query("SELECT 1 FROM tienda.auditoria WHERE accion = 'whatsapp_a_mano' AND detalle->>'numero' = $1", [n])).rowCount).toBe(1);
+  });
+  it("el aviso según el estado", () => {
+    expect(tipoAviso("pagado", "envio", null)).toBe("pago_recibido");
+    expect(tipoAviso("enviado", "envio", "en_camino")).toBe("en_camino");
+    expect(tipoAviso("enviado", "envio", "en_sucursal")).toBe("en_sucursal");
+    expect(tipoAviso("enviado", "envio", "en_reparto")).toBe("llega_hoy");
+    expect(tipoAviso("enviado", "envio", "no_entregado")).toBe("no_entregado");
+    expect(tipoAviso("enviado", "envio", null)).toBe("en_camino"); // estándar o moto, marcado a mano
+    expect(tipoAviso("entregado", "envio", "entregado")).toBe("entregado");
+    expect(tipoAviso("pagado", "retiro", null)).toBeNull();
+    expect(tipoAviso("cancelado", "envio", null)).toBeNull();
   });
   it("no prepara pedidos sin pagar", async () => {
     const n = (await post("/v1/pedidos", pedido("sinpagar", { opcion: "oca:domicilio" }))).json().numero;

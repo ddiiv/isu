@@ -7,7 +7,7 @@ import { aplicarCatalogo, aplicarStock, registrar } from "./stocker/sincronizar.
 import { crearCobros } from "./stocker/cobros.js";
 import { crearNovedades } from "./stocker/novedades.js";
 import type { Invalidador } from "./stocker/invalidar.js";
-import type { Envios } from "./envios/envios.js";
+import { TIPOS_AVISO, type Envios, type TipoAviso } from "./envios/envios.js";
 import type { Carritos } from "./correo/carritos.js";
 import type { Whatsapp } from "@isu/envios";
 
@@ -32,6 +32,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/carritos-abandonados  cada 10 minutos: purga los carritos viejos y manda el recordatorio (un solo mail) a quien lo pidió.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
+ * envios/avisar          un WhatsApp: «pago recibido» (API) o el que se manda a mano desde el pedido.
  * envios/preparar        prepara solo el envío de un pedido recién pagado (lo hace la API).
  * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
  *                   el worker sólo marca el ritmo (cada 1 y 10 minutos).
@@ -167,13 +168,24 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         const tel = String(t.data?.telefono ?? "");
         const plantilla = String(t.data?.plantilla ?? "");
         const parametros = Array.isArray(t.data?.parametros) ? (t.data.parametros as unknown[]).map((p) => String(p).slice(0, 200)).slice(0, 10) : [];
+        const boton = typeof t.data?.boton === "string" ? t.data.boton.slice(0, 200) : undefined;
+        const respaldo = t.data?.respaldo as { plantilla?: unknown; parametros?: unknown } | undefined;
         if (!/^549\d{10}$/.test(tel)) throw sinReintento("Teléfono inválido");
         try {
-          return await extras.whatsapp.plantilla(tel, plantilla, parametros);
+          return await extras.whatsapp.plantilla(tel, plantilla, parametros, boton);
         } catch (e) {
           // Meta rechaza (plantilla no aprobada, número sin WhatsApp): reintentar no lo arregla.
-          if ((e as { reintentable?: boolean }).reintentable === false) throw Object.assign(e as Error, { sinReintento: true });
-          throw e;
+          if ((e as { reintentable?: boolean }).reintentable !== false) throw e;
+          // La plantilla nueva todavía en revisión (o pausada): sale la de antes, sin botón.
+          if (respaldo && typeof respaldo.plantilla === "string" && Array.isArray(respaldo.parametros)) {
+            try {
+              return { ...await extras.whatsapp.plantilla(tel, respaldo.plantilla, respaldo.parametros.map((p) => String(p).slice(0, 200)).slice(0, 10)), respaldo: true };
+            } catch (e2) {
+              if ((e2 as { reintentable?: boolean }).reintentable === false) throw Object.assign(e2 as Error, { sinReintento: true });
+              throw e2;
+            }
+          }
+          throw Object.assign(e as Error, { sinReintento: true });
         }
       },
     },
@@ -211,6 +223,15 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         const pagoId = String(t.data?.pagoId ?? "");
         if (!NUMERO.test(numero) || !/^\d{1,20}$/.test(pagoId)) throw sinReintento("Datos inválidos");
         return extras.envios.mercadoEnvios(numero, pagoId);
+      },
+      // Un aviso por WhatsApp: «pago recibido» (lo encola la API) o el que se manda a mano desde la ficha del pedido.
+      avisar: async (t) => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        const numero = String(t.data?.numero ?? "");
+        const tipo = String(t.data?.tipo ?? "");
+        if (!NUMERO.test(numero) || !TIPOS_AVISO.includes(tipo as TipoAviso)) throw sinReintento("Datos inválidos");
+        const quien = typeof t.data?.quien === "string" ? t.data.quien.slice(0, 120) : null;
+        return extras.envios.avisarPedido(numero, tipo as TipoAviso, quien);
       },
       preparar: async (t) => {
         if (!extras.api) throw sinReintento("Falta API_URL / INTERNO_TOKEN en el worker");

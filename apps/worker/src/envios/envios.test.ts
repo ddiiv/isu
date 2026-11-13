@@ -94,9 +94,13 @@ describe("despacho desde Stocker", () => {
     expect(d.transporte).toBe("Andreani");
     const t = new URL(d.enlace).searchParams.get("t")!;
     expect(firmaSeguimientoValida(p.numero, t, SECRETO)).toBe(true);
+    // La plantilla con botón: el código en el texto y el enlace firmado al final de la URL del botón; la de antes, de respaldo.
     const wa = cola.find((c) => c.nombre === "whatsapp")!;
-    expect(wa.datos).toMatchObject({ telefono: "5491155551234", plantilla: "pedido_en_camino" });
-    expect((wa.datos.parametros as string[]).slice(0, 3)).toEqual(["Ana", p.numero, "Andreani"]);
+    expect(wa.datos).toMatchObject({ telefono: "5491155551234", plantilla: "aviso_en_camino", parametros: ["Ana", p.numero, "Andreani", p.seguimiento] });
+    const [num, firma] = String(wa.datos.boton).split("?t=");
+    expect(num).toBe(p.numero);
+    expect(firmaSeguimientoValida(p.numero, firma!, SECRETO)).toBe(true);
+    expect(wa.datos.respaldo).toMatchObject({ plantilla: "pedido_en_camino", parametros: ["Ana", p.numero, "Andreani", d.enlace] });
   });
   it("el mismo aviso dos veces (NOTIFY + repaso) no cambia nada ni avisa de nuevo", async () => {
     const p = await conEnvio("d2");
@@ -145,6 +149,43 @@ describe("despacho desde Stocker", () => {
     const p = await conEnvio("d9", { estado: "cancelado" });
     expect((await envios.despachado(p.numero, "despachado")).cambio).toBe(false);
     expect(await estado(p.id)).toBe("cancelado");
+  });
+});
+
+describe("WhatsApp: pago recibido y a mano", () => {
+  it("pago recibido: sólo WhatsApp (el mail lo manda la API), una vez, sin respaldo", async () => {
+    const p = await pedido("w1");
+    expect(await envios.avisarPedido(p.numero, "pago_recibido", null)).toEqual({ email: false, whatsapp: true });
+    expect(await envios.avisarPedido(p.numero, "pago_recibido", null)).toEqual({ email: false, whatsapp: false });
+    expect(await avisos(p.id)).toEqual(["pago_recibido:whatsapp"]);
+    const wa = cola.filter((c) => c.nombre === "whatsapp");
+    expect(wa).toHaveLength(1);
+    expect(wa[0]!.datos).toMatchObject({ plantilla: "aviso_pago_recibido", parametros: ["Ana", p.numero] });
+    expect(wa[0]!.datos.respaldo).toBeUndefined();
+  });
+  it("a mano: lo vuelve a mandar aunque ya se haya mandado o estén apagados, sin mail, y queda en el historial", async () => {
+    const p = await conEnvio("w2");
+    await envios.despachado(p.numero, "despachado");
+    await pool.query("UPDATE tienda.ajustes SET valor = 'false' WHERE clave = 'avisosWhatsapp'");
+    cola.length = 0;
+    expect(await envios.avisarPedido(p.numero, "en_camino", "ana@isu.com")).toEqual({ email: false, whatsapp: true });
+    expect(await envios.avisarPedido(p.numero, "en_camino", "ana@isu.com")).toEqual({ email: false, whatsapp: true });
+    await pool.query("UPDATE tienda.ajustes SET valor = 'true' WHERE clave = 'avisosWhatsapp'");
+    expect(cola.filter((c) => c.nombre === "whatsapp")).toHaveLength(2);
+    expect(cola.filter((c) => c.nombre === "email")).toHaveLength(0);
+    const ev = await pool.query("SELECT detalle, actor FROM tienda.pedido_eventos WHERE pedido_id = $1 ORDER BY id DESC LIMIT 1", [p.id]);
+    expect(ev.rows[0]).toEqual({ detalle: "WhatsApp mandado a mano: en camino", actor: "ana@isu.com" });
+  });
+  it("a mano, sin el tilde de WhatsApp del cliente: no manda", async () => {
+    const p = await conEnvio("w3", { avisos_whatsapp: false });
+    expect((await envios.avisarPedido(p.numero, "en_camino", "ana@isu.com")).whatsapp).toBe(false);
+  });
+  it("entregado: la plantilla de siempre, sin botón", async () => {
+    const p = await pedido("w4", { estado: "entregado" });
+    await envios.avisarPedido(p.numero, "entregado", "ana@isu.com");
+    const wa = cola.find((c) => c.nombre === "whatsapp")!;
+    expect(wa.datos).toMatchObject({ plantilla: "pedido_entregado", parametros: ["Ana", p.numero] });
+    expect(wa.datos.boton).toBeUndefined();
   });
 });
 

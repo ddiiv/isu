@@ -462,6 +462,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       // Correo, Andreani y OCA: el envío se prepara solo (si está prendido en Ajustes; lo decide la API).
       if (p.transporte && SE_PREPARAN_SOLOS.has(p.transporte)) await deps.colas.envios("preparar", { numero: p.numero }, `preparar-${p.numero}`);
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
+      // «Recibimos tu pago» por WhatsApp (si lo pidió; el worker decide si se puede mandar).
+      if (p.entrega === "envio" && p.avisos_whatsapp) await deps.colas.envios("avisar", { numero: p.numero, tipo: "pago_recibido" }, `pago-wa-${p.numero}`);
       // Aviso interno de la venta: el worker lo manda a CORREO_VENTAS (si está) y arma todo desde la base; `para` no se usa.
       await deps.colas.email("venta_tienda", p.email, { numero: p.numero });
     }

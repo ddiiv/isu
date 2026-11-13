@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { avanza, enlaceOpinar, enlaceSeguimiento, telefonoWhatsapp, type Adaptador, type EstadoEnvio, type Transportes } from "@isu/envios";
+import { avanza, enlaceOpinar, enlaceSeguimiento, firmaSeguimiento, telefonoWhatsapp, type Adaptador, type EstadoEnvio, type Transportes } from "@isu/envios";
 import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
 
 /*
@@ -17,11 +17,22 @@ import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
  * Los avisos (mail y WhatsApp) pasan por tienda.avisos: uno por pedido, tipo
  * y canal. Un reintento o dos réplicas nunca mandan dos veces el mismo.
  */
-export type TipoAviso = "en_camino" | "en_sucursal" | "llega_hoy" | "entregado" | "no_entregado";
+export const TIPOS_AVISO = ["pago_recibido", "en_camino", "en_sucursal", "llega_hoy", "entregado", "no_entregado"] as const;
+export type TipoAviso = (typeof TIPOS_AVISO)[number];
 
-/* Plantillas de WhatsApp (aprobadas en Meta) y sus parámetros, en orden. */
-const PLANTILLA_WA: Record<TipoAviso, string> = {
-  en_camino: "pedido_en_camino", en_sucursal: "pedido_en_sucursal", llega_hoy: "pedido_llega_hoy", entregado: "pedido_entregado", no_entregado: "pedido_no_entregado",
+/*
+ * Plantillas de WhatsApp (en Meta). Las «aviso_*» traen el botón «Seguir mi
+ * envío» (https://www.isuwaya.com/seguimiento/{{1}}, con {{1}} = ISU-1042?t=…)
+ * y el código de seguimiento en el texto. Mientras Meta no las apruebe, el
+ * worker manda la «pedido_*» de antes (respaldo, sin botón).
+ */
+const PLANTILLA_WA: Record<TipoAviso, { nueva: string | null; vieja: string | null }> = {
+  pago_recibido: { nueva: "aviso_pago_recibido", vieja: null },
+  en_camino: { nueva: "aviso_en_camino", vieja: "pedido_en_camino" },
+  en_sucursal: { nueva: "aviso_en_sucursal", vieja: "pedido_en_sucursal" },
+  llega_hoy: { nueva: "aviso_llega_hoy", vieja: "pedido_llega_hoy" },
+  entregado: { nueva: null, vieja: "pedido_entregado" },
+  no_entregado: { nueva: "aviso_no_entregado", vieja: "pedido_no_entregado" },
 };
 
 export interface DepsEnvios {
@@ -41,6 +52,10 @@ interface FilaPedido {
   transporte: string | null; servicio_envio: string | null; sucursal_envio: { nombre?: string; direccion?: string } | null; avisos_whatsapp: boolean;
 }
 
+const TITULO_AVISO: Record<TipoAviso, string> = {
+  pago_recibido: "pago recibido", en_camino: "en camino", en_sucursal: "en sucursal", llega_hoy: "llega hoy", entregado: "entregado", no_entregado: "no entregado",
+};
+
 const FINALES: EstadoEnvio[] = ["entregado", "devuelto", "cancelado"];
 
 export function crearEnvios(d: DepsEnvios) {
@@ -54,8 +69,13 @@ export function crearEnvios(d: DepsEnvios) {
     return rows[0]?.valor !== false;
   }
 
-  /** Avisa al cliente (una sola vez por tipo y canal). */
-  async function avisar(pedidoId: number, tipo: TipoAviso) {
+  /**
+   * Avisa al cliente (una sola vez por tipo y canal). «Pago recibido» va sólo
+   * por WhatsApp: el mail del pago lo manda la API.
+   * aMano: el botón de la ficha del pedido; sólo WhatsApp, aunque ya se haya mandado
+   * o estén apagados en Ajustes (lo decide la persona del backoffice).
+   */
+  async function avisar(pedidoId: number, tipo: TipoAviso, aMano: { quien: string | null } | null = null) {
     const { rows } = await d.pool.query<FilaPedido & { seguimiento: string | null }>(
       `SELECT p.id, p.numero, p.estado, p.entrega, p.nombre, p.email, p.telefono, p.transporte, p.servicio_envio, p.sucursal_envio, p.avisos_whatsapp,
               e.seguimiento
@@ -72,27 +92,53 @@ export function crearEnvios(d: DepsEnvios) {
       (await d.pool.query("INSERT INTO tienda.avisos (pedido_id, tipo, canal) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [p.id, tipo, canal])).rowCount === 1;
 
     let email = false, wa = false;
-    if (await nuevo("email")) {
+    if (!aMano && tipo !== "pago_recibido" && await nuevo("email")) {
       await d.encolar("email", { plantilla: `envio_${tipo}`, para: p.email, datos: { numero: p.numero, nombre: primerNombre, transporte, seguimiento, sucursal, enlace } }, `aviso-${p.id}-${tipo}-email`);
       email = true;
     }
     const tel = p.avisos_whatsapp && d.transportes.whatsapp ? telefonoWhatsapp(p.telefono) : null;
-    if (tel && await avisosWhatsappActivos() && await nuevo("whatsapp")) {
-      const params: Record<TipoAviso, string[]> = {
-        en_camino: [primerNombre, p.numero, transporte, enlace],
-        en_sucursal: [primerNombre, p.numero, sucursal ?? transporte, enlace],
-        llega_hoy: [primerNombre, p.numero, enlace],
-        entregado: [primerNombre, p.numero],
-        no_entregado: [primerNombre, p.numero, transporte, enlace],
-      };
-      await d.encolar("whatsapp", { telefono: tel, plantilla: PLANTILLA_WA[tipo], parametros: params[tipo] }, `aviso-${p.id}-${tipo}-wa`);
+    const plantillas = PLANTILLA_WA[tipo];
+    // El botón lleva el enlace firmado: sin el secreto, sale la plantilla de antes (con el enlace en el texto).
+    const boton = d.secreto && plantillas.nueva ? `${encodeURIComponent(p.numero)}?t=${firmaSeguimiento(p.numero, d.secreto)}` : null;
+    const codigo = seguimiento ?? "lo ves con el botón de abajo";
+    const nueva: Record<TipoAviso, string[]> = {
+      pago_recibido: [primerNombre, p.numero],
+      en_camino: [primerNombre, p.numero, transporte, codigo],
+      en_sucursal: [primerNombre, p.numero, sucursal ?? transporte, codigo],
+      llega_hoy: [primerNombre, p.numero],
+      entregado: [],
+      no_entregado: [primerNombre, p.numero, transporte],
+    };
+    const vieja: Record<TipoAviso, string[]> = {
+      pago_recibido: [],
+      en_camino: [primerNombre, p.numero, transporte, enlace],
+      en_sucursal: [primerNombre, p.numero, sucursal ?? transporte, enlace],
+      llega_hoy: [primerNombre, p.numero, enlace],
+      entregado: [primerNombre, p.numero],
+      no_entregado: [primerNombre, p.numero, transporte, enlace],
+    };
+    const mensaje = boton
+      ? { plantilla: plantillas.nueva, parametros: nueva[tipo], boton, respaldo: plantillas.vieja ? { plantilla: plantillas.vieja, parametros: vieja[tipo] } : undefined }
+      : plantillas.vieja ? { plantilla: plantillas.vieja, parametros: vieja[tipo] } : null;
+    if (tel && mensaje && (aMano || (await avisosWhatsappActivos() && await nuevo("whatsapp")))) {
+      if (aMano) await nuevo("whatsapp");
+      await d.encolar("whatsapp", { telefono: tel, ...mensaje }, aMano ? `aviso-${p.id}-${tipo}-wa-${Date.now()}` : `aviso-${p.id}-${tipo}-wa`);
       wa = true;
+      if (aMano) await evento(d.pool, p.id, p.estado, `WhatsApp mandado a mano: ${TITULO_AVISO[tipo]}`, aMano.quien ?? "backoffice");
     }
     return { email, whatsapp: wa };
   }
 
-  const evento = (db: pg.Pool | pg.PoolClient, pedidoId: number, estado: string, detalle: string) =>
-    db.query("INSERT INTO tienda.pedido_eventos (pedido_id, estado, detalle, actor) VALUES ($1, $2, $3, 'envios')", [pedidoId, estado, detalle.slice(0, 300)]);
+  /** El trabajo envios/avisar: por número de pedido. */
+  async function avisarPedido(numero: string, tipo: TipoAviso, quien: string | null) {
+    const { rows } = await d.pool.query<{ id: number }>("SELECT id FROM tienda.pedidos WHERE numero = $1", [numero]);
+    if (!rows[0]) return { motivo: "no_existe" };
+    // Sin quien: «pago recibido» automático (una sola vez). Con quien: el botón del backoffice.
+    return avisar(rows[0].id, tipo, quien ? { quien } : null);
+  }
+
+  const evento = (db: pg.Pool | pg.PoolClient, pedidoId: number, estado: string, detalle: string, actor = "envios") =>
+    db.query("INSERT INTO tienda.pedido_eventos (pedido_id, estado, detalle, actor) VALUES ($1, $2, $3, $4)", [pedidoId, estado, detalle.slice(0, 300), actor.slice(0, 120)]);
 
   /**
    * Stocker despachó el pedido (o avisó que falta mercadería). Idempotente:
@@ -287,6 +333,6 @@ export function crearEnvios(d: DepsEnvios) {
     return { pedidos: rows.length };
   }
 
-  return { avisar, despachado, seguir, seguirPendientes, mercadoEnvios, pedirResenas };
+  return { avisar, avisarPedido, despachado, seguir, seguirPendientes, mercadoEnvios, pedirResenas };
 }
 export type Envios = ReturnType<typeof crearEnvios>;

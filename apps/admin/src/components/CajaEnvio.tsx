@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
-import { fecha, pesos, useDatos } from "@/lib/api";
-import { Insignia, Tarjeta } from "./ui";
+import { useState } from "react";
+import { api, fecha, pesos, useDatos } from "@/lib/api";
+import { Boton, Insignia, Tarjeta, useAviso } from "./ui";
 
 /* El envío del pedido en su ficha: transporte, la bolsa, seguimiento, eventos y avisos mandados. */
 const TRANSPORTE: Record<string, string> = { correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío estándar", moto: "Envío en moto" };
 const SERVICIO: Record<string, string> = { domicilio: "a domicilio", sucursal: "a sucursal", en_el_dia: "en el día" };
-const AVISO: Record<string, string> = { en_camino: "En camino", en_sucursal: "En sucursal", llega_hoy: "Llega hoy", entregado: "Entregado", no_entregado: "No entregado" };
+const AVISO: Record<string, string> = { pago_recibido: "Pago recibido", en_camino: "En camino", en_sucursal: "En sucursal", llega_hoy: "Llega hoy", entregado: "Entregado", no_entregado: "No entregado" };
 
 interface Datos {
   envios: Array<{ id: number; transporte: string; seguimiento: string | null; estado: string; activo: boolean; tieneEtiqueta: boolean; despachadoEn: string | null; entregadoEn: string | null; ultimoError: string | null; creadoPor: string | null; creadoEn: string; urlSeguimiento: string | null; portal: string | null }>;
@@ -21,12 +22,28 @@ export function CajaEnvio({ numero, pedido }: { numero: string; pedido: Record<s
   const t = String(pedido.transporte ?? "estandar");
   const suc = pedido.sucursal_envio as { nombre?: string; direccion?: string } | null;
   const vigente = datos?.envios.find((e) => e.activo);
+  const aviso = useAviso();
+  const [mandando, setMandando] = useState(false);
+  async function mandarWhatsapp() {
+    setMandando(true); aviso.limpiar();
+    try {
+      const r = await api<{ tipo: string }>(`envios/${numero}/whatsapp`, { metodo: "POST" });
+      aviso.ok(`Mandamos «${AVISO[r.tipo] ?? r.tipo}» por WhatsApp. En un minuto queda en el historial del pedido.`);
+    } catch (e) { aviso.error(e); } finally { setMandando(false); }
+  }
   return (
     <Tarjeta titulo="Envío">
       <p className="text-sm"><b>{TRANSPORTE[t] ?? t}</b> {SERVICIO[String(pedido.servicio_envio ?? "")] ?? ""}</p>
       {suc?.nombre && <p className="text-sm text-tinta-suave">Sucursal: {suc.nombre}{suc.direccion ? ` · ${suc.direccion}` : ""}</p>}
       {typeof pedido.envio_mercado_pago === "number" && <p className="text-sm text-tinta-suave">Cobrado por Mercado Pago: {pesos(pedido.envio_mercado_pago)}</p>}
       <p className="text-xs text-tinta-tenue">Avisos por WhatsApp: {pedido.avisos_whatsapp ? "sí" : "no"}</p>
+      {Boolean(pedido.avisos_whatsapp) && pedido.entrega === "envio" && (
+        <div className="mt-2">
+          <Boton variante="borde" disabled={mandando} onClick={mandarWhatsapp}>{mandando ? "Mandando…" : "Mandar aviso por WhatsApp"}</Boton>
+          <p className="mt-1 text-xs text-tinta-tenue">Manda el aviso de cómo está el pedido ahora (pago recibido, en camino, en sucursal…), con el botón para seguirlo.</p>
+          <aviso.Aviso />
+        </div>
+      )}
       {datos?.paquete && (
         <p className="text-xs text-tinta-tenue">
           {datos.paquete.bolsa ? `Bolsa ${datos.paquete.bolsa} · ` : "Paquete · "}{(datos.paquete.pesoGramos / 1000).toLocaleString("es-AR", { maximumFractionDigits: 2 })} kg · {datos.paquete.altoCm} × {datos.paquete.anchoCm} × {datos.paquete.largoCm} cm
