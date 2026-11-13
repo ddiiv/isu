@@ -81,6 +81,13 @@ const Entorno = z.object({
   // Georef (Gobierno, gratis y sin clave): revisa calle y altura. "off" lo apaga.
   GEOREF_URL: z.union([z.string().url(), z.literal("off")]).default("https://apis.datos.gob.ar/georef/api"),
   CHATBOT_MODELO: z.string().regex(/^[a-z0-9.-]{3,60}$/).default("claude-opus-5-5"),
+
+  // Botón «Actualizar catálogo de WhatsApp» (opcional). Token de un usuario del sistema de Meta con
+  // catalog_management sobre el catálogo, y el id de la fuente de datos (Commerce Manager → Fuentes de datos).
+  META_CATALOGO_TOKEN: z.string().min(20).optional(),
+  META_CATALOGO_FEED_ID: z.string().regex(/^\d{5,25}$/).optional(),
+  META_API_VERSION: z.string().regex(/^v\d{1,3}\.\d$/).default("v22.0"),
+  META_GRAPH_URL: z.string().url().default("https://graph.facebook.com"),
 });
 
 export type Entorno = z.infer<typeof Entorno>;

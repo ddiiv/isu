@@ -28,6 +28,7 @@ import { crearTalo } from "./lib/talo.js";
 import { crearClienteStocker } from "@isu/stocker";
 import { almacenDeBanners, almacenDeComprobantes, almacenDeEtiquetas, almacenDeFotos, almacenDeVideos, type Almacen } from "@isu/almacen";
 import { rutasEnviosAdmin } from "./modulos/admin/envios.js";
+import { rutasCatalogoWhatsapp } from "./modulos/admin/catalogo-whatsapp.js";
 import { crearAsistente } from "./modulos/chat/motor.js";
 import { crearIa, type Ia } from "./modulos/chat/ia.js";
 import { rutasChat } from "./modulos/chat/rutas.js";
@@ -156,6 +157,7 @@ export async function construirApp(deps: Dependencias) {
   // ── Etapa 4: backoffice de envíos ──
   const etiquetas = almacenDeEtiquetas({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasEnviosAdmin(app, { pool, redis, env, colas, transportes, cotizador, etiquetas });
+  await rutasCatalogoWhatsapp(app, { pool, env });
 
   // ── Etapa 5: asistente de la tienda (la IA es opcional: sin ANTHROPIC_API_KEY responde con las preguntas frecuentes) ──
   const ia = env.ANTHROPIC_API_KEY ? crearIa({ apiKey: env.ANTHROPIC_API_KEY, modelo: env.CHATBOT_MODELO, log: app.log }) : null;
