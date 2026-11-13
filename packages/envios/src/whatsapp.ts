@@ -53,7 +53,7 @@ export function whatsapp(c: ConfigWhatsapp): Whatsapp {
           template: {
             name: nombre, language: { code: c.idioma },
             components: [
-              ...parametros.length ? [{ type: "body", parameters: parametros.map((p) => ({ type: "text", text: p.slice(0, 200) })) }] : [],
+              ...parametros.length ? [{ type: "body", parameters: parametros.map((p) => ({ type: "text", text: p.slice(0, 600) })) }] : [],
               ...boton ? [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: boton }] }] : [],
             ],
           },

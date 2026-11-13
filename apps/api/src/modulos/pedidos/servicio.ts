@@ -464,6 +464,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
       // «Recibimos tu pago» por WhatsApp (si lo pidió; el worker decide si se puede mandar).
       if (p.entrega === "envio" && p.avisos_whatsapp) await deps.colas.envios("avisar", { numero: p.numero, tipo: "pago_recibido" }, `pago-wa-${p.numero}`);
+      // A los empleados por WhatsApp, para que lo armen (EMPLEADOS_WHATSAPP en el worker).
+      await deps.colas.envios("empleados", { numero: p.numero }, `empleados-${p.numero}`);
       // Aviso interno de la venta: el worker lo manda a CORREO_VENTAS (si está) y arma todo desde la base; `para` no se usa.
       await deps.colas.email("venta_tienda", p.email, { numero: p.numero });
     }

@@ -32,6 +32,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/carritos-abandonados  cada 10 minutos: purga los carritos viejos y manda el recordatorio (un solo mail) a quien lo pidió.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
+ * envios/empleados       venta pagada: el WhatsApp a los empleados para que la armen (API).
  * envios/avisar          un WhatsApp: «pago recibido» (API) o el que se manda a mano desde el pedido.
  * envios/preparar        prepara solo el envío de un pedido recién pagado (lo hace la API).
  * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
@@ -167,7 +168,7 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         if (!extras.whatsapp) throw sinReintento("WhatsApp sin configurar");
         const tel = String(t.data?.telefono ?? "");
         const plantilla = String(t.data?.plantilla ?? "");
-        const parametros = Array.isArray(t.data?.parametros) ? (t.data.parametros as unknown[]).map((p) => String(p).slice(0, 200)).slice(0, 10) : [];
+        const parametros = Array.isArray(t.data?.parametros) ? (t.data.parametros as unknown[]).map((p) => String(p).slice(0, 600)).slice(0, 10) : [];
         const boton = typeof t.data?.boton === "string" ? t.data.boton.slice(0, 200) : undefined;
         const respaldo = t.data?.respaldo as { plantilla?: unknown; parametros?: unknown } | undefined;
         if (!/^549\d{10}$/.test(tel)) throw sinReintento("Teléfono inválido");
@@ -223,6 +224,13 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         const pagoId = String(t.data?.pagoId ?? "");
         if (!NUMERO.test(numero) || !/^\d{1,20}$/.test(pagoId)) throw sinReintento("Datos inválidos");
         return extras.envios.mercadoEnvios(numero, pagoId);
+      },
+      // Venta pagada de la tienda: el WhatsApp para que los empleados la armen (lo encola la API).
+      empleados: async (t) => {
+        if (!extras.envios) throw sinReintento("Envíos sin configurar");
+        const numero = String(t.data?.numero ?? "");
+        if (!NUMERO.test(numero)) throw sinReintento("Datos inválidos");
+        return extras.envios.avisarEmpleados(numero);
       },
       // Un aviso por WhatsApp: «pago recibido» (lo encola la API) o el que se manda a mano desde la ficha del pedido.
       avisar: async (t) => {
