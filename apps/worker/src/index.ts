@@ -36,6 +36,8 @@ const env = z.object({
   SMTP_URL: z.string().min(8).optional(),
   CORREO_DE: z.string().min(3).default("Isuwaya <isu.isuwaya@gmail.com>"),
   CORREO_RESPONDER: z.string().email().optional(),
+  // A quiénes les llega por WhatsApp cada venta pagada para armarla (separados por coma). Sin ella, a nadie.
+  EMPLEADOS_WHATSAPP: z.string().max(500).optional(),
   // A dónde va el aviso interno de cada venta de la tienda (con el PDF). Sin ella no se manda.
   CORREO_VENTAS: z.string().email().optional(),
   // Para el link al pedido en el backoffice dentro de ese aviso.
@@ -99,6 +101,7 @@ const envios = crearEnvios({
   encolarStocker: (nombre, datos, id) => colaStocker.add(nombre, datos, { jobId: id, attempts: 12 }),
   sitio: env.SITIO_URL,
   secreto: env.INTERNO_TOKEN,
+  empleados: env.EMPLEADOS_WHATSAPP?.split(",").map((n) => n.trim()).filter(Boolean),
 });
 if (!env.SITIO_URL || !env.INTERNO_TOKEN) console.warn("Sin SITIO_URL / INTERNO_TOKEN: los avisos de envío van sin enlace de seguimiento.");
 

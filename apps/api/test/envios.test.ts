@@ -516,6 +516,9 @@ describe("backoffice de envíos", () => {
     await post(`/v1/admin/pedidos/${n}/pago`, { medio: "transferencia", monto: rows[0].total, referencia: "QA-TRF-WA" }, adm(adminOperador));
     expect(enviados.some((e) => e.nombre === "avisar" && e.datos.numero === n && e.datos.tipo === "pago_recibido" && !e.datos.quien)).toBe(true);
     expect(enviados.some((e) => e.nombre === "avisar" && e.datos.numero === numero)).toBe(false);
+    // Pagado: también el aviso a los empleados para armarlo (con o sin el tilde del cliente).
+    expect(enviados.some((e) => e.nombre === "empleados" && e.datos.numero === n)).toBe(true);
+    expect(enviados.some((e) => e.nombre === "empleados" && e.datos.numero === numero)).toBe(true);
     expect((await post(`/v1/admin/envios/${n}/whatsapp`, {}, adm(adminLectura))).statusCode).toBe(403);
     const m = await post(`/v1/admin/envios/${n}/whatsapp`, {}, adm(adminOperador));
     expect(m.statusCode, m.body).toBe(200);

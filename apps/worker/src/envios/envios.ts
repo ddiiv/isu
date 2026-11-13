@@ -1,6 +1,7 @@
 import type pg from "pg";
 import { avanza, enlaceOpinar, enlaceSeguimiento, firmaSeguimiento, telefonoWhatsapp, type Adaptador, type EstadoEnvio, type Transportes } from "@isu/envios";
 import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
+import { cargarPedido } from "../correo/pedido.js";
 
 /*
  * Envíos del lado del worker (etapa 4):
@@ -44,6 +45,8 @@ export interface DepsEnvios {
   encolarStocker: (nombre: "envio", datos: Record<string, unknown>, id: string) => Promise<unknown>;
   sitio: string | undefined;
   secreto: string | undefined;
+  /** EMPLEADOS_WHATSAPP: a quiénes avisar cada venta para que la armen (vacío = a nadie). */
+  empleados?: string[];
   log?: Pick<Console, "warn">;
 }
 
@@ -55,6 +58,22 @@ interface FilaPedido {
 const TITULO_AVISO: Record<TipoAviso, string> = {
   pago_recibido: "pago recibido", en_camino: "en camino", en_sucursal: "en sucursal", llega_hoy: "llega hoy", entregado: "entregado", no_entregado: "no entregado",
 };
+
+/*
+ * «Remera Oversize Negro M x2 · Jogger Gris L x1», en una línea (Meta no acepta saltos de línea en un
+ * parámetro) y cortada para que entre en el mensaje: lo que no entra, en el backoffice.
+ */
+export function prendas(items: Array<{ nombre: string; color: string | null; talle: string | null; cantidad: number }>, tope = 550) {
+  const partes = items.map((i) => [i.nombre, i.color, i.talle].filter(Boolean).join(" ").replace(/\s+/g, " ") + ` x${i.cantidad}`);
+  let texto = "";
+  for (const [n, parte] of partes.entries()) {
+    const resto = partes.length - n - 1;
+    const sigue = texto ? `${texto} · ${parte}` : parte;
+    if (sigue.length + (resto ? 20 : 0) > tope) return `${texto} · y ${partes.length - n} más`;
+    texto = sigue;
+  }
+  return texto;
+}
 
 const FINALES: EstadoEnvio[] = ["entregado", "devuelto", "cancelado"];
 
@@ -127,6 +146,25 @@ export function crearEnvios(d: DepsEnvios) {
       if (aMano) await evento(d.pool, p.id, p.estado, `WhatsApp mandado a mano: ${TITULO_AVISO[tipo]}`, aMano.quien ?? "backoffice");
     }
     return { email, whatsapp: wa };
+  }
+
+  /**
+   * Venta pagada: el WhatsApp «pedido_para_armar» a cada empleado, con el cliente,
+   * la entrega y las prendas. Una sola vez por pedido.
+   */
+  async function avisarEmpleados(numero: string) {
+    const empleados = (d.empleados ?? []).map(telefonoWhatsapp).filter((t): t is string => !!t);
+    if (!empleados.length || !d.transportes.whatsapp) return { omitido: "sin EMPLEADOS_WHATSAPP o sin WhatsApp" };
+    const p = await cargarPedido(d.pool, numero);
+    if (!p) return { motivo: "no_existe" };
+    const r = await d.pool.query(
+      "INSERT INTO tienda.avisos (pedido_id, tipo, canal) SELECT id, 'empleados', 'whatsapp' FROM tienda.pedidos WHERE numero = $1 ON CONFLICT DO NOTHING", [numero]);
+    if (!r.rowCount) return { repetido: true };
+    const entrega = p.entrega === "retiro" ? `Retira en el local ${p.local ?? ""}`.trim()
+      : `${p.transporte ?? "Envío"}${p.sucursal ? ` a sucursal · ${p.sucursal}` : ` a domicilio · ${p.direccion ?? ""}`}`;
+    const parametros = [p.numero, `${p.nombre} · ${p.telefono}`, entrega, prendas(p.items)];
+    for (const tel of empleados) await d.encolar("whatsapp", { telefono: tel, plantilla: "pedido_para_armar", parametros }, `empleados-${p.numero}-${tel}`);
+    return { empleados: empleados.length };
   }
 
   /** El trabajo envios/avisar: por número de pedido. */
@@ -333,6 +371,6 @@ export function crearEnvios(d: DepsEnvios) {
     return { pedidos: rows.length };
   }
 
-  return { avisar, avisarPedido, despachado, seguir, seguirPendientes, mercadoEnvios, pedirResenas };
+  return { avisar, avisarPedido, avisarEmpleados, despachado, seguir, seguirPendientes, mercadoEnvios, pedirResenas };
 }
 export type Envios = ReturnType<typeof crearEnvios>;
