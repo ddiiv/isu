@@ -10,8 +10,11 @@ import { SeguimientoPublico } from "@/components/pedido/SeguimientoPublico";
 export const metadata: Metadata = { title: "Seguí tu envío", robots: { index: false, follow: false }, referrer: "no-referrer" };
 
 export default async function Seguimiento({ params, searchParams }: { params: Promise<{ numero: string }>; searchParams: Promise<{ t?: string }> }) {
-  const { numero } = await params;
-  const { t } = await searchParams;
-  if (!/^ISU-\d{4,10}$/.test(numero) || typeof t !== "string" || !/^[A-Za-z0-9_-]{24}$/.test(t)) notFound();
-  return <SeguimientoPublico numero={numero} firma={t} />;
+  let crudo = (await params).numero;
+  try { crudo = decodeURIComponent(crudo); } catch { notFound(); }
+  // El botón de WhatsApp pega «ISU-1001?t=…» al final de la URL; si llega con el «?» codificado, viene todo en el número.
+  const [numero, enRuta] = crudo.split("?t=");
+  const t = enRuta ?? (await searchParams).t;
+  if (!/^ISU-\d{4,10}$/.test(numero!) || typeof t !== "string" || !/^[A-Za-z0-9_-]{24}$/.test(t)) notFound();
+  return <SeguimientoPublico numero={numero!} firma={t} />;
 }

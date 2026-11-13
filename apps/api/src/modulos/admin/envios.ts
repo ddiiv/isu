@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { PDFDocument } from "pdf-lib";
 import { CP, NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
-import { ErrorTransporte, type Paquete, type Transportes } from "@isu/envios";
+import { ErrorTransporte, telefonoWhatsapp, type Paquete, type Transportes } from "@isu/envios";
 import type { Almacen } from "@isu/almacen";
 import type { Entorno } from "../../entorno.js";
 import type { Colas } from "../../lib/colas.js";
@@ -391,6 +391,23 @@ export async function rutasEnviosAdmin(app: FastifyInstance, deps: DepsEnviosAdm
     return { ok: true };
   });
 
+  // Mandarle al cliente, ya, el WhatsApp que corresponde al estado del pedido (botón de la ficha).
+  api.post("/v1/admin/envios/:numero/whatsapp", { schema: { params: z.object({ numero: NUMERO }) } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const { rows } = await pool.query<{ estado: string; entrega: string; avisos_whatsapp: boolean; telefono: string; envio: string | null }>(
+      `SELECT p.estado, p.entrega, p.avisos_whatsapp, p.telefono, e.estado AS envio
+         FROM tienda.pedidos p LEFT JOIN tienda.envios e ON e.pedido_id = p.id AND e.activo WHERE p.numero = $1`, [req.params.numero]);
+    const p = rows[0];
+    if (!p) throw new ErrorHttp(404, "no_existe", "No existe ese pedido.");
+    if (!p.avisos_whatsapp) throw new ErrorHttp(409, "sin_permiso", "El cliente no pidió avisos por WhatsApp en la compra.");
+    if (!telefonoWhatsapp(p.telefono)) throw new ErrorHttp(409, "telefono", "El teléfono del pedido no es un celular argentino.");
+    const tipo = tipoAviso(p.estado, p.entrega, p.envio);
+    if (!tipo) throw new ErrorHttp(409, "sin_aviso", "En este estado del pedido no hay un aviso para mandar.");
+    await deps.colas.envios("avisar", { numero: req.params.numero, tipo, quien: a.email }, `wa-${req.params.numero}-${Math.floor(Date.now() / 60_000)}`);
+    await auditar(pool, a, "whatsapp_a_mano", "pedido", null, { numero: req.params.numero, tipo }, ip(req));
+    return { ok: true, tipo };
+  });
+
   // Detalle del envío de un pedido (para la ficha del pedido).
   api.get("/v1/admin/envios/:numero", { schema: { params: z.object({ numero: NUMERO }) } }, async (req) => {
     await exigir(pool, req);
@@ -410,4 +427,13 @@ export async function rutasEnviosAdmin(app: FastifyInstance, deps: DepsEnviosAdm
       eventos, avisos, paquete,
     };
   });
+}
+
+/** El aviso que corresponde a cómo está el pedido (el botón «Mandar por WhatsApp»). */
+export function tipoAviso(estado: string, entrega: string, envio: string | null) {
+  if (entrega !== "envio") return null;
+  if (estado === "pagado") return "pago_recibido";
+  if (estado === "entregado") return "entregado";
+  if (estado !== "enviado") return null;
+  return envio === "en_sucursal" ? "en_sucursal" : envio === "en_reparto" ? "llega_hoy" : envio === "no_entregado" ? "no_entregado" : "en_camino";
 }
