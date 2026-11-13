@@ -5,6 +5,7 @@ import { Suspense, useState } from "react";
 import { api, fotoUrl, pesos, useDatos } from "@/lib/api";
 import { Boton, Cargando, claseEntrada, Insignia, Mensaje, Paginador, Titulo, useAviso } from "@/components/ui";
 import { puede, useYo } from "@/components/Marco";
+import { CatalogoWhatsapp } from "@/components/CatalogoWhatsapp";
 import { nombresCategorias, type Categoria, type FilaProducto } from "@/lib/catalogo";
 
 const FILTROS: Array<[string, string]> = [
@@ -94,7 +95,12 @@ function Productos() {
   const todosElegidos = todos.length > 0 && todos.every((p) => elegidos.has(p.id));
   return (
     <>
-      <Titulo acciones={operador && <Boton variante="borde" onClick={() => api("sincronizar-catalogo", { metodo: "POST" }).then(() => aviso.ok("Se pidió el catálogo a Stocker: en un minuto está al día."), aviso.error)}>Traer cambios de Stocker</Boton>}>Productos</Titulo>
+      <Titulo acciones={operador && (
+        <span className="flex flex-wrap items-start gap-2">
+          <CatalogoWhatsapp aviso={aviso} />
+          <Boton variante="borde" onClick={() => api("sincronizar-catalogo", { metodo: "POST" }).then(() => aviso.ok("Se pidió el catálogo a Stocker: en un minuto está al día."), aviso.error)}>Traer cambios de Stocker</Boton>
+        </span>
+      )}>Productos</Titulo>
       <div className="mb-4 flex flex-wrap gap-2">
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); ir({ q, pagina: null }); }}>
           <input className={`${claseEntrada} w-64`} placeholder="Nombre o artículo" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" />

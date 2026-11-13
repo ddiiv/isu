@@ -64,6 +64,11 @@ hacer una vez (cuentas de Google, día del cambio de dominio).
 3. **WhatsApp Manager** → el número mayorista → *Catálogo*: conectá ese catálogo y dejá visible el ícono de carrito.
 4. **Conjuntos**: uno por género y tipo ("Hombre · Pantalones"), con dos filtros: *Tipo de producto contiene* `Hombre > Pantalones` y *Etiqueta personalizada 0 es* `principal`.
 
+**Actualizar ya, sin esperar la hora** (los productos nuevos, por ejemplo): Backoffice → Productos → **«Actualizar catálogo de WhatsApp»**. Le pide a Meta que traiga el feed en ese momento (rol operador; una vez cada 10 minutos) y abajo muestra la última carga de Meta. Tarda unos minutos en verse en WhatsApp. Lo mismo a mano: Commerce Manager → la fuente de datos → *Pedir actualización ahora*.
+El botón aparece cuando la **API** tiene:
+- `META_CATALOGO_FEED_ID`: el id de la fuente de datos (Commerce Manager → Fuentes de datos → la fuente → *Configuración*).
+- `META_CATALOGO_TOKEN`: el token de un usuario del sistema (business.facebook.com → Configuración del negocio → Usuarios del sistema) con el permiso `catalog_management` y acceso al catálogo. No es el token de WhatsApp.
+
 ## El día del cambio de dominio (Jumpseller → tienda nueva)
 
 > **Clave:** que la tienda nueva quede en **el mismo dominio** (`www.isuwaya.com`). Así las redirecciones hacen su trabajo y Google no pierde nada. Si va a otro dominio, también hay que redirigir el dominio viejo entero al nuevo (Cloudflare → *Redirect Rules*) y avisar en Search Console (*Cambio de dirección*).

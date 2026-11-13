@@ -34,6 +34,7 @@ let app: Awaited<ReturnType<typeof construirApp>>;
 let sim: Simulador;
 let transportes: ReturnType<typeof crearTransportes>;
 
+const cargasMeta: string[] = [];
 const enviados: Array<{ tipo: string; nombre: string; datos: Record<string, unknown> }> = [];
 const colas: Colas = {
   async email(plantilla, para, datos) { enviados.push({ tipo: "email", nombre: plantilla, datos: { ...datos, para } }); },
@@ -101,6 +102,17 @@ beforeAll(async () => {
     }
     return json(res, 404, {});
   });
+  // Meta (Graph API) para el botón «Actualizar catálogo de WhatsApp».
+  const urlMeta = await levantar(async (req, res) => {
+    if (req.headers.authorization !== `Bearer ${"m".repeat(30)}`) return json(res, 401, { error: { message: "token" } });
+    if (req.url === "/v22.0/123456789/uploads" && req.method === "POST") {
+      let b = ""; for await (const c of req) b += c;
+      cargasMeta.push(new URLSearchParams(b).get("url") ?? "");
+      return json(res, 200, { id: "999" });
+    }
+    if (req.url?.startsWith("/v22.0/123456789/uploads?")) return json(res, 200, { data: [{ id: "999", start_time: "2026-11-13T12:00:00+0000" }] });
+    return json(res, 404, {});
+  });
   transportes = crearTransportes({ NODE_ENV: "test", TRANSPORTES_SIMULADOR: sim.url, MP_API_URL: `${sim.url}/mp`, MP_ACCESS_TOKEN: TOKEN_MP });
   app = await construirApp({
     env: leerEntorno({
@@ -108,6 +120,7 @@ beforeAll(async () => {
       STOCKER_API_URL: urlStocker, STOCKER_TOKEN: "s".repeat(30), MP_ACCESS_TOKEN: TOKEN_MP, MP_API_URL: urlMp, MP_WEBHOOK_SECRET: "secreto-de-prueba-de-mp",
       INTERNO_TOKEN: INTERNO, PAGOS_TOKEN: "p".repeat(40), COMPROBANTES_DIR: await mkdtemp(path.join(os.tmpdir(), "etq-")),
       SITIO_URL: "https://www.isuwaya.test", API_PUBLICA_URL: "https://api.isuwaya.test",
+      META_CATALOGO_TOKEN: "m".repeat(30), META_CATALOGO_FEED_ID: "123456789", META_GRAPH_URL: urlMeta,
     }),
     pool, redis, colas, transportes,
   });
@@ -695,3 +708,17 @@ describe("peso y medidas de los productos (backoffice)", () => {
     }
   });
 });
+
+describe("catálogo de WhatsApp (botón de Productos)", () => {
+  it("le pide a Meta que traiga el feed, una vez cada 10 minutos, sólo operador", async () => {
+    const estado = await get("/v1/admin/catalogo-whatsapp", adm(adminLectura));
+    expect(estado.json()).toEqual({ configurado: true, ultima: { inicio: "2026-11-13T12:00:00+0000", fin: null } });
+    expect((await post("/v1/admin/catalogo-whatsapp/actualizar", {}, adm(adminLectura))).statusCode).toBe(403);
+    const r = await post("/v1/admin/catalogo-whatsapp/actualizar", {}, adm(adminOperador));
+    expect(r.statusCode, r.body).toBe(200);
+    expect(cargasMeta).toEqual(["https://www.isuwaya.test/feed/whatsapp.xml"]);
+    expect((await post("/v1/admin/catalogo-whatsapp/actualizar", {}, adm(adminOperador))).statusCode).toBe(429);
+    expect(cargasMeta).toHaveLength(1);
+  });
+});
+
