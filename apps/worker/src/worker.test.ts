@@ -48,9 +48,17 @@ describe("notificaciones/whatsapp", () => {
     const r = await p(job({ telefono: "5491155551234", plantilla: "aviso_en_camino", parametros: ["Ana"], boton: "ISU-1001?t=x", respaldo: { plantilla: "pedido_en_camino", parametros: ["Ana", "enlace"] } }));
     expect(r).toEqual({ id: "wamid.1", respaldo: true });
     expect(llamadas).toEqual([
-      ["5491155551234", "aviso_en_camino", ["Ana"], "ISU-1001?t=x"],
-      ["5491155551234", "pedido_en_camino", ["Ana", "enlace"]],
+      ["5491155551234", "aviso_en_camino", ["Ana"], "ISU-1001?t=x", undefined],
+      ["5491155551234", "pedido_en_camino", ["Ana", "enlace"], undefined],
     ]);
+    // Con el PDF del pedido: lo arma el worker y va en la cabecera; si no se puede armar, sale el respaldo (con su botón).
+    llamadas.length = 0;
+    const conPdf = crearProcesadores(undefined, { whatsapp, pdfPedido: async (n) => (n === "ISU-1001" ? Buffer.from("%PDF-1") : null) }).notificaciones!.whatsapp!;
+    await conPdf(job({ telefono: "5491155551234", plantilla: "aviso_pedido_pagado", parametros: ["Ana"], boton: "b", documento: "ISU-1001" }));
+    expect(llamadas[0]!.slice(1)).toEqual(["aviso_pedido_pagado", ["Ana"], "b", { contenido: Buffer.from("%PDF-1"), archivo: "pedido-ISU-1001.pdf" }]);
+    llamadas.length = 0;
+    await conPdf(job({ telefono: "5491155551234", plantilla: "aviso_pedido_pagado", parametros: ["Ana"], boton: "b", documento: "ISU-9999", respaldo: { plantilla: "aviso_pago_recibido", parametros: ["Ana"], boton: "b" } }));
+    expect(llamadas).toEqual([["5491155551234", "aviso_pago_recibido", ["Ana"], "b"]]);
     // Sin respaldo, el rechazo no se reintenta.
     await expect(p(job({ telefono: "5491155551234", plantilla: "aviso_en_camino", parametros: [] }))).rejects.toMatchObject({ sinReintento: true });
   });

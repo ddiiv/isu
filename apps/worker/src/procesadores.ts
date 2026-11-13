@@ -32,7 +32,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/carritos-abandonados  cada 10 minutos: purga los carritos viejos y manda el recordatorio (un solo mail) a quien lo pidió.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
- * envios/empleados       venta pagada: el WhatsApp a los empleados para que la armen (API).
+ * envios/empleados       venta pagada: al grupo de WhatsApp de los empleados, por el portal mayorista (API).
  * envios/avisar          un WhatsApp: «pago recibido» (API) o el que se manda a mano desde el pedido.
  * envios/preparar        prepara solo el envío de un pedido recién pagado (lo hace la API).
  * pagos/vencer · pagos/conciliar-mp · pagos/conciliar-transferencias   los corre la API (tiene la lógica del pedido);
@@ -57,6 +57,8 @@ export interface Extras {
   envios?: Envios;
   carritos?: Carritos;
   whatsapp?: Whatsapp | null;
+  /** El PDF del pedido para el cliente (cabecera de «aviso_pedido_pagado»); null si el pedido no existe. */
+  pdfPedido?: (numero: string) => Promise<Buffer | null>;
 }
 
 const NUMERO = /^ISU-\d{4,10}$/;
@@ -170,17 +172,23 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         const plantilla = String(t.data?.plantilla ?? "");
         const parametros = Array.isArray(t.data?.parametros) ? (t.data.parametros as unknown[]).map((p) => String(p).slice(0, 600)).slice(0, 10) : [];
         const boton = typeof t.data?.boton === "string" ? t.data.boton.slice(0, 200) : undefined;
-        const respaldo = t.data?.respaldo as { plantilla?: unknown; parametros?: unknown } | undefined;
+        const respaldo = t.data?.respaldo as { plantilla?: unknown; parametros?: unknown; boton?: unknown } | undefined;
+        const documento = typeof t.data?.documento === "string" && NUMERO.test(t.data.documento) ? t.data.documento : null;
         if (!/^549\d{10}$/.test(tel)) throw sinReintento("Teléfono inválido");
+        const wa = extras.whatsapp;
         try {
-          return await extras.whatsapp.plantilla(tel, plantilla, parametros, boton);
+          // El PDF del pedido para la cabecera; si no se puede armar, sale el respaldo (sin PDF).
+          const pdf = documento ? await extras.pdfPedido?.(documento).catch(() => null) : null;
+          if (documento && !pdf) throw Object.assign(new Error("No se pudo armar el PDF del pedido"), { reintentable: false });
+          return await wa.plantilla(tel, plantilla, parametros, boton, pdf ? { contenido: pdf, archivo: `pedido-${documento}.pdf` } : undefined);
         } catch (e) {
           // Meta rechaza (plantilla no aprobada, número sin WhatsApp): reintentar no lo arregla.
           if ((e as { reintentable?: boolean }).reintentable !== false) throw e;
-          // La plantilla nueva todavía en revisión (o pausada): sale la de antes, sin botón.
+          // La plantilla nueva todavía en revisión (o pausada): sale la de antes.
           if (respaldo && typeof respaldo.plantilla === "string" && Array.isArray(respaldo.parametros)) {
             try {
-              return { ...await extras.whatsapp.plantilla(tel, respaldo.plantilla, respaldo.parametros.map((p) => String(p).slice(0, 200)).slice(0, 10)), respaldo: true };
+              const b = typeof respaldo.boton === "string" ? respaldo.boton.slice(0, 200) : undefined;
+              return { ...await wa.plantilla(tel, respaldo.plantilla, respaldo.parametros.map((p) => String(p).slice(0, 600)).slice(0, 10), b), respaldo: true };
             } catch (e2) {
               if ((e2 as { reintentable?: boolean }).reintentable === false) throw Object.assign(e2 as Error, { sinReintento: true });
               throw e2;

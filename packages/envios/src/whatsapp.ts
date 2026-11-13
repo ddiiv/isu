@@ -35,17 +35,34 @@ export function telefonoWhatsapp(crudo: string): string | null {
 }
 
 export interface Whatsapp {
-  /** boton: lo que va al final de la URL del botón (plantillas con botón de enlace dinámico). */
-  plantilla(telefono: string, nombre: string, parametros: string[], boton?: string): Promise<{ id: string | null }>;
+  /**
+   * boton: lo que va al final de la URL del botón (plantillas con botón de enlace dinámico).
+   * documento: el PDF de la cabecera (plantillas con documento): se sube a Meta y va por su id, nunca por un enlace público.
+   */
+  plantilla(telefono: string, nombre: string, parametros: string[], boton?: string, documento?: { contenido: Buffer; archivo: string }): Promise<{ id: string | null }>;
 }
 
 export function whatsapp(c: ConfigWhatsapp): Whatsapp {
   const url = `${c.url.replace(/\/+$/, "")}/${c.version}/${encodeURIComponent(c.telefonoId)}/messages`;
   return {
-    async plantilla(telefono, nombre, parametros, boton) {
+    async plantilla(telefono, nombre, parametros, boton, documento) {
       const to = telefonoWhatsapp(telefono);
       if (!to) throw new ErrorTransporte("whatsapp", "el teléfono no es un celular argentino", null, false);
       if (!/^[a-z0-9_]{1,512}$/.test(nombre)) throw new ErrorTransporte("whatsapp", "nombre de plantilla inválido", null, false);
+      let media: string | null = null;
+      if (documento) {
+        const fd = new FormData();
+        fd.append("messaging_product", "whatsapp");
+        fd.append("type", "application/pdf");
+        fd.append("file", new Blob([new Uint8Array(documento.contenido)], { type: "application/pdf" }), documento.archivo);
+        let r: Response;
+        try {
+          r = await fetch(url.replace(/\/messages$/, "/media"), { method: "POST", headers: { authorization: `Bearer ${c.token}` }, body: fd, redirect: "error", signal: AbortSignal.timeout(20_000) });
+        } catch (e) { throw new ErrorTransporte("whatsapp", `sin respuesta al subir el PDF (${(e as Error).message})`); }
+        const j = await r.json().catch(() => ({})) as { id?: string; error?: { message?: string } };
+        if (!r.ok || !j.id) throw new ErrorTransporte("whatsapp", `Meta no aceptó el PDF: ${j.error?.message ?? r.status}`, r.status, r.status >= 500);
+        media = j.id;
+      }
       const r = await pedir<{ messages?: Array<{ id?: string }> }>("whatsapp", url, {
         method: "POST", headers: { authorization: `Bearer ${c.token}` },
         cuerpo: {
@@ -53,6 +70,7 @@ export function whatsapp(c: ConfigWhatsapp): Whatsapp {
           template: {
             name: nombre, language: { code: c.idioma },
             components: [
+              ...media ? [{ type: "header", parameters: [{ type: "document", document: { id: media, filename: documento!.archivo } }] }] : [],
               ...parametros.length ? [{ type: "body", parameters: parametros.map((p) => ({ type: "text", text: p.slice(0, 600) })) }] : [],
               ...boton ? [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: boton }] }] : [],
             ],
