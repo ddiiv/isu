@@ -1,7 +1,8 @@
 import type pg from "pg";
 import { avanza, enlaceOpinar, enlaceSeguimiento, firmaSeguimiento, telefonoWhatsapp, type Adaptador, type EstadoEnvio, type Transportes } from "@isu/envios";
 import { NOMBRE_TRANSPORTE, type TransporteTienda } from "@isu/shared";
-import { cargarPedido } from "../correo/pedido.js";
+import { cargarPedido, type PedidoVenta } from "../correo/pedido.js";
+import { pdfPedido } from "../correo/pdf.js";
 
 /*
  * Envíos del lado del worker (etapa 4):
@@ -26,9 +27,11 @@ export type TipoAviso = (typeof TIPOS_AVISO)[number];
  * envío» (https://www.isuwaya.com/seguimiento/{{1}}, con {{1}} = ISU-1042?t=…)
  * y el código de seguimiento en el texto. Mientras Meta no las apruebe, el
  * worker manda la «pedido_*» de antes (respaldo, sin botón).
+ * «aviso_pedido_pagado» lleva además el PDF del pedido (lo arma el trabajo de
+ * WhatsApp); su respaldo es «aviso_pago_recibido», con botón y sin PDF.
  */
 const PLANTILLA_WA: Record<TipoAviso, { nueva: string | null; vieja: string | null }> = {
-  pago_recibido: { nueva: "aviso_pago_recibido", vieja: null },
+  pago_recibido: { nueva: "aviso_pedido_pagado", vieja: "aviso_pago_recibido" },
   en_camino: { nueva: "aviso_en_camino", vieja: "pedido_en_camino" },
   en_sucursal: { nueva: "aviso_en_sucursal", vieja: "pedido_en_sucursal" },
   llega_hoy: { nueva: "aviso_llega_hoy", vieja: "pedido_llega_hoy" },
@@ -45,8 +48,8 @@ export interface DepsEnvios {
   encolarStocker: (nombre: "envio", datos: Record<string, unknown>, id: string) => Promise<unknown>;
   sitio: string | undefined;
   secreto: string | undefined;
-  /** EMPLEADOS_WHATSAPP: a quiénes avisar cada venta para que la armen (vacío = a nadie). */
-  empleados?: string[];
+  /** Publica en el grupo de WhatsApp de los empleados (por el portal mayorista); sin él no se avisa. Tira error si no salió. */
+  grupo?: (m: { texto: string; pdf: Buffer; archivo: string }) => Promise<void>;
   log?: Pick<Console, "warn">;
 }
 
@@ -59,20 +62,16 @@ const TITULO_AVISO: Record<TipoAviso, string> = {
   pago_recibido: "pago recibido", en_camino: "en camino", en_sucursal: "en sucursal", llega_hoy: "llega hoy", entregado: "entregado", no_entregado: "no entregado",
 };
 
-/*
- * «Remera Oversize Negro M x2 · Jogger Gris L x1», en una línea (Meta no acepta saltos de línea en un
- * parámetro) y cortada para que entre en el mensaje: lo que no entra, en el backoffice.
- */
-export function prendas(items: Array<{ nombre: string; color: string | null; talle: string | null; cantidad: number }>, tope = 550) {
-  const partes = items.map((i) => [i.nombre, i.color, i.talle].filter(Boolean).join(" ").replace(/\s+/g, " ") + ` x${i.cantidad}`);
-  let texto = "";
-  for (const [n, parte] of partes.entries()) {
-    const resto = partes.length - n - 1;
-    const sigue = texto ? `${texto} · ${parte}` : parte;
-    if (sigue.length + (resto ? 20 : 0) > tope) return `${texto} · y ${partes.length - n} más`;
-    texto = sigue;
-  }
-  return texto;
+/** El mensaje de una venta para el grupo de los empleados (va con el PDF del pedido). */
+export function textoParaElGrupo(p: PedidoVenta) {
+  const entrega = p.entrega === "retiro" ? `Retira en el local${p.local ? ` ${p.local}` : ""}`
+    : `${p.transporte ?? "Envío"}${p.sucursal ? ` a sucursal · ${p.sucursal}` : ` a domicilio · ${p.direccion ?? ""}`}`;
+  return [
+    `*Venta ${p.numero} · tienda minorista (isuwaya.com)* — pagada, para armar`,
+    `${p.nombre} · Tel. ${p.telefono}`,
+    `Entrega: ${entrega}`,
+    ...p.items.map((i) => `· ${[i.nombre, i.color, i.talle].filter(Boolean).join(" ")} x${i.cantidad}`),
+  ].join("\n").slice(0, 2900);
 }
 
 const FINALES: EstadoEnvio[] = ["entregado", "devuelto", "cancelado"];
@@ -129,16 +128,18 @@ export function crearEnvios(d: DepsEnvios) {
       no_entregado: [primerNombre, p.numero, transporte],
     };
     const vieja: Record<TipoAviso, string[]> = {
-      pago_recibido: [],
+      pago_recibido: [primerNombre, p.numero],
       en_camino: [primerNombre, p.numero, transporte, enlace],
       en_sucursal: [primerNombre, p.numero, sucursal ?? transporte, enlace],
       llega_hoy: [primerNombre, p.numero, enlace],
       entregado: [primerNombre, p.numero],
       no_entregado: [primerNombre, p.numero, transporte, enlace],
     };
+    // Una «aviso_*» de respaldo también lleva el botón (y sin el botón no se puede mandar).
+    const respaldo = plantillas.vieja ? { plantilla: plantillas.vieja, parametros: vieja[tipo], ...plantillas.vieja.startsWith("aviso_") ? { boton } : {} } : undefined;
     const mensaje = boton
-      ? { plantilla: plantillas.nueva, parametros: nueva[tipo], boton, respaldo: plantillas.vieja ? { plantilla: plantillas.vieja, parametros: vieja[tipo] } : undefined }
-      : plantillas.vieja ? { plantilla: plantillas.vieja, parametros: vieja[tipo] } : null;
+      ? { plantilla: plantillas.nueva, parametros: nueva[tipo], boton, respaldo, ...tipo === "pago_recibido" ? { documento: p.numero } : {} }
+      : respaldo && !respaldo.plantilla.startsWith("aviso_") ? respaldo : null;
     if (tel && mensaje && (aMano || (await avisosWhatsappActivos() && await nuevo("whatsapp")))) {
       if (aMano) await nuevo("whatsapp");
       await d.encolar("whatsapp", { telefono: tel, ...mensaje }, aMano ? `aviso-${p.id}-${tipo}-wa-${Date.now()}` : `aviso-${p.id}-${tipo}-wa`);
@@ -149,22 +150,19 @@ export function crearEnvios(d: DepsEnvios) {
   }
 
   /**
-   * Venta pagada: el WhatsApp «pedido_para_armar» a cada empleado, con el cliente,
-   * la entrega y las prendas. Una sola vez por pedido.
+   * Venta pagada: al grupo de WhatsApp de los empleados, para armarla, con el
+   * PDF del pedido. Una sola vez por pedido; si el grupo no está (WhatsApp
+   * desconectado), el trabajo reintenta.
    */
   async function avisarEmpleados(numero: string) {
-    const empleados = (d.empleados ?? []).map(telefonoWhatsapp).filter((t): t is string => !!t);
-    if (!empleados.length || !d.transportes.whatsapp) return { omitido: "sin EMPLEADOS_WHATSAPP o sin WhatsApp" };
+    if (!d.grupo) return { omitido: "sin PORTAL_AVISOS_TOKEN" };
     const p = await cargarPedido(d.pool, numero);
     if (!p) return { motivo: "no_existe" };
-    const r = await d.pool.query(
-      "INSERT INTO tienda.avisos (pedido_id, tipo, canal) SELECT id, 'empleados', 'whatsapp' FROM tienda.pedidos WHERE numero = $1 ON CONFLICT DO NOTHING", [numero]);
-    if (!r.rowCount) return { repetido: true };
-    const entrega = p.entrega === "retiro" ? `Retira en el local ${p.local ?? ""}`.trim()
-      : `${p.transporte ?? "Envío"}${p.sucursal ? ` a sucursal · ${p.sucursal}` : ` a domicilio · ${p.direccion ?? ""}`}`;
-    const parametros = [p.numero, `${p.nombre} · ${p.telefono}`, entrega, prendas(p.items)];
-    for (const tel of empleados) await d.encolar("whatsapp", { telefono: tel, plantilla: "pedido_para_armar", parametros }, `empleados-${p.numero}-${tel}`);
-    return { empleados: empleados.length };
+    const ya = await d.pool.query("SELECT 1 FROM tienda.avisos a JOIN tienda.pedidos p ON p.id = a.pedido_id WHERE p.numero = $1 AND a.tipo = 'empleados'", [numero]);
+    if (ya.rowCount) return { repetido: true };
+    await d.grupo({ texto: textoParaElGrupo(p), pdf: await pdfPedido(p, true), archivo: `${p.numero}-pedido.pdf` });
+    await d.pool.query("INSERT INTO tienda.avisos (pedido_id, tipo, canal) SELECT id, 'empleados', 'whatsapp' FROM tienda.pedidos WHERE numero = $1 ON CONFLICT DO NOTHING", [numero]);
+    return { grupo: true };
   }
 
   /** El trabajo envios/avisar: por número de pedido. */

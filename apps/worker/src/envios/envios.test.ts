@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { crearPool, migrar } from "@isu/db";
 import { crearTransportes, firmaOpinarValida, firmaSeguimientoValida } from "@isu/envios";
 import { levantarSimulador, type Simulador } from "@isu/envios/simulador";
-import { crearEnvios, prendas, type Envios } from "./envios.js";
+import { crearEnvios, type Envios } from "./envios.js";
 
 /*
  * Etapa 4 en el worker: el despacho que trae el feed de Stocker, el seguimiento de
@@ -153,15 +153,16 @@ describe("despacho desde Stocker", () => {
 });
 
 describe("WhatsApp: pago recibido y a mano", () => {
-  it("pago recibido: sólo WhatsApp (el mail lo manda la API), una vez, sin respaldo", async () => {
+  it("pago recibido: sólo WhatsApp (el mail lo manda la API), una vez, con el PDF del pedido", async () => {
     const p = await pedido("w1");
     expect(await envios.avisarPedido(p.numero, "pago_recibido", null)).toEqual({ email: false, whatsapp: true });
     expect(await envios.avisarPedido(p.numero, "pago_recibido", null)).toEqual({ email: false, whatsapp: false });
     expect(await avisos(p.id)).toEqual(["pago_recibido:whatsapp"]);
     const wa = cola.filter((c) => c.nombre === "whatsapp");
     expect(wa).toHaveLength(1);
-    expect(wa[0]!.datos).toMatchObject({ plantilla: "aviso_pago_recibido", parametros: ["Ana", p.numero] });
-    expect(wa[0]!.datos.respaldo).toBeUndefined();
+    // Con el PDF del pedido; de respaldo, la que tiene botón y no PDF.
+    expect(wa[0]!.datos).toMatchObject({ plantilla: "aviso_pedido_pagado", parametros: ["Ana", p.numero], documento: p.numero });
+    expect(wa[0]!.datos.respaldo).toEqual({ plantilla: "aviso_pago_recibido", parametros: ["Ana", p.numero], boton: wa[0]!.datos.boton });
   });
   it("a mano: lo vuelve a mandar aunque ya se haya mandado o estén apagados, sin mail, y queda en el historial", async () => {
     const p = await conEnvio("w2");
@@ -189,32 +190,34 @@ describe("WhatsApp: pago recibido y a mano", () => {
   });
 });
 
-describe("WhatsApp a los empleados (venta pagada, para armarla)", () => {
-  it("a cada empleado, una sola vez, con el cliente, la entrega y las prendas", async () => {
-    const conEmpleados = crearEnvios({
+describe("venta pagada al grupo de los empleados (por el portal mayorista)", () => {
+  it("una vez, con el texto y el PDF; si el portal falla, tira (el trabajo reintenta) y no la da por avisada", async () => {
+    const mandados: Array<{ texto: string; pdf: Buffer; archivo: string }> = [];
+    let falla = true;
+    const conGrupo = crearEnvios({
       pool, transportes: crearTransportes({ NODE_ENV: "test", TRANSPORTES_SIMULADOR: sim.url }), encolar: encolar("notificaciones"), encolarStocker: encolar("stocker"),
-      sitio: "https://www.isuwaya.test", secreto: SECRETO, empleados: ["+54 9 11 6922-1390", "11 5555-0000", "no es un teléfono"], log: { warn: () => {} },
+      sitio: "https://www.isuwaya.test", secreto: SECRETO, log: { warn: () => {} },
+      grupo: async (m) => { if (falla) throw new Error("WhatsApp desconectado"); mandados.push(m); },
     });
     const p = await pedido("e1", { servicio_envio: "sucursal", sucursal_envio: { nombre: "Sucursal Flores", direccion: "Rivadavia 1150" } });
     await pool.query("INSERT INTO tienda.pedido_items (pedido_id, sku, nombre, color, talle, precio, cantidad) VALUES ($1, 'A', 'Remera Oversize', 'Negro', 'M', 1000, 2), ($1, 'B', 'Jogger', NULL, 'L', 1000, 1)", [p.id]);
-    expect(await conEmpleados.avisarEmpleados(p.numero)).toEqual({ empleados: 2 });
-    expect(await conEmpleados.avisarEmpleados(p.numero)).toEqual({ repetido: true });
-    const wa = cola.filter((c) => c.nombre === "whatsapp");
-    expect(wa.map((c) => c.datos.telefono)).toEqual(["5491169221390", "5491155550000"]);
-    expect(wa[0]!.datos).toEqual({
-      telefono: "5491169221390", plantilla: "pedido_para_armar",
-      parametros: [p.numero, "Ana María Envío · 11 5555-1234", "Andreani a sucursal · Sucursal Flores · Rivadavia 1150", "Remera Oversize Negro M x2 · Jogger L x1"],
-    });
-    // Sin la lista, a nadie (lo pidió así el negocio).
-    expect(await envios.avisarEmpleados(p.numero)).toEqual({ omitido: "sin EMPLEADOS_WHATSAPP o sin WhatsApp" });
-  });
-  it("muchas prendas: corta y dice cuántas faltan", () => {
-    const items = Array.from({ length: 40 }, (_, i) => ({ nombre: `Remera modelo ${i}`, color: "Negro", talle: "XL", cantidad: 3 }));
-    const t = prendas(items);
-    expect(t.length).toBeLessThanOrEqual(570);
-    expect(t).toMatch(/ · y \d+ más$/);
-    expect(t.startsWith("Remera modelo 0 Negro XL x3 · ")).toBe(true);
-    expect(prendas([{ nombre: "Buzo", color: null, talle: null, cantidad: 1 }])).toBe("Buzo x1");
+    await expect(conGrupo.avisarEmpleados(p.numero)).rejects.toThrow("desconectado");
+    falla = false;
+    expect(await conGrupo.avisarEmpleados(p.numero)).toEqual({ grupo: true });
+    expect(await conGrupo.avisarEmpleados(p.numero)).toEqual({ repetido: true });
+    expect(mandados).toHaveLength(1);
+    expect(mandados[0]!.texto).toBe([
+      `*Venta ${p.numero} · tienda minorista (isuwaya.com)* — pagada, para armar`,
+      "Ana María Envío · Tel. 11 5555-1234",
+      "Entrega: Andreani a sucursal · Sucursal Flores · Rivadavia 1150",
+      "· Remera Oversize Negro M x2",
+      "· Jogger L x1",
+    ].join("\n"));
+    expect(mandados[0]!.pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(mandados[0]!.archivo).toBe(`${p.numero}-pedido.pdf`);
+    expect(cola.filter((c) => c.nombre === "whatsapp")).toHaveLength(0);
+    // Sin la clave del portal, nada.
+    expect(await envios.avisarEmpleados(p.numero)).toEqual({ omitido: "sin PORTAL_AVISOS_TOKEN" });
   });
 });
 

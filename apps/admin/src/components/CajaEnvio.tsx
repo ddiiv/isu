@@ -7,7 +7,7 @@ import { Boton, Insignia, Tarjeta, useAviso } from "./ui";
 /* El envío del pedido en su ficha: transporte, la bolsa, seguimiento, eventos y avisos mandados. */
 const TRANSPORTE: Record<string, string> = { correo_argentino: "Correo Argentino", andreani: "Andreani", oca: "OCA", mercado_envios: "Mercado Envíos", cabify: "Cabify", estandar: "Envío estándar", moto: "Envío en moto" };
 const SERVICIO: Record<string, string> = { domicilio: "a domicilio", sucursal: "a sucursal", en_el_dia: "en el día" };
-const AVISO: Record<string, string> = { empleados: "A los empleados", pago_recibido: "Pago recibido", en_camino: "En camino", en_sucursal: "En sucursal", llega_hoy: "Llega hoy", entregado: "Entregado", no_entregado: "No entregado" };
+const AVISO: Record<string, string> = { empleados: "Al grupo de empleados", pago_recibido: "Pago recibido", en_camino: "En camino", en_sucursal: "En sucursal", llega_hoy: "Llega hoy", entregado: "Entregado", no_entregado: "No entregado" };
 
 interface Datos {
   envios: Array<{ id: number; transporte: string; seguimiento: string | null; estado: string; activo: boolean; tieneEtiqueta: boolean; despachadoEn: string | null; entregadoEn: string | null; ultimoError: string | null; creadoPor: string | null; creadoEn: string; urlSeguimiento: string | null; portal: string | null }>;

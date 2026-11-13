@@ -45,7 +45,7 @@ export interface Simulador {
   correo: Map<string, CargadoCorreo>;
   /** MiCorreo: pagar e imprimir el rótulo de un envío cargado (lo que se hace en su portal). Devuelve el número de seguimiento. */
   rotuloCorreo(extOrderId: string): string | null;
-  mensajes: Array<{ fecha: Date; para: string; plantilla: string; parametros: string[] }>;
+  mensajes: Array<{ fecha: Date; para: string; plantilla: string; parametros: string[]; documento?: { id: string; filename: string } | null; boton?: string | null }>;
   avanzar(seguimiento: string, forzar?: "no_entregado" | "en_sucursal"): Envio | null;
   cerrar(): Promise<void>;
 }
@@ -355,9 +355,18 @@ export async function levantarSimulador(puerto = 0, host = "127.0.0.1"): Promise
       if (wa && req.method === "POST") {
         if (!autorizado(req)) return json(401, { error: { code: 190, message: "Invalid OAuth access token" } });
         if (body.type !== "template" || !body.template?.name) return json(400, { error: { code: 131009, message: "Parameter value is not valid" } });
-        const parametros = (body.template.components?.[0]?.parameters ?? []).map((x: { text: string }) => x.text);
-        mensajes.push({ fecha: new Date(), para: String(body.to), plantilla: body.template.name, parametros });
+        type Comp = { type: string; parameters?: Array<{ text?: string; document?: { id: string; filename: string } }> };
+        const comps = (body.template.components ?? []) as Comp[];
+        const parametros = (comps.find((x) => x.type === "body")?.parameters ?? []).map((x) => String(x.text));
+        const documento = comps.find((x) => x.type === "header")?.parameters?.[0]?.document ?? null;
+        const boton = comps.find((x) => x.type === "button")?.parameters?.[0]?.text ?? null;
+        mensajes.push({ fecha: new Date(), para: String(body.to), plantilla: body.template.name, parametros, documento, boton });
         return json(200, { messaging_product: "whatsapp", contacts: [{ input: body.to, wa_id: body.to }], messages: [{ id: `wamid.${randomBytes(8).toString("hex")}` }] });
+      }
+      // Subida de un PDF (multipart): devuelve el id con que se manda.
+      if (/^\/whatsapp\/v[\d.]+\/\d+\/media$/.test(p) && req.method === "POST") {
+        if (!autorizado(req)) return json(401, { error: { code: 190, message: "Invalid OAuth access token" } });
+        return json(200, { id: `media-${randomBytes(4).toString("hex")}` });
       }
       if (p === "/whatsapp/mensajes") return json(200, mensajes);
 

@@ -277,6 +277,12 @@ describe("WhatsApp", () => {
     expect(r.id).toMatch(/^wamid\./);
     expect(sim.mensajes.at(-1)).toMatchObject({ para: "5491155551234", plantilla: "pedido_en_camino", parametros: ["Ana", "ISU-1001", "Andreani", "https://x"] });
   });
+  it("con botón y con el PDF en la cabecera (subido a Meta y mandado por su id)", async () => {
+    await t.whatsapp!.plantilla("1155551234", "aviso_pedido_pagado", ["Ana", "ISU-1001"], "ISU-1001?t=x", { contenido: Buffer.from("%PDF-1"), archivo: "pedido-ISU-1001.pdf" });
+    const m = sim.mensajes.at(-1)!;
+    expect(m).toMatchObject({ plantilla: "aviso_pedido_pagado", parametros: ["Ana", "ISU-1001"], boton: "ISU-1001?t=x" });
+    expect(m.documento).toEqual({ id: expect.stringMatching(/^media-/), filename: "pedido-ISU-1001.pdf" });
+  });
   it("un teléfono que no es celular argentino no se manda", async () => {
     await expect(t.whatsapp!.plantilla("1234", "pedido_en_camino", [])).rejects.toThrow(/celular/);
     await expect(t.whatsapp!.plantilla("1155551234", "Plantilla Rara!", [])).rejects.toThrow(/plantilla/);

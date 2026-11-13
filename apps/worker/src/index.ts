@@ -11,6 +11,8 @@ import { crearCarritos } from "./correo/carritos.js";
 import { crearInvalidador } from "./stocker/invalidar.js";
 import { crearTransportes } from "@isu/envios";
 import { crearEnvios } from "./envios/envios.js";
+import { cargarPedido } from "./correo/pedido.js";
+import { pdfPedido } from "./correo/pdf.js";
 
 /*
  * Worker: procesa las colas en segundo plano. Es un servicio aparte en
@@ -36,8 +38,10 @@ const env = z.object({
   SMTP_URL: z.string().min(8).optional(),
   CORREO_DE: z.string().min(3).default("Isuwaya <isu.isuwaya@gmail.com>"),
   CORREO_RESPONDER: z.string().email().optional(),
-  // A quiénes les llega por WhatsApp cada venta pagada para armarla (separados por coma). Sin ella, a nadie.
-  EMPLEADOS_WHATSAPP: z.string().max(500).optional(),
+  // Cada venta pagada va al grupo de WhatsApp de los empleados, por el portal mayorista (POST /api/avisos/grupo).
+  // La clave es la AVISOS_TOKEN del portal; sin ella no se avisa al grupo.
+  PORTAL_AVISOS_URL: z.string().url().default("https://isumayoristapedidos-production.up.railway.app"),
+  PORTAL_AVISOS_TOKEN: z.string().min(32).optional(),
   // A dónde va el aviso interno de cada venta de la tienda (con el PDF). Sin ella no se manda.
   CORREO_VENTAS: z.string().email().optional(),
   // Para el link al pedido en el backoffice dentro de ese aviso.
@@ -101,7 +105,16 @@ const envios = crearEnvios({
   encolarStocker: (nombre, datos, id) => colaStocker.add(nombre, datos, { jobId: id, attempts: 12 }),
   sitio: env.SITIO_URL,
   secreto: env.INTERNO_TOKEN,
-  empleados: env.EMPLEADOS_WHATSAPP?.split(",").map((n) => n.trim()).filter(Boolean),
+  grupo: env.PORTAL_AVISOS_TOKEN
+    ? async ({ texto, pdf, archivo }) => {
+      const r = await fetch(`${env.PORTAL_AVISOS_URL.replace(/\/+$/, "")}/api/avisos/grupo`, {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(30_000),
+        headers: { authorization: `Bearer ${env.PORTAL_AVISOS_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ texto, pdf: pdf.toString("base64"), archivo }),
+      });
+      if (!r.ok) throw new Error(`Portal mayorista ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+    }
+    : undefined,
 });
 if (!env.SITIO_URL || !env.INTERNO_TOKEN) console.warn("Sin SITIO_URL / INTERNO_TOKEN: los avisos de envío van sin enlace de seguimiento.");
 
@@ -120,6 +133,7 @@ const procesar = crearProcesar(deps, {
   envios,
   carritos,
   whatsapp: transportes.whatsapp,
+  pdfPedido: async (numero) => { const p = await cargarPedido(pool, numero); return p ? pdfPedido(p) : null; },
 });
 
 const workers = Object.values(COLAS).map((cola) =>
