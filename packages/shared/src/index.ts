@@ -21,4 +21,5 @@ export * from "./direcciones.js";
 export * from "./banners.js";
 export * from "./constantes.js";
 export * from "./consentimiento.js";
+export * from "./medicion.js";
 export * from "./origen.js";
