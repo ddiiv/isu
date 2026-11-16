@@ -1,5 +1,7 @@
 # Textos de las categorías para Google
 
+Desde Isu v1.53 **Niños no tiene subcategorías** y las chombas están en Hombre › Remeras: por eso no hay textos para esas.
+
 Para pegar en **Backoffice → Categorías → Editar** (campos «Título para Google» y «Texto de la categoría»).
 
 - **Título:** la tienda le agrega « · Isuwaya», por eso va de hasta 50 caracteres.
@@ -38,7 +40,7 @@ Comprás online con envíos a todo el país, o retirás gratis en nuestros local
 ## Hombre › Remeras
 **Título:** Remeras y musculosas de hombre
 **Texto:**
-Remeras de hombre Isuwaya: cuello redondo, cuello V, rayadas, bordadas, térmicas y rústicas. También musculosas clásicas, con bordado y sin ruedo.
+Remeras de hombre Isuwaya: cuello redondo, cuello V, rayadas, bordadas, térmicas y rústicas. También musculosas clásicas, con bordado y sin ruedo, y chombas.
 
 Todas con talles reales, del XS al 5XL. Elegí tu talle y tu color, comprá online y te lo enviamos a todo el país, o retiralo gratis en nuestros locales de Flores y de Ingeniero Budge.
 
@@ -62,11 +64,6 @@ Comprá online con envíos a todo el país, o retirá gratis en nuestros locales
 Shorts y bermudas de hombre Isuwaya: de lino, rústicos, baggy, clásicos con dos bolsillos y con cierre. Para el verano y para todos los días.
 
 Fabricamos con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
-
-## Hombre › Chombas
-**Título:** Chombas de hombre
-**Texto:**
-Chombas de hombre Isuwaya, con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
 
 ---
 
@@ -95,23 +92,3 @@ Buzos y camperas de mujer Isuwaya, con talles reales. Comprá online con envíos
 Shorts y bermudas de mujer Isuwaya, con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
 
 ---
-
-## Niños › Remeras
-**Título:** Remeras de niños y niñas
-**Texto:**
-Remeras para niños y niñas Isuwaya, incluidas las térmicas. Con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
-
-## Niños › Pantalones
-**Título:** Pantalones de niños y niñas
-**Texto:**
-Pantalones para niños y niñas Isuwaya, con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
-
-## Niños › Camperas
-**Título:** Camperas de niños y niñas
-**Texto:**
-Camperas para niños y niñas Isuwaya, con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
-
-## Niños › Shorts
-**Título:** Shorts de niños y niñas
-**Texto:**
-Shorts para niños y niñas Isuwaya, con talles reales. Comprá online con envíos a todo el país, o retirá gratis en nuestros locales de Flores y de Ingeniero Budge.
