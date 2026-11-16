@@ -26,13 +26,14 @@ function vigilar(page: Page) {
 }
 
 test.describe("tienda", () => {
-  test("Armá tu outfit y Pedido mayorista siempre a la vista en la barra; Mayorista lleva a MAYORISTA_URL", async ({ page, request }) => {
+  test("Pedido mayorista siempre a la vista en la barra (Mayorista lleva a MAYORISTA_URL); Armá tu outfit en el pie", async ({ page, request }) => {
     await page.goto("/");
     const barra = page.getByRole("banner");
-    await expect(barra.getByRole("link", { name: "Armá tu outfit" })).toBeVisible();
     await expect(barra.getByRole("link", { name: "Pedido mayorista" })).toBeVisible();
     await expect(barra.getByRole("link", { name: "Pedido mayorista" })).toHaveAttribute("href", "/mayorista");
-    await barra.getByRole("link", { name: "Armá tu outfit" }).click();
+    // La barra quedó con lo justo: Armá tu outfit y Nuevos están en el pie.
+    await expect(barra.getByRole("link", { name: "Armá tu outfit" })).toHaveCount(0);
+    await page.getByRole("contentinfo").getByRole("link", { name: "Armá tu outfit" }).click();
     await expect(page).toHaveURL(/\/outfits$/);
     const r = await request.get("/mayorista", { maxRedirects: 0 });
     expect(r.status()).toBe(302);
@@ -40,14 +41,15 @@ test.describe("tienda", () => {
     expect(r.headers()["cache-control"]).toContain("no-store");
   });
 
-  test("Nuevos en la barra y en su página; Destacados en el inicio", async ({ page, isMobile }) => {
+  test("Nuevos en el pie (y en el menú del celular) y en su página; Destacados en el inicio", async ({ page, isMobile }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Destacados" })).toBeVisible();
     if (isMobile) {
       await page.getByRole("button", { name: "Abrir menú" }).click();
       await page.getByRole("dialog", { name: "Menú" }).getByRole("link", { name: "Nuevos", exact: true }).click();
     } else {
-      await page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Nuevos" }).click();
+      await expect(page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Nuevos" })).toHaveCount(0);
+      await page.getByRole("contentinfo").getByRole("link", { name: "Nuevos", exact: true }).click();
     }
     await expect(page).toHaveURL(/\/nuevos$/);
     await expect(page.getByRole("heading", { level: 1, name: "Nuevos" })).toBeVisible();

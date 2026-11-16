@@ -55,7 +55,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
         <a href="#contenido" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:shadow">Saltar al contenido</a>
         <ProveedorCarrito>
           <Anuncio texto={config.anuncio} envioGratisDesde={config.envioGratisDesde} />
-          <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, packsEn: config.packsEn, hayLiquidacion: config.hayLiquidacion, liquidacionEn: config.liquidacionEn, fotos }} />
+          <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, hayLiquidacion: config.hayLiquidacion, fotos }} />
           <main id="contenido">{children}</main>
           <OrigenYCupon />
           <Footer config={config} categorias={categorias} />

@@ -78,9 +78,10 @@ test.describe("Packs y Liquidación por categoría", () => {
   test("Packs: en el menú y en su página, divididos en Hombre, Mujer y Niños", async ({ page }, info) => {
     const errores = vigilar(page);
     if (info.project.name === "escritorio") {
+      // Un solo enlace, sin desplegable: el filtro por género está adentro de la página.
       await page.goto("/");
-      await page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Packs", exact: true }).hover();
-      await expect(page.getByRole("link", { name: "Packs Niños", exact: true })).toBeVisible();
+      await page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Packs", exact: true }).click();
+      await expect(page).toHaveURL(/\/packs$/);
     }
     await page.goto("/packs");
     for (const c of ["Hombre", "Mujer", "Niños"]) await expect(page.getByRole("heading", { name: `Packs ${c}` })).toBeVisible();
@@ -107,6 +108,16 @@ test.describe("Packs y Liquidación por categoría", () => {
     await page.getByRole("link", { name: "Campera Inflable Niños" }).first().click();
     await expect(page).toHaveURL(/\/producto\/campera-inflable-ninos/);
     await expect(page.getByRole("main").getByRole("link", { name: "Liquidación", exact: true })).toBeVisible();
+    // Por temporada: la liquidación de invierno (los datos de muestra) tiene su página y sus pestañas.
+    await page.goto("/liquidacion");
+    const pestanas = page.getByRole("navigation", { name: "Liquidación por temporada" });
+    await expect(pestanas.getByRole("link", { name: "Invierno" })).toBeVisible();
+    await expect(pestanas.getByRole("link", { name: "Verano" })).toHaveCount(0);
+    await pestanas.getByRole("link", { name: "Invierno" }).click();
+    await expect(page).toHaveURL(/\/liquidacion\/invierno$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Liquidación de invierno");
+    await expect(page.getByRole("link", { name: "Campera Inflable Niños" }).first()).toBeVisible();
+    expect((await page.request.get("/liquidacion/verano")).status()).toBe(200);
     // En el menú de la compu.
     if (info.project.name === "escritorio") await expect(page.getByRole("navigation", { name: "Categorías" }).getByRole("link", { name: "Liquidación", exact: true })).toBeVisible();
     expect(errores).toEqual([]);
@@ -114,7 +125,7 @@ test.describe("Packs y Liquidación por categoría", () => {
 });
 
 test.describe("menú del celular", () => {
-  test("al tocar una categoría: sus subcategorías y 1 o 2 fotos; Packs por categoría; Escape vuelve y cierra", async ({ page }, info) => {
+  test("al tocar una categoría: sus subcategorías y 1 o 2 fotos; Packs y Liquidación directos; Escape vuelve y cierra", async ({ page }, info) => {
     test.skip(info.project.name !== "celular", "el menú por niveles es del celular");
     const errores = vigilar(page);
     await page.goto("/");
@@ -123,16 +134,16 @@ test.describe("menú del celular", () => {
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("link", { name: "Ver todo Mujer" })).toBeVisible();
     await expect(menu.getByRole("link", { name: "Remeras y tops" })).toBeVisible();
-    await expect(menu.getByRole("link", { name: "📦 Packs Mujer" })).toBeVisible();
+    await expect(menu.getByRole("link", { name: /Packs/ })).toHaveCount(0);
     const fotos = menu.getByRole("list", { name: "Prendas de Mujer" }).getByRole("listitem");
     expect(await fotos.count()).toBeGreaterThanOrEqual(1);
     expect(await fotos.count()).toBeLessThanOrEqual(2);
     await expect(fotos.first().getByRole("img")).toBeVisible();
-    // Volver al menú y entrar a Packs.
+    // Volver al menú: Packs y Liquidación son enlaces directos.
     await menu.getByRole("button", { name: /Menú/ }).click();
-    await menu.getByRole("button", { name: /^Packs/ }).click();
-    await expect(menu.getByRole("link", { name: "Packs Hombre" })).toBeVisible();
-    // Escape: primero vuelve, después cierra.
+    await expect(menu.getByRole("link", { name: "Packs", exact: true })).toHaveAttribute("href", "/packs");
+    // Escape: desde un panel vuelve al menú, y después cierra.
+    await menu.getByRole("button", { name: /^Hombre/ }).click();
     await page.keyboard.press("Escape");
     await expect(menu.getByRole("link", { name: "Nuevos" })).toBeVisible();
     await page.keyboard.press("Escape");

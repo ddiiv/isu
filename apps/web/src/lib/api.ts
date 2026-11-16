@@ -54,6 +54,7 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   packsEn: [],
   hayLiquidacion: false,
   liquidacionEn: [],
+  liquidacionTemporadas: [],
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
@@ -122,9 +123,9 @@ export async function obtenerNuevos(cantidad = 8): Promise<ListadoProductos> {
 }
 
 /** Colecciones elegidas a mano en el backoffice (casillas "Destacado", "Nuevo" y "Pack") y la Liquidación (descuentos marcados). */
-export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite = 200): Promise<ListadoProductos> {
+export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite = 200, temporada?: "invierno" | "verano"): Promise<ListadoProductos> {
   try {
-    return (await pedirCatalogo(`/v1/productos?coleccion=${cual}&limite=${limite}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
+    return (await pedirCatalogo(`/v1/productos?${new URLSearchParams({ coleccion: cual, limite: String(limite), ...(temporada ? { temporada } : {}) })}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
   } catch (err) {
     console.warn(`[api] ${cual}: ${(err as Error).message}`);
     return LISTADO_VACIO;
@@ -132,8 +133,8 @@ export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" |
 }
 
 /** Etapa 9: los packs o la liquidación de una categoría de arriba (/packs/hombre). null = esa categoría no existe. */
-export async function obtenerColeccionDe(cual: "packs" | "liquidacion", categoria: string): Promise<ListadoProductos | null> {
-  return pedirCatalogo(`/v1/productos?${new URLSearchParams({ coleccion: cual, categoria })}`, ListadoProductos, ["catalogo"]);
+export async function obtenerColeccionDe(cual: "packs" | "liquidacion", categoria: string, temporada?: "invierno" | "verano"): Promise<ListadoProductos | null> {
+  return pedirCatalogo(`/v1/productos?${new URLSearchParams({ coleccion: cual, categoria, ...(temporada ? { temporada } : {}) })}`, ListadoProductos, ["catalogo"]);
 }
 
 /** Etapa 9: 1 o 2 prendas con foto por categoría de arriba, para el menú. Sin API, el menú sale sin fotos. */

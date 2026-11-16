@@ -25,6 +25,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...["/nuevos", "/destacados", "/packs", "/outfits", ...(config.hayLiquidacion ? ["/liquidacion"] : [])].map((p) => ({ url: url(p), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.7 })),
     // Etapa 9: packs y liquidación por categoría (sólo las que tienen algo).
     ...config.packsEn.map((c) => ({ url: url(`/packs/${c}`), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.6 })),
+    ...config.liquidacionTemporadas.map((t) => ({ url: url(`/liquidacion/${t}`), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.6 })),
     ...config.liquidacionEn.map((c) => ({ url: url(`/liquidacion/${c}`), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.6 })),
     // Etapa 13: las que Google puede mostrar como accesos debajo de «Isuwaya».
     ...["/nosotros", "/contacto", "/venta-por-mayor"].map((p) => ({ url: url(p), lastModified: ahora, changeFrequency: "monthly" as const, priority: 0.5 })),

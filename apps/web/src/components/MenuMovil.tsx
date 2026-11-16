@@ -9,17 +9,17 @@ import { SITIO } from "@/lib/sitio";
 import { useSalida } from "@/lib/animacion";
 
 /*
- * Menú del celular: un cajón lateral por niveles. Arriba: Nuevos, Packs,
- * Liquidación y las categorías. Al tocar una categoría (Hombre, Mujer,
- * Niños) se abre su panel: sus subcategorías, 1 o 2 fotos de prendas que la
- * representan y los atajos a sus packs y su liquidación. Packs y
- * Liquidación tienen su panel dividido por categoría.
+ * Menú del celular: un cajón lateral. Arriba, lo justo: las categorías (Hombre,
+ * Mujer, Niños), Packs y Liquidación (enlaces directos: el filtro por género
+ * y temporada está adentro de cada página). Al tocar una categoría con
+ * subcategorías se abre su panel: sus subcategorías y 1 o 2 fotos de prendas
+ * que la representan. Nuevos y Armá tu outfit quedan abajo, más chicos.
  *
  * Los accesos de la fila de abajo del header (MenuAcceso) abren el cajón
  * directo en el panel de esa categoría.
  */
 export interface FotoDelMenu { slug: string; nombre: string; foto: { clave: string; ancho: number | null; alto: number | null; alt: string | null } }
-type Panel = null | "packs" | "liquidacion" | string;
+type Panel = null | string;
 const EVENTO = "isu:menu";
 
 /** Abre el menú del celular en un panel (lo usan los accesos del header). */
@@ -27,8 +27,8 @@ export function MenuAcceso({ panel, children, className }: { panel: string; chil
   return <button type="button" className={className} onClick={() => window.dispatchEvent(new CustomEvent(EVENTO, { detail: panel }))}>{children}</button>;
 }
 
-export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks, hayLiquidacion }: {
-  categorias: CategoriaNodo[]; fotos: Record<string, FotoDelMenu[]>; packsEn: string[]; liquidacionEn: string[]; hayPacks: boolean; hayLiquidacion: boolean;
+export function MenuMovil({ categorias, fotos, hayPacks, hayLiquidacion }: {
+  categorias: CategoriaNodo[]; fotos: Record<string, FotoDelMenu[]>; hayPacks: boolean; hayLiquidacion: boolean;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
@@ -93,13 +93,13 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
             <div key={panel ?? "menu"} className="flex flex-col animate-desliza">
             {panel === null && (
               <>
-                <Link href="/nuevos" className={`${enlace} text-marca`} onClick={cerrar}>Nuevos</Link>
-                {hayPacks && <button type="button" className={`${enlace} text-left text-ahorro`} onClick={() => setPanel("packs")}>Packs {flecha}</button>}
-                {hayLiquidacion && <button type="button" className={`${enlace} text-left text-oferta`} onClick={() => setPanel("liquidacion")}>Liquidación {flecha}</button>}
                 {categorias.map((c) => c.hijas.length || fotos[c.slug]?.length
                   ? <button key={c.id} type="button" className={`${enlace} text-left`} onClick={() => setPanel(c.slug)}>{c.nombre} {flecha}</button>
                   : <Link key={c.id} href={`/${c.slug}`} className={enlace} onClick={cerrar}>{c.nombre}</Link>)}
-                <Link href="/outfits" className="pt-4 text-[15px] font-bold" onClick={cerrar}>Armá tu outfit</Link>
+                {hayPacks && <Link href="/packs" className={`${enlace} text-ahorro`} onClick={cerrar}>Packs</Link>}
+                {hayLiquidacion && <Link href="/liquidacion" className={`${enlace} text-oferta`} onClick={cerrar}>Liquidación</Link>}
+                <Link href="/nuevos" className="pt-4 text-[15px] font-bold" onClick={cerrar}>Nuevos</Link>
+                <Link href="/outfits" className="py-3 text-[15px] font-bold" onClick={cerrar}>Armá tu outfit</Link>
                 <Link href="/locales" className="py-3 text-[15px]" onClick={cerrar}>Nuestros locales</Link>
                 <Link href="/nosotros" className="py-1.5 text-[15px]" onClick={cerrar}>Quiénes somos</Link>
                 <Link href="/contacto" className="py-1.5 text-[15px]" onClick={cerrar}>Contacto</Link>
@@ -113,8 +113,6 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
                 <ul className="mt-3 divide-y divide-linea border-y border-linea text-[17px]">
                   {cat.hijas.map((h) => <li key={h.id}><Link href={`/${cat.slug}/${h.slug}`} className="block py-3" onClick={cerrar}>{h.nombre}</Link></li>)}
                   <li><Link href={`/${cat.slug}`} className="block py-3 font-bold text-marca" onClick={cerrar}>Ver todo {cat.nombre}</Link></li>
-                  {packsEn.includes(cat.slug) && <li><Link href={`/packs/${cat.slug}`} className="block py-3 font-bold text-ahorro" onClick={cerrar}>📦 Packs {cat.nombre}</Link></li>}
-                  {liquidacionEn.includes(cat.slug) && <li><Link href={`/liquidacion/${cat.slug}`} className="block py-3 font-bold text-oferta" onClick={cerrar}>Liquidación {cat.nombre}</Link></li>}
                 </ul>
                 {(fotos[cat.slug]?.length ?? 0) > 0 && (
                   <ul className={`mt-5 grid gap-3 ${fotos[cat.slug]!.length > 1 ? "grid-cols-2" : "grid-cols-1"}`} aria-label={`Prendas de ${cat.nombre}`}>
@@ -133,18 +131,6 @@ export function MenuMovil({ categorias, fotos, packsEn, liquidacionEn, hayPacks,
               </>
             )}
 
-            {(panel === "packs" || panel === "liquidacion") && (
-              <>
-                <p className={`font-display text-3xl ${panel === "packs" ? "text-ahorro" : "text-oferta"}`}>{panel === "packs" ? "Packs" : "Liquidación"}</p>
-                <p className="mt-1 text-sm text-tinta-suave">{panel === "packs" ? "Llevá más, pagá menos: armalos con tus talles y colores." : "Fin de temporada, a precio más bajo."}</p>
-                <ul className="mt-3 divide-y divide-linea border-y border-linea text-[17px]">
-                  {categorias.filter((c) => (panel === "packs" ? packsEn : liquidacionEn).includes(c.slug)).map((c) => (
-                    <li key={c.id}><Link href={`/${panel}/${c.slug}`} className="block py-3" onClick={cerrar}>{panel === "packs" ? "Packs" : "Liquidación"} {c.nombre}</Link></li>
-                  ))}
-                  <li><Link href={`/${panel}`} className="block py-3 font-bold text-marca" onClick={cerrar}>Ver {panel === "packs" ? "todos los packs" : "toda la liquidación"}</Link></li>
-                </ul>
-              </>
-            )}
             </div>
           </nav>
         </div>,

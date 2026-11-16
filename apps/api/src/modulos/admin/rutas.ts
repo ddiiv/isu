@@ -728,14 +728,17 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     activo: z.boolean().default(true),
     // Etapa 9: sus productos salen en la sección Liquidación (fin de temporada o lo que se elija liquidar).
     liquidacion: z.boolean().default(false),
-  }).strict().refine((d) => d.alcance !== "categorias" || d.categoriaIds.length > 0, { message: "Elegí al menos una categoría", path: ["categoriaIds"] })
+    // Sólo con liquidación: sale en /liquidacion/invierno o /liquidacion/verano. Sin elegir, sólo en «Toda la liquidación».
+    temporada: z.enum(["invierno", "verano"]).nullable().default(null),
+  }).strict()
+    .refine((d) => !d.temporada || d.liquidacion, { message: "La temporada es sólo para liquidaciones", path: ["temporada"] }).refine((d) => d.alcance !== "categorias" || d.categoriaIds.length > 0, { message: "Elegí al menos una categoría", path: ["categoriaIds"] })
     .refine((d) => d.alcance !== "productos" || d.productoIds.length > 0, { message: "Elegí al menos un producto", path: ["productoIds"] })
     .refine((d) => !d.desde || !d.hasta || new Date(d.hasta) > new Date(d.desde), { message: "La fecha de fin tiene que ser posterior", path: ["hasta"] });
-  const aFila = (d: z.infer<typeof Descuento>) => [d.nombre, d.porcentaje, d.alcance, d.alcance === "categorias" ? d.categoriaIds : [], d.alcance === "productos" ? d.productoIds : [], d.desde, d.hasta, d.activo, d.liquidacion];
+  const aFila = (d: z.infer<typeof Descuento>) => [d.nombre, d.porcentaje, d.alcance, d.alcance === "categorias" ? d.categoriaIds : [], d.alcance === "productos" ? d.productoIds : [], d.desde, d.hasta, d.activo, d.liquidacion, d.temporada];
   api.get("/v1/admin/descuentos", async (req) => {
     await exigir(pool, req);
     const { rows } = await pool.query(
-      `SELECT id, nombre, porcentaje, alcance, categoria_ids AS "categoriaIds", producto_ids AS "productoIds", desde, hasta, activo, liquidacion, creado_por AS "creadoPor",
+      `SELECT id, nombre, porcentaje, alcance, categoria_ids AS "categoriaIds", producto_ids AS "productoIds", desde, hasta, activo, liquidacion, temporada, creado_por AS "creadoPor",
               (activo AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())) AS vigente
          FROM tienda.descuentos ORDER BY activo DESC, id DESC`);
     return { descuentos: rows };
@@ -743,7 +746,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.post("/v1/admin/descuentos", { schema: { body: Descuento } }, async (req, reply) => {
     const a = await exigir(pool, req, "operador");
     const { rows } = await pool.query<{ id: number }>(
-      "INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, categoria_ids, producto_ids, desde, hasta, activo, liquidacion, creado_por) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
+      "INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, categoria_ids, producto_ids, desde, hasta, activo, liquidacion, temporada, creado_por) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
       [...aFila(req.body), a.email]);
     await auditar(pool, a, "crear_descuento", "descuento", rows[0]!.id, req.body, ip(req));
     await invalidar([]);
@@ -752,7 +755,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.put("/v1/admin/descuentos/:id", { schema: { params: z.object({ id: Id }), body: Descuento } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const r = await pool.query(
-      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, liquidacion=$10, actualizado_en=now() WHERE id = $1",
+      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, liquidacion=$10, temporada=$11, actualizado_en=now() WHERE id = $1",
       [req.params.id, ...aFila(req.body)]);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese descuento.");
     await auditar(pool, a, "editar_descuento", "descuento", req.params.id, req.body, ip(req));
@@ -794,7 +797,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   }).strict();
   const AJUSTES: Record<string, z.ZodType> = {
     // hayPacks, packsEn, hayLiquidacion y liquidacionEn no se guardan: salen de los productos y los descuentos.
-    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "direcciones"].includes(k))),
+    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "liquidacionTemporadas", "direcciones"].includes(k))),
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),
