@@ -10,6 +10,7 @@ import type { Invalidador } from "./stocker/invalidar.js";
 import { TIPOS_AVISO, type Envios, type TipoAviso } from "./envios/envios.js";
 import type { Carritos } from "./correo/carritos.js";
 import type { Whatsapp } from "@isu/envios";
+import type { Conversiones } from "./meta/conversiones.js";
 
 /*
  * Qué hace cada trabajo de cada cola.
@@ -32,6 +33,7 @@ import type { Whatsapp } from "@isu/envios";
  * envios/pedir-resenas   cada hora: el mail para opinar de las compras ya entregadas.
  * envios/carritos-abandonados  cada 10 minutos: purga los carritos viejos y manda el recordatorio (un solo mail) a quien lo pidió.
  * envios/mercado-envios  trae el envío que creó Mercado Pago con el pago.
+ * envios/conversion      la compra pagada a la API de conversiones de Meta (la encola la API).
  * envios/empleados       venta pagada: al grupo de WhatsApp de los empleados, por el portal mayorista (API).
  * envios/avisar          un WhatsApp: «pago recibido» (API) o el que se manda a mano desde el pedido.
  * envios/preparar        prepara solo el envío de un pedido recién pagado (lo hace la API).
@@ -57,6 +59,8 @@ export interface Extras {
   envios?: Envios;
   carritos?: Carritos;
   whatsapp?: Whatsapp | null;
+  /** API de conversiones de Meta (sin META_PIXEL_ID y META_CAPI_TOKEN no hay). */
+  conversiones?: Conversiones;
   /** El PDF del pedido para el cliente (cabecera de «aviso_pedido_pagado»); null si el pedido no existe. */
   pdfPedido?: (numero: string) => Promise<Buffer | null>;
 }
@@ -233,7 +237,14 @@ export function crearProcesadores(deps?: Dependencias, extras: Extras = {}): Rec
         if (!NUMERO.test(numero) || !/^\d{1,20}$/.test(pagoId)) throw sinReintento("Datos inválidos");
         return extras.envios.mercadoEnvios(numero, pagoId);
       },
-      // Venta pagada de la tienda: el WhatsApp para que los empleados la armen (lo encola la API).
+      // La compra pagada, a la API de conversiones de Meta (lo encola la API; sin configurar, se omite).
+      conversion: async (t) => {
+        if (!extras.conversiones) return { omitido: "sin META_PIXEL_ID o META_CAPI_TOKEN" };
+        const numero = String(t.data?.numero ?? "");
+        if (!NUMERO.test(numero)) throw sinReintento("Datos inválidos");
+        return extras.conversiones.compra(numero);
+      },
+      // Venta pagada de la tienda: al grupo de WhatsApp de los empleados (lo encola la API).
       empleados: async (t) => {
         if (!extras.envios) throw sinReintento("Envíos sin configurar");
         const numero = String(t.data?.numero ?? "");

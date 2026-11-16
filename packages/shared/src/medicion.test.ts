@@ -13,7 +13,7 @@ describe("medición: Pixel de Meta y Clarity", () => {
     expect(eventoMeta("view_item", { value: 100, items })).toEqual(["ViewContent", { content_type: "product", content_ids: ["SKU1", "SKU2"], currency: "ARS", value: 100 }]);
     expect(eventoMeta("add_to_cart", { items })![0]).toBe("AddToCart");
     expect(eventoMeta("begin_checkout", { value: 5, items })![1]).toMatchObject({ num_items: 3, value: 5 });
-    expect(eventoMeta("purchase", { value: 9, items })).toEqual(["Purchase", { content_type: "product", content_ids: ["SKU1", "SKU2"], currency: "ARS", value: 9, num_items: 3 }]);
+    expect(eventoMeta("purchase", { value: 9, transaction_id: "ISU-1042", items })).toEqual(["Purchase", { content_type: "product", content_ids: ["SKU1", "SKU2"], currency: "ARS", value: 9, num_items: 3 }, "purchase-ISU-1042"]);
     expect(eventoMeta("search", { search_term: "musculosa" })).toEqual(["Search", { search_string: "musculosa" }]);
     expect(eventoMeta("select_item", { items })).toBeNull();
     expect(eventoMeta("search", {})).toBeNull();
