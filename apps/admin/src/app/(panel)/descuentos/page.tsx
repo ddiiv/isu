@@ -10,8 +10,8 @@ import { puede, useYo } from "@/components/Marco";
  * productos, con fechas opcionales. Si a un producto le tocan varios, gana
  * el mayor. El de transferencia se suma aparte, sobre el precio rebajado.
  */
-interface Descuento { id?: number; nombre: string; porcentaje: number; alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; desde: string | null; hasta: string | null; activo: boolean; liquidacion: boolean; vigente?: boolean; creadoPor?: string }
-const vacio: Descuento = { nombre: "", porcentaje: 10, alcance: "todo", categoriaIds: [], productoIds: [], desde: null, hasta: null, activo: true, liquidacion: false };
+interface Descuento { id?: number; nombre: string; porcentaje: number; alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; desde: string | null; hasta: string | null; activo: boolean; liquidacion: boolean; temporada?: "invierno" | "verano" | null; vigente?: boolean; creadoPor?: string }
+const vacio: Descuento = { nombre: "", porcentaje: 10, alcance: "todo", categoriaIds: [], productoIds: [], desde: null, hasta: null, activo: true, liquidacion: false, temporada: null };
 // <input type="datetime-local"> trabaja en hora local, sin zona.
 const aLocal = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const deLocal = (v: string) => (v ? new Date(v).toISOString() : null);
@@ -52,7 +52,7 @@ export default function Descuentos() {
           <ul className="divide-y divide-linea">
             {datos.descuentos.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-                <span><span className="font-bold">{d.nombre}</span> <Insignia clase="bg-oferta text-white">-{d.porcentaje}%</Insignia> {d.liquidacion && <Insignia clase="bg-tinta text-white">Liquidación</Insignia>} {d.vigente ? <Insignia clase="bg-ahorro-claro text-ahorro">Vigente</Insignia> : <Insignia>{d.activo ? "Fuera de fecha" : "Pausado"}</Insignia>}
+                <span><span className="font-bold">{d.nombre}</span> <Insignia clase="bg-oferta text-white">-{d.porcentaje}%</Insignia> {d.liquidacion && <Insignia clase="bg-tinta text-white">Liquidación{d.temporada ? ` de ${d.temporada}` : ""}</Insignia>} {d.vigente ? <Insignia clase="bg-ahorro-claro text-ahorro">Vigente</Insignia> : <Insignia>{d.activo ? "Fuera de fecha" : "Pausado"}</Insignia>}
                   <br /><span className="text-xs text-tinta-tenue">{alcance(d)} · {d.desde ? `desde ${fecha(d.desde)}` : "desde ya"} · {d.hasta ? `hasta ${fecha(d.hasta)}` : "sin fin"}</span></span>
                 {operador && <span className="flex flex-wrap gap-2">
                   <Boton variante="texto" onClick={() => setF({ ...d })}>Editar</Boton>
@@ -95,7 +95,14 @@ export default function Descuentos() {
               </div>
               <Casilla etiqueta="Activo" marcada={f.activo} onChange={(v) => setF({ ...f, activo: v })} />
               <Casilla etiqueta="Es liquidación" ayuda="Sus productos salen en la sección Liquidación del menú (por categoría) y con la etiqueta «Liquidación». Para fin de temporada o lo que quieras liquidar."
-                marcada={f.liquidacion ?? false} onChange={(v) => setF({ ...f, liquidacion: v })} />
+                marcada={f.liquidacion ?? false} onChange={(v) => setF({ ...f, liquidacion: v, temporada: v ? f.temporada ?? null : null })} />
+              {f.liquidacion && (
+                <Campo etiqueta="Temporada" ayuda="Sale en Liquidación de invierno o de verano. Sin elegir, sólo aparece en «Toda la liquidación».">
+                  <select className={claseEntrada} value={f.temporada ?? ""} onChange={(e) => setF({ ...f, temporada: e.target.value === "invierno" || e.target.value === "verano" ? e.target.value : null })}>
+                    <option value="">Sin temporada</option><option value="invierno">Invierno</option><option value="verano">Verano</option>
+                  </select>
+                </Campo>
+              )}
               <div className="flex gap-2"><Boton type="submit">Guardar</Boton><Boton variante="borde" onClick={() => setF(null)}>Cancelar</Boton></div>
             </form>
           </Tarjeta>

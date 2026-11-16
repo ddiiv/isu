@@ -78,8 +78,8 @@ await pool.query(`INSERT INTO tienda.cupones (codigo, nombre, tipo, valor, minim
 // ── Etapa 8: packs, composición, opiniones de muestra y portada ──
 console.warn(`Packs: ${await porNombre("pack", ["Remera Oversize Algodón Peinado", "Remera Básica Cuello Redondo", "Top Deportivo Ribb", "Musculosa Morley", "Bermuda Rústica con Bolsillos", "Remera Estampada Niños"])}`);
 // Etapa 9: Liquidación de fin de temporada (un descuento marcado como liquidación), en las tres categorías.
-await pool.query(`INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, producto_ids, liquidacion, creado_por)
-  SELECT 'Liquidación de invierno (demo)', 35, 'productos', array_agg(id), true, 'demo' FROM tienda.productos
+await pool.query(`INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, producto_ids, liquidacion, temporada, creado_por)
+  SELECT 'Liquidación de invierno (demo)', 35, 'productos', array_agg(id), true, 'invierno', 'demo' FROM tienda.productos
    WHERE nombre IN ('Campera Rompevientos Liviana', 'Buzo Crop Friza', 'Campera Inflable Niños', 'Pantalón Cargo Gabardina') HAVING count(*) > 0`);
 await pool.query("UPDATE tienda.productos SET composicion = '100% algodón jersey' WHERE nombre IN ('Remera Oversize Algodón Peinado', 'Remera Básica Cuello Redondo') AND composicion IS NULL");
 await pool.query("DELETE FROM tienda.pedidos WHERE email LIKE 'demo-resena-%@isuwaya.test'");

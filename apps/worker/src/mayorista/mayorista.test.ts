@@ -77,11 +77,12 @@ describe("importar del mayorista", () => {
     const plan = await planificar(pool, mayorista);
     expect(plan.productos.map((p) => p.categorias)).toEqual([["mujer/remeras-y-tops"], ["hombre/buzos-y-camperas"], ["ninos/shorts"]]);
     await aplicar(pool, almacenEnDisco(dir, PATRON_FOTOS), plan, descargar);
+    // Niños ya no tiene subcategorías (se unificaron): «ninos/shorts» cae en Niños.
     const { rows } = await pool.query(
-      `SELECT p.categorias_fijas, array_agg(pa.slug || '/' || c.slug) AS rutas FROM tienda.productos p
+      `SELECT p.categorias_fijas, array_agg(c.slug) AS rutas FROM tienda.productos p
          JOIN tienda.producto_categorias pc ON pc.producto_id = p.id JOIN tienda.categorias c ON c.id = pc.categoria_id
-         JOIN tienda.categorias pa ON pa.id = c.padre_id WHERE p.id = $1 GROUP BY 1`, [await id(BASE + 3)]);
-    expect(rows).toEqual([{ categorias_fijas: true, rutas: ["ninos/shorts"] }]);
+        WHERE p.id = $1 GROUP BY 1`, [await id(BASE + 3)]);
+    expect(rows).toEqual([{ categorias_fijas: true, rutas: ["ninos"] }]);
   });
 
   it("fotos: la principal primero (con su color), las de color a su color, las sin color generales; la de un color que no se vende no entra", async () => {

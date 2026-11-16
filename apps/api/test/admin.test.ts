@@ -75,7 +75,7 @@ async function producto(n: number, nombre: string, cat: string, categoria: strin
   const slug = `qa-adm-${n}`;
   const p = await pool.query(
     `INSERT INTO tienda.productos (stocker_id, stocker_padre, nombre, slug, visible, stocker_categoria, categoria_id)
-     VALUES ($1,$2,$3,$4,true,$5,(SELECT h.id FROM tienda.categorias h JOIN tienda.categorias p ON p.id = h.padre_id WHERE p.slug || '/' || h.slug = $6)) RETURNING id, categoria_id`,
+     VALUES ($1,$2,$3,$4,true,$5,COALESCE((SELECT h.id FROM tienda.categorias h JOIN tienda.categorias p ON p.id = h.padre_id WHERE p.slug || '/' || h.slug = $6), (SELECT id FROM tienda.categorias WHERE slug = $6 AND padre_id IS NULL))) RETURNING id, categoria_id`,
     [BASE + n, `QA-ADM-${n}`, nombre, slug, categoria, cat]);
   const id = p.rows[0].id;
   await pool.query("INSERT INTO tienda.producto_categorias VALUES ($1,$2)", [id, p.rows[0].categoria_id]);
@@ -166,7 +166,7 @@ beforeAll(async () => {
   ]);
   await producto(2, "Jogger qa adm frisa", "mujer/pantalones-y-calzas", "Joggers", [["gris", "#8a8a8a", "M", 2_000_000, 4], ["verde", "#2e7d4f", "M", 2_000_000, 4]]);
   await producto(3, "Campera qa adm puffer", "mujer/buzos-y-camperas", "Camperas", [["negro", "#111111", "M", 5_000_000, 2]]);
-  await producto(4, "Remera qa adm nena", "ninos/remeras", "Remeras", [["rosa", "#f2a7bd", "8", 700_000, 5], ["rosa", "#f2a7bd", "10", 700_000, 5]]);
+  await producto(4, "Remera qa adm nena", "ninos", "Remeras", [["rosa", "#f2a7bd", "8", 700_000, 5], ["rosa", "#f2a7bd", "10", 700_000, 5]]);
   await producto(5, "Top qa adm crop", "mujer/remeras-y-tops", "Tops", [["blanco", "#ffffff", "M", 900_000, 5], ["blanco", "#ffffff", "XXL", 900_000, 5]]);
 });
 afterAll(async () => {
@@ -964,6 +964,23 @@ describe("liquidación (etapa 9)", () => {
     expect((await app.inject("/v1/config")).json().hayLiquidacion).toBe(false);
     await req("DELETE", `/v1/admin/descuentos/${d.json().id}`, operador);
     await req("DELETE", `/v1/admin/descuentos/${comun.json().id}`, operador);
+  });
+  it("por temporada: invierno y verano se separan; sin temporada sale sólo en «toda la liquidación»", async () => {
+    const inv = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm invierno", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-3"]], liquidacion: true, temporada: "invierno" });
+    const ver = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm verano", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-4"]], liquidacion: true, temporada: "verano" });
+    const sin = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm sin temporada", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-5"]], liquidacion: true });
+    expect([inv.statusCode, ver.statusCode, sin.statusCode]).toEqual([201, 201, 201]);
+    expect(await lista("coleccion=liquidacion&temporada=invierno")).toEqual(["qa-adm-3"]);
+    expect(await lista("coleccion=liquidacion&temporada=verano")).toEqual(["qa-adm-4"]);
+    expect(await lista("coleccion=liquidacion")).toEqual(expect.arrayContaining(["qa-adm-3", "qa-adm-4", "qa-adm-5"]));
+    expect(await lista("coleccion=liquidacion&temporada=invierno&categoria=ninos")).toEqual([]);
+    expect((await app.inject("/v1/config")).json().liquidacionTemporadas).toEqual(["invierno", "verano"]);
+    // La temporada es sólo de liquidaciones, y sólo invierno o verano.
+    expect((await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm mal", porcentaje: 10, alcance: "todo", temporada: "invierno" })).statusCode).toBe(400);
+    expect((await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm mal", porcentaje: 10, alcance: "todo", liquidacion: true, temporada: "otoño" })).statusCode).toBe(400);
+    expect((await app.inject("/v1/productos?coleccion=liquidacion&temporada=otono")).statusCode).toBe(400);
+    for (const d of [inv, ver, sin]) await req("DELETE", `/v1/admin/descuentos/${d.json().id}`, operador);
+    expect((await app.inject("/v1/config")).json().liquidacionTemporadas).toEqual([]);
   });
   it("por categorías (con sus subcategorías) también vale", async () => {
     const mujer = (await pool.query("SELECT id FROM tienda.categorias WHERE slug = 'mujer' AND padre_id IS NULL")).rows[0].id;

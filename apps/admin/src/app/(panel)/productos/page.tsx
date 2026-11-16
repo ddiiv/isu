@@ -55,9 +55,13 @@ function Productos() {
     if (pct === null) return;
     const porcentaje = Math.trunc(Number(pct));
     if (!(porcentaje >= 1 && porcentaje <= 90)) { aviso.error(new Error("El % va de 1 a 90.")); return; }
+    const t = window.prompt("¿De qué temporada? Escribí «invierno» o «verano» (vacío: sólo en «Toda la liquidación»)", "invierno");
+    if (t === null) return;
+    const temporada = t.trim().toLowerCase();
+    if (temporada !== "" && temporada !== "invierno" && temporada !== "verano") { aviso.error(new Error("La temporada es «invierno» o «verano».")); return; }
     try {
-      await api("descuentos", { cuerpo: { nombre: `Liquidación ${porcentaje}% (${new Date().toLocaleDateString("es-AR")})`, porcentaje, alcance: "productos", productoIds: [...elegidos], liquidacion: true } });
-      aviso.ok(`${elegidos.size} en Liquidación con ${porcentaje}% OFF. Se cambia o se termina en Descuentos.`);
+      await api("descuentos", { cuerpo: { nombre: `Liquidación ${temporada ? `${temporada} ` : ""}${porcentaje}% (${new Date().toLocaleDateString("es-AR")})`, porcentaje, alcance: "productos", productoIds: [...elegidos], liquidacion: true, temporada: temporada || null } });
+      aviso.ok(`${elegidos.size} en Liquidación${temporada ? ` de ${temporada}` : ""} con ${porcentaje}% OFF. Se cambia o se termina en Descuentos.`);
       setElegidos(new Set());
     } catch (e) { aviso.error(e); }
   }

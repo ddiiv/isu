@@ -107,6 +107,8 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
   return salida.sort((a, b) => Number(a.agotado) - Number(b.agotado));
 }
 
+export type Temporada = "invierno" | "verano";
+export const TEMPORADAS: readonly Temporada[] = ["invierno", "verano"];
 const PUBLICABLE = "p.visible AND p.en_stocker";
 /** El producto `p` tiene alguna variante a la venta. */
 export const CON_STOCK = "EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.producto_id = p.id AND v.activo AND v.stock > 0)";
@@ -114,11 +116,12 @@ export const CON_STOCK = "EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.produ
  * Etapa 9: el producto `p` está en Liquidación (le toca un descuento vigente marcado como liquidación).
  * Mismas reglas que lib/descuentos.ts: una categoría de arriba incluye sus subcategorías.
  */
-export const EN_LIQUIDACION = `EXISTS (SELECT 1 FROM tienda.descuentos d
-  WHERE d.liquidacion AND d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
+export const enLiquidacion = (temporada?: Temporada) => `EXISTS (SELECT 1 FROM tienda.descuentos d
+  WHERE d.liquidacion${temporada ? ` AND d.temporada = '${temporada}'` : ""} AND d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
     AND (d.alcance = 'todo' OR (d.alcance = 'productos' AND p.id = ANY(d.producto_ids))
       OR (d.alcance = 'categorias' AND EXISTS (SELECT 1 FROM tienda.producto_categorias pcl JOIN tienda.categorias cl ON cl.id = pcl.categoria_id
             WHERE pcl.producto_id = p.id AND (cl.id = ANY(d.categoria_ids) OR cl.padre_id = ANY(d.categoria_ids))))))`;
+export const EN_LIQUIDACION = enLiquidacion();
 /** El producto `p` está en la categoría $N o en alguna de sus hijas. */
 const EN_CATEGORIA = (n: number) => `EXISTS (SELECT 1 FROM tienda.producto_categorias pcc JOIN tienda.categorias cc ON cc.id = pcc.categoria_id AND cc.visible
   WHERE pcc.producto_id = p.id AND (cc.id = $${n} OR cc.padre_id = $${n}))`;
@@ -151,7 +154,7 @@ export async function productosDeCategoria(pool: pg.Pool, categoriaId: number, l
  * Etapa 9: "Packs" y "Liquidación" se pueden pedir de una categoría de arriba
  * (/packs/hombre, /liquidacion/mujer); Liquidación, sólo lo que tiene stock.
  */
-export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite: number, categoriaId: number | null = null): Promise<FilaProducto[]> {
+export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite: number, categoriaId: number | null = null, temporada?: Temporada): Promise<FilaProducto[]> {
   const enCategoria = categoriaId === null ? "" : ` AND ${EN_CATEGORIA(2)}`;
   const params = categoriaId === null ? [limite] : [limite, categoriaId];
   const { rows } = await pool.query<FilaProducto>(
@@ -160,7 +163,7 @@ export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "
           WHERE p.pack AND p.visible AND p.en_stocker${enCategoria} ORDER BY p.pack_orden, p.id DESC LIMIT $1`
       : cual === "liquidacion"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
-          WHERE ${PUBLICABLE} AND ${EN_LIQUIDACION} AND ${CON_STOCK}${enCategoria} ORDER BY p.creado_en DESC, p.id DESC LIMIT $1`
+          WHERE ${PUBLICABLE} AND ${enLiquidacion(temporada)} AND ${CON_STOCK}${enCategoria} ORDER BY p.creado_en DESC, p.id DESC LIMIT $1`
       : cual === "nuevos"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
           WHERE p.nuevo AND p.visible AND p.en_stocker${enCategoria} ORDER BY p.nuevo_desde DESC NULLS LAST, p.id DESC LIMIT $1`

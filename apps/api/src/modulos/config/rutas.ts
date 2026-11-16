@@ -4,7 +4,7 @@ import type pg from "pg";
 import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, EnlaceLocal, leerPacks, PACKS_POR_DEFECTO, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
 import type { CacheCorta } from "../../lib/cache.js";
-import { CON_STOCK, EN_LIQUIDACION } from "../productos/consultas.js";
+import { CON_STOCK, EN_LIQUIDACION, TEMPORADAS, enLiquidacion } from "../productos/consultas.js";
 
 /*
  * GET /v1/config — lo que la tienda necesita saber sin sesión: monto mínimo
@@ -33,6 +33,7 @@ const POR_DEFECTO: ConfigPublica = {
   packsEn: [],
   hayLiquidacion: false,
   liquidacionEn: [],
+  liquidacionTemporadas: [],
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
@@ -82,15 +83,18 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
       else app.log.warn({ clave }, "ajuste inválido: se usa el valor por defecto");
     }
     // Hay packs si alguna prenda publicada se vende en pack (el menú muestra "Packs"), y en qué categorías de arriba.
-    const [packsEn, liquidacionEn, hayPacks, hayLiquidacion] = await Promise.all([
+    const [packsEn, liquidacionEn, hayPacks, hayLiquidacion, invierno, verano] = await Promise.all([
       categoriasCon(deps.pool, "p.pack"), categoriasCon(deps.pool, EN_LIQUIDACION),
       deps.pool.query("SELECT 1 FROM tienda.productos WHERE pack AND visible AND en_stocker LIMIT 1"),
       deps.pool.query(`SELECT 1 FROM tienda.productos p WHERE p.visible AND p.en_stocker AND ${EN_LIQUIDACION} AND ${CON_STOCK} LIMIT 1`),
+      ...TEMPORADAS.map((t) => deps.pool.query(`SELECT 1 FROM tienda.productos p WHERE p.visible AND p.en_stocker AND ${enLiquidacion(t)} AND ${CON_STOCK} LIMIT 1`)),
     ]);
     salida.hayPacks = !!hayPacks.rowCount;
     salida.packsEn = packsEn;
     salida.hayLiquidacion = !!hayLiquidacion.rowCount;
     salida.liquidacionEn = liquidacionEn;
+    // Las temporadas con algo en liquidación (las pestañas de /liquidacion).
+    salida.liquidacionTemporadas = TEMPORADAS.filter((_, i) => !![invierno, verano][i]!.rowCount);
     // Etapa 11: qué ayudas para la dirección hay (configuradas y prendidas en Ajustes).
     const dir = AjusteDirecciones.safeParse(filas.find((f) => f.clave === "direcciones")?.valor ?? DIRECCIONES_POR_DEFECTO);
     const aj = dir.success ? dir.data : DIRECCIONES_POR_DEFECTO;

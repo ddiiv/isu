@@ -108,6 +108,8 @@ export const ConfigPublica = z.object({
   packsEn: z.array(z.string()).default([]),
   hayLiquidacion: z.boolean().default(false),
   liquidacionEn: z.array(z.string()).default([]),
+  /** Las temporadas (invierno, verano) que tienen algo en liquidación con stock. */
+  liquidacionTemporadas: z.array(z.enum(["invierno", "verano"])).default([]),
   /** Cuidados generales de las prendas (la ficha los muestra). */
   cuidados: z.string().max(600).default(""),
   /** Números de la marca para el inicio ("+10 años · diseñando y fabricando"). */
