@@ -239,9 +239,10 @@ describe("feed de Google Shopping", () => {
     expect(fotos(wa, "Azul")).toEqual(["general-1200.webp"]);
     // Google sigue mostrando las generales también en el color que tiene propias.
     expect(fotos(itemsFeed(conGeneral, ctx, "d"), "Negro")).toContain("general-1200.webp");
-    // Sin propias ni generales, el color no sale (antes mostraba las de otro color).
+    // Sin propias ni generales, sale con la foto de otro color del producto (mejor que sin foto).
     const sinNada = producto({ colores: [{ clave: "negro", nombre: "Negro", hex: "#000", fotos: [foto("p/1/negro1")] }, { clave: "azul", nombre: "Azul", hex: "#00f", fotos: [] }], exhibicion: [] });
-    expect(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }).map((i) => i.color)).toEqual(["Negro", "Negro"]);
+    expect(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }).map((i) => i.color)).toEqual(["Negro", "Negro", "Azul"]);
+    expect(fotos(itemsFeed(sinNada, ctx, "d", { soloFotosDelColor: true }), "Azul")).toEqual(["negro1-1200.webp"]);
     expect(itemsFeed(sinNada, ctx, "d").map((i) => i.color)).toContain("Azul");
   });
   it("WhatsApp: variantes con el título del producto, la misma descripción, todas disponibles y una sola principal", () => {

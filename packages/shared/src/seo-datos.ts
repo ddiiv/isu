@@ -94,14 +94,15 @@ function fotosDe(p: ProductoDetalle, color: string | null): FotoPublica[] {
 }
 
 /**
- * Para el catálogo de WhatsApp: las fotos de ese color y nada más; si el color
- * no tiene, las generales (sin color). Nunca las de otro color: sin ninguna,
- * esa variante no sale (Meta pide foto).
+ * Para el catálogo de WhatsApp: las fotos de ese color primero; si el color no tiene, las generales
+ * (sin color); y si tampoco hay, las de cualquier otro color del producto: todo artículo sale con
+ * alguna foto del producto (el dueño prefiere eso a la imagen de la marca). Sin ninguna foto en
+ * todo el producto, sale el relleno de `sinFoto`.
  */
 function fotosDelColor(p: ProductoDetalle, color: string | null): FotoPublica[] {
   if (color === null) return fotosDe(p, null);
   const propias = [...p.exhibicion.filter((f) => f.color === color), ...(p.colores.find((c) => c.clave === color)?.fotos ?? [])];
-  const elegidas = propias.length ? propias : p.exhibicion.filter((f) => !f.color);
+  const elegidas = propias.length ? propias : p.exhibicion.some((f) => !f.color) ? p.exhibicion.filter((f) => !f.color) : fotosDe(p, null);
   return elegidas.filter((f, i) => elegidas.findIndex((g) => g.clave === f.clave) === i);
 }
 
