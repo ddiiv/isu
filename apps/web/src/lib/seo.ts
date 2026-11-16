@@ -1,5 +1,5 @@
 import type { ConfigPublica, ContextoSeo, FotoPublica } from "@isu/shared";
-import { src } from "./fotos";
+import { src, srcVideo } from "./fotos";
 import { SITIO } from "./sitio";
 
 /* Lo que necesitan los datos estructurados y el feed, a partir de los ajustes de la tienda. */
@@ -10,6 +10,7 @@ export function contextoSeo(config: ConfigPublica): ContextoSeo {
     sitio: SITIO.url,
     marca: SITIO.nombre,
     foto: (f: FotoPublica, ancho) => absoluta(src(f, ancho)),
+    video: (clave: string) => absoluta(srcVideo(clave)),
     costoEnvio: config.costoEnvio > 0 ? config.costoEnvio : null,
     envioGratisDesde: config.envioGratisDesde,
     cuotas: config.cuotasSinInteres,

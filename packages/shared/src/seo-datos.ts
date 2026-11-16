@@ -16,6 +16,8 @@ export interface ContextoSeo {
   marca: string;
   /** URL absoluta de una foto */
   foto: (f: FotoPublica, ancho: 400 | 800 | 1200) => string;
+  /** URL absoluta de un video de producto; sin ella no se publican los datos de video */
+  video?: (clave: string) => string;
   /** centavos; null = sin costo fijo publicado */
   costoEnvio: number | null;
   envioGratisDesde: number | null;
@@ -157,6 +159,11 @@ export function jsonLdProducto(p: ProductoDetalle, ctx: ContextoSeo, descripcion
     audience: audiencia,
     ...(p.migas.length ? { category: p.migas.map((m) => m.nombre).join(" > ") } : {}),
     ...(p.composicion ? { material: p.composicion } : {}),
+    // Video de la ficha (sólo si está publicado): lo pide Google con miniatura y fecha. shortcut: la fecha es la de la última
+    // actualización del producto (no se guarda cuándo se subió el video); mejorarlo si Search Console la objeta.
+    ...(p.video && ctx.video && imagenes[0]
+      ? { video: { "@type": "VideoObject", name: p.nombre, description: descripcion, thumbnailUrl: imagenes[0], contentUrl: ctx.video(p.video), uploadDate: p.actualizadoEn } }
+      : {}),
     // Etapa 8: las estrellas en Google. Son de compras entregadas (no se pueden escribir sin haber comprado).
     ...(p.resenas?.cantidad && p.resenas.promedio
       ? {
