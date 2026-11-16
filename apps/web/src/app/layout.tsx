@@ -7,6 +7,8 @@ import { BotonWhatsapp } from "@/components/BotonWhatsapp";
 import { BotonAsistente } from "@/components/chat/BotonAsistente";
 import { Analytics, ConsentimientoGa, idGa } from "@/components/Analytics";
 import { AvisoCookies } from "@/components/AvisoCookies";
+import { Pixeles } from "@/components/Pixeles";
+import { idClarity, idMeta } from "@isu/shared";
 import { OrigenYCupon } from "@/components/OrigenYCupon";
 import { WebVitals } from "@/components/WebVitals";
 import { Hidratado } from "@/components/Hidratado";
@@ -62,7 +64,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <CajonCarrito descuento={config.descuentoTransferencia} montoMinimo={config.montoMinimoCarrito} cuotas={config.cuotasSinInteres} medios={config.mediosPago} />
         </ProveedorCarrito>
         <Analytics />
-        {idGa() && <AvisoCookies />}
+        <Pixeles meta={idMeta(process.env.NEXT_PUBLIC_META_PIXEL_ID)} clarity={idClarity(process.env.NEXT_PUBLIC_CLARITY_ID)} />
+        {(idGa() || idMeta(process.env.NEXT_PUBLIC_META_PIXEL_ID) || idClarity(process.env.NEXT_PUBLIC_CLARITY_ID)) && <AvisoCookies />}
         <WebVitals />
         <Hidratado />
       </body>

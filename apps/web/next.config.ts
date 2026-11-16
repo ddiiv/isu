@@ -19,6 +19,9 @@ try { process.loadEnvFile(path.join(import.meta.dirname, "../../.env")); } catch
  * serializa escapando "<".
  */
 const GA = ["https://www.googletagmanager.com", "https://www.google-analytics.com", "https://*.google-analytics.com", "https://*.analytics.google.com"];
+// Pixel de Meta y Clarity: sólo se abren esos sitios si hay ID configurado (misma validación que idMeta / idClarity de @isu/shared).
+const META = /^\d{8,20}$/.test(process.env.NEXT_PUBLIC_META_PIXEL_ID ?? "") ? ["https://connect.facebook.net", "https://www.facebook.com"] : [];
+const CLARITY = /^[a-z0-9]{8,12}$/.test(process.env.NEXT_PUBLIC_CLARITY_ID ?? "") ? ["https://www.clarity.ms", "https://*.clarity.ms", "https://c.bing.com"] : [];
 const IMAGENES = (process.env.NEXT_PUBLIC_CDN_IMAGENES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 // En CSP, una fuente con ruta y sin "/" final coincide SÓLO con esa ruta exacta: "…/fotos" no deja cargar "…/fotos/p/1.webp".
 const FUENTES_IMAGENES = IMAGENES.map((u) => (new URL(u).pathname.length > 1 && !u.endsWith("/") ? `${u}/` : u));
@@ -26,13 +29,13 @@ const dev = process.env.NODE_ENV !== "production";
 
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline' ${dev ? "'unsafe-eval'" : ""} ${GA[0]}`,
+  `script-src 'self' 'unsafe-inline' ${dev ? "'unsafe-eval'" : ""} ${[GA[0], ...META.slice(0, 1), ...CLARITY.slice(0, 2)].join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: ${[...GA, ...FUENTES_IMAGENES].join(" ")}`,
+  `img-src 'self' data: blob: ${[...GA, ...META.slice(1), ...CLARITY, ...FUENTES_IMAGENES].join(" ")}`,
   // Los videos de producto salen del mismo lugar que las fotos.
   `media-src 'self' ${FUENTES_IMAGENES.join(" ")}`,
   "font-src 'self'",
-  `connect-src 'self' ${GA.join(" ")} ${process.env.NEXT_PUBLIC_API_URL ?? ""}`,
+  `connect-src 'self' ${[...GA, ...META, ...CLARITY].join(" ")} ${process.env.NEXT_PUBLIC_API_URL ?? ""}`,
   "frame-src 'none'",
   "object-src 'none'",
   "base-uri 'self'",

@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CLAVE_CONSENTIMIENTO, leerEleccion, valoresConsentimiento, type EleccionCookies } from "@isu/shared";
+import { ELECCION_COOKIES } from "./Pixeles";
 
 /* Evento que dispara el link «Cookies» del pie para reabrir el aviso. */
 export const REABRIR_COOKIES = "isu:cookies";
 
 /*
- * Aviso de cookies para la medición de Analytics (Consent Mode v2). Sólo se
- * monta con GA configurado. Arranca oculto y aparece tras hidratar si no hay
+ * Aviso de cookies para la medición (Analytics con Consent Mode v2, Pixel de Meta y
+ * Clarity). Sólo se monta con alguno configurado. Arranca oculto y aparece tras hidratar si no hay
  * elección guardada: al ser fixed no empuja el contenido (sin salto de layout).
  */
 export function AvisoCookies() {
@@ -29,6 +30,7 @@ export function AvisoCookies() {
   function elegir(e: EleccionCookies) {
     try { localStorage.setItem(CLAVE_CONSENTIMIENTO, e); } catch { /* sin storage: vale para esta página */ }
     try { window.gtag?.("consent", "update", valoresConsentimiento(e)); } catch { /* nada */ }
+    window.dispatchEvent(new Event(ELECCION_COOKIES));
     setAbierto(false);
   }
 
