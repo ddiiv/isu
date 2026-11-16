@@ -27,6 +27,22 @@ const producto = (cambios: Partial<ProductoDetalle> = {}): ProductoDetalle => ({
   ...cambios,
 });
 
+describe("video del producto en los datos estructurados", () => {
+  const clave = "v/0123456789ab/0123456789abcdef.mp4";
+  const conVideo = { ...ctx, video: (c: string) => `https://fotos.isuwaya.com/${c}` };
+  it("va como VideoObject con miniatura, archivo y fecha", () => {
+    const d = jsonLdProducto(producto({ video: clave }), conVideo, "Una descripción", []) as any;
+    expect(d.video).toEqual({
+      "@type": "VideoObject", name: "Abel Pantalón Hombre", description: "Una descripción",
+      thumbnailUrl: d.image[0], contentUrl: `https://fotos.isuwaya.com/${clave}`, uploadDate: "2026-10-01T00:00:00Z",
+    });
+  });
+  it("sin video, o sin la dirección del video, no sale", () => {
+    expect((jsonLdProducto(producto(), conVideo, "x", []) as any).video).toBeUndefined();
+    expect((jsonLdProducto(producto({ video: clave }), ctx, "x", []) as any).video).toBeUndefined();
+  });
+});
+
 describe("direcciones de las redirecciones", () => {
   it("guarda la dirección vieja normalizada", () => {
     expect(rutaVieja("https://www.isuwaya.com/Abel-Pantalon-Hombre/?ref=x#top")).toBe("/abel-pantalon-hombre");
