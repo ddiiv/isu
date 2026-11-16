@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import { ErrorStocker, type ClienteStocker } from "@isu/stocker";
 import { CLAVE_CURSOR_NOVEDADES, HORAS_MAXIMAS_PAGO, NOMBRE_TRANSPORTE } from "@isu/shared";
-import { CP, OrigenPedido, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
+import { CP, MedicionPedido, OrigenPedido, enlaceDeLocal, ESTADOS_PENDIENTES, formatearPesos, type Local, type MedioPago, type OpcionEnvio, type PedidoNuevo, type PedidoPublico } from "@isu/shared";
 import { firmaOpinar, type Paquete, type Transportes } from "@isu/envios";
 import type { CotizadorEnvios } from "../envios/cotizador.js";
 import { hoyA } from "../envios/cotizador.js";
@@ -76,7 +76,7 @@ interface FilaPedido {
   cupon_id: number | null; cupon_codigo: string | null; cupon_nombre: string | null; descuento_cupon: number;
   vence_en: Date | null; pagado_en: Date | null; mp_preferencia: string | null; creado_en: Date;
   transporte: string | null; servicio_envio: string | null; sucursal_envio: { id: string; nombre: string; direccion: string } | null;
-  avisos_whatsapp: boolean; paquete_envio: Paquete | null;
+  avisos_whatsapp: boolean; paquete_envio: Paquete | null; medicion: unknown;
   transferencia_via: "talo" | "mercadopago" | "cuenta" | null; transferencia_monto: number | null;
   talo_pago: string | null; talo_cvu: string | null; talo_alias: string | null;
 }
@@ -158,6 +158,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     const { entrega, medioPago, contacto } = datos;
     // Inválido o gigante: se ignora, nunca tumba el pedido.
     const origen = OrigenPedido.safeParse(datos.origen).data;
+    const medicion = MedicionPedido.safeParse(datos.medicion).data;
     if (medioPago === "local" && entrega.tipo !== "retiro") throw new ErrorHttp(400, "validacion", "El pago en el local es sólo para retirar en el local.");
     if (entrega.tipo === "retiro" && !a.locales.some((l) => l.retiro && l.nombre === entrega.local)) {
       throw new ErrorHttp(400, "validacion", "Elegí un local de retiro de la lista.");
@@ -238,14 +239,14 @@ export function crearServicioPedidos(deps: DepsPedidos) {
         `INSERT INTO tienda.pedidos (acceso_hash, cliente_id, email, nombre, apellido, telefono, dni, entrega, direccion, local_retiro,
                                      medio_pago, subtotal, descuento, envio, total, estado, notas, ip,
                                      transporte, servicio_envio, sucursal_envio, avisos_whatsapp, paquete_envio,
-                                     cupon_id, cupon_codigo, cupon_nombre, descuento_cupon, envio_bonificado, origen)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'reservando',$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
+                                     cupon_id, cupon_codigo, cupon_nombre, descuento_cupon, envio_bonificado, origen, medicion)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'reservando',$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
         [sha256(acceso), clienteId, contacto.email, contacto.nombre, contacto.apellido, contacto.telefono, contacto.dni,
           entrega.tipo, entrega.tipo === "envio" ? JSON.stringify(entrega.direccion) : null, entrega.tipo === "retiro" ? entrega.local : null,
           medioPago, c.subtotal, c.descuento, c.envio, c.total, datos.notas ?? null, ctx.ip,
           entrega.tipo === "envio" ? (opcion?.transporte ?? "estandar") : null, entrega.tipo === "envio" ? (opcion?.servicio ?? "domicilio") : null,
           sucursal ? JSON.stringify(sucursal) : null, datos.avisosWhatsapp ?? false, paqueteEnvio ? JSON.stringify(paqueteEnvio) : null,
-          c.aplicado?.cupon.id ?? null, c.aplicado?.cupon.codigo ?? null, c.aplicado?.cupon.nombre ?? null, c.descuentoCupon ?? 0, c.envioBonificado, origen ? JSON.stringify(origen) : null],
+          c.aplicado?.cupon.id ?? null, c.aplicado?.cupon.codigo ?? null, c.aplicado?.cupon.nombre ?? null, c.descuentoCupon ?? 0, c.envioBonificado, origen ? JSON.stringify(origen) : null, medicion && Object.keys(medicion).length ? JSON.stringify(medicion) : null],
       )).rows[0]!;
       for (const l of c.lineas) {
         // Las prendas de un pack llevan "(Pack xN)" en el nombre: así se ven en el mail, la página del pedido, Mercado Pago y el backoffice.
@@ -464,6 +465,8 @@ export function crearServicioPedidos(deps: DepsPedidos) {
       await deps.colas.email("pago_confirmado", p.email, await datosMail(p, null));
       // «Recibimos tu pago» por WhatsApp (si lo pidió; el worker decide si se puede mandar).
       if (p.entrega === "envio" && p.avisos_whatsapp) await deps.colas.envios("avisar", { numero: p.numero, tipo: "pago_recibido" }, `pago-wa-${p.numero}`);
+      // A Meta (API de conversiones): sólo si quien compró aceptó las cookies (el checkout guarda `medicion` sólo en ese caso).
+      if (p.medicion) await deps.colas.envios("conversion", { numero: p.numero }, `conversion-${p.numero}`);
       // Al grupo de WhatsApp de los empleados, para que lo armen (por el portal mayorista: PORTAL_AVISOS_TOKEN en el worker).
       await deps.colas.envios("empleados", { numero: p.numero }, `empleados-${p.numero}`);
       // Aviso interno de la venta: el worker lo manda a CORREO_VENTAS (si está) y arma todo desde la base; `para` no se usa.

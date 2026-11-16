@@ -12,6 +12,7 @@ import { crearInvalidador } from "./stocker/invalidar.js";
 import { crearTransportes } from "@isu/envios";
 import { crearEnvios } from "./envios/envios.js";
 import { cargarPedido } from "./correo/pedido.js";
+import { crearConversiones } from "./meta/conversiones.js";
 import { pdfPedido } from "./correo/pdf.js";
 
 /*
@@ -38,6 +39,13 @@ const env = z.object({
   SMTP_URL: z.string().min(8).optional(),
   CORREO_DE: z.string().min(3).default("Isuwaya <isu.isuwaya@gmail.com>"),
   CORREO_RESPONDER: z.string().email().optional(),
+  // API de conversiones de Meta: la compra pagada, desde el servidor (sólo de quien aceptó las cookies). Las dos juntas.
+  META_PIXEL_ID: z.string().regex(/^\d{8,20}$/).optional(),
+  META_CAPI_TOKEN: z.string().min(20).optional(),
+  // Para probar en Eventos de prueba del Administrador de eventos (los eventos salen marcados de prueba).
+  META_CAPI_TEST_CODE: z.string().regex(/^[A-Za-z0-9]{4,20}$/).optional(),
+  META_API_VERSION: z.string().regex(/^v\d{1,3}\.\d$/).default("v22.0"),
+  META_GRAPH_URL: z.string().url().default("https://graph.facebook.com"),
   // Cada venta pagada va al grupo de WhatsApp de los empleados, por el portal mayorista (POST /api/avisos/grupo).
   // La clave es la AVISOS_TOKEN del portal; sin ella no se avisa al grupo.
   PORTAL_AVISOS_URL: z.string().url().default("https://isumayoristapedidos-production.up.railway.app"),
@@ -133,6 +141,9 @@ const procesar = crearProcesar(deps, {
   envios,
   carritos,
   whatsapp: transportes.whatsapp,
+  conversiones: env.META_PIXEL_ID && env.META_CAPI_TOKEN && env.SITIO_URL
+    ? crearConversiones({ pool, sitio: env.SITIO_URL, meta: { pixelId: env.META_PIXEL_ID, token: env.META_CAPI_TOKEN, version: env.META_API_VERSION, url: env.META_GRAPH_URL, codigoDePrueba: env.META_CAPI_TEST_CODE } })
+    : undefined,
   pdfPedido: async (numero) => { const p = await cargarPedido(pool, numero); return p ? pdfPedido(p) : null; },
 });
 

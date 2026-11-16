@@ -18,7 +18,17 @@ Todo respeta el aviso de cookies: **sin «Aceptar» no se carga ningún medidor*
 4. Verificá con la extensión *Meta Pixel Helper* de Chrome: aceptá las cookies y mirá un producto, agregalo al carrito y empezá el pago. Tienen que aparecer `ViewContent`, `AddToCart` e `InitiateCheckout`. `Purchase` sale al ver el pedido ya pagado.
 5. Qué manda: `PageView`, `ViewContent`, `AddToCart`, `InitiateCheckout`, `Purchase` y `Search`, con el valor en pesos y los códigos de producto.
 
-**Todavía no está** la API de conversiones (el envío desde el servidor): sin ella Meta pierde las compras de quien rechaza cookies o usa bloqueador. Es el siguiente paso.
+### API de conversiones (la compra, desde el servidor)
+Cuando un pedido se paga, el worker le avisa a Meta la compra (`Purchase`) por la API de conversiones. Cubre lo que el Pixel no ve: transferencias que se confirman después, bloqueadores de anuncios, navegadores que cortan las cookies.
+- **Sólo de quien aceptó las cookies.** Al comprar, el checkout guarda las cookies del Pixel (`_fbp`, `_fbc`) y el navegador sólo si aceptó; sin eso, esa compra no se informa.
+- **Con hash.** Email, teléfono, nombre, apellido, ciudad y código postal viajan cifrados (SHA-256), como pide Meta. La IP y el navegador van en claro, también como pide Meta.
+- **Sin duplicados.** El Pixel y el servidor mandan la compra con el mismo identificador (`purchase-ISU-1042`) y Meta la cuenta una sola vez.
+- **Configurar** en Railway, servicio **worker**:
+  - `META_PIXEL_ID`: el ID del Pixel (el mismo número).
+  - `META_CAPI_TOKEN`: Administrador de eventos → tu Pixel → *Configuración* → API de conversiones → **Generar token de acceso**. Es un secreto: sólo en Railway.
+  - Para probar: `META_CAPI_TEST_CODE` con el código de *Eventos de prueba* (los eventos aparecen ahí, no cuentan). **Sacala** cuando termines.
+  - Necesita también `SITIO_URL` en el worker, que ya está.
+- **Probar:** con el código de prueba cargado, hacé una compra de prueba aceptando las cookies, pagala desde el backoffice y mirá en *Eventos de prueba* un `Purchase` de «Servidor» (y otro del «Navegador» si abriste la página del pedido: Meta los junta como uno).
 
 **Códigos de producto:** en las fichas el Pixel manda el identificador del producto y en el carrito y la compra el SKU de la variante. Para los anuncios de catálogo hay que unificarlos con los códigos del catálogo de Meta.
 

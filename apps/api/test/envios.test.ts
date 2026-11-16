@@ -526,6 +526,22 @@ describe("backoffice de envíos", () => {
     expect(enviados.some((e) => e.nombre === "avisar" && e.datos.numero === n && e.datos.quien)).toBe(true);
     expect((await pool.query("SELECT 1 FROM tienda.auditoria WHERE accion = 'whatsapp_a_mano' AND detalle->>'numero' = $1", [n])).rowCount).toBe(1);
   });
+  it("API de conversiones de Meta: al pagarse se encola sólo si quien compró aceptó las cookies (guardó su medición)", async () => {
+    const pagar = async (sufijo: string, extra: Record<string, unknown>) => {
+      const n = (await post("/v1/pedidos", pedido(sufijo, { opcion: "andreani:domicilio" }, extra))).json().numero as string;
+      const { rows } = await pool.query("SELECT total, medicion FROM tienda.pedidos WHERE numero = $1", [n]);
+      await post(`/v1/admin/pedidos/${n}/pago`, { medio: "transferencia", monto: rows[0].total, referencia: `QA-TRF-${sufijo}` }, adm(adminOperador));
+      return { n, medicion: rows[0].medicion };
+    };
+    const con = await pagar("capi1", { medicion: { fbp: "fb.1.1700000000000.123456", ua: "Mozilla/5.0 test" } });
+    expect(con.medicion).toEqual({ fbp: "fb.1.1700000000000.123456", ua: "Mozilla/5.0 test" });
+    expect(enviados.some((e) => e.nombre === "conversion" && e.datos.numero === con.n)).toBe(true);
+    // Sin medición, o con una que no sirve, no se informa nada a Meta.
+    const sin = await pagar("capi2", {});
+    const rota = await pagar("capi3", { medicion: { fbp: "<script>", otro: 1 } });
+    expect([sin.medicion, rota.medicion]).toEqual([null, null]);
+    expect(enviados.some((e) => e.nombre === "conversion" && (e.datos.numero === sin.n || e.datos.numero === rota.n))).toBe(false);
+  });
   it("el aviso según el estado", () => {
     expect(tipoAviso("pagado", "envio", null)).toBe("pago_recibido");
     expect(tipoAviso("enviado", "envio", "en_camino")).toBe("en_camino");

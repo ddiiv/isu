@@ -84,6 +84,14 @@ export const OrigenPedido = z.object({
 }).strict();
 export type OrigenPedido = z.infer<typeof OrigenPedido>;
 
+/* Para la API de conversiones de Meta: las cookies del Pixel y el navegador, sólo si aceptó las cookies. */
+export const MedicionPedido = z.object({
+  fbp: z.string().regex(/^fb\.\d\.\d{10,14}\.\d{1,12}$/).optional(),
+  fbc: z.string().regex(/^fb\.\d\.\d{10,14}\.[A-Za-z0-9_-]{4,300}$/).optional(),
+  ua: z.string().max(300).optional(),
+}).strict();
+export type MedicionPedido = z.infer<typeof MedicionPedido>;
+
 export const PedidoNuevo = z.object({
   items: Items,
   cupon: CodigoCupon.optional(),
@@ -95,6 +103,8 @@ export const PedidoNuevo = z.object({
   avisosWhatsapp: z.boolean().optional().default(false),
   // Se valida aparte con OrigenPedido y, si no sirve, se ignora: el origen nunca tumba un pedido.
   origen: z.unknown().optional(),
+  // Igual: se valida aparte con MedicionPedido y, si no sirve, se ignora.
+  medicion: z.unknown().optional(),
   aceptaTerminos: z.literal(true, { error: "Tenés que aceptar los términos y condiciones" }),
 }).strict();
 export type PedidoNuevo = z.infer<typeof PedidoNuevo>;

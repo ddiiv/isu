@@ -13,7 +13,7 @@ declare global { interface Window { gtag?: (...args: unknown[]) => void; fbq?: (
 export function evento(nombre: string, params: Record<string, unknown>) {
   try { window.gtag?.("event", nombre, params); } catch { /* nada */ }
   // El Pixel de Meta (sólo existe si la persona aceptó las cookies): el mismo hecho con el nombre estándar de Meta.
-  try { const m = eventoMeta(nombre, params); if (m) window.fbq?.("track", m[0], m[1]); } catch { /* nada */ }
+  try { const m = eventoMeta(nombre, params); if (m) window.fbq?.("track", m[0], m[1], m[2] ? { eventID: m[2] } : undefined); } catch { /* nada */ }
 }
 
 /** Centavos → pesos (GA espera el valor en la moneda, no en centavos). */
