@@ -54,6 +54,8 @@ const Entorno = z.object({
   MP_API_URL: z.string().url().default("https://api.mercadopago.com"),
   // Credencial para registrar pagos por API (transferencias, cobros en el local).
   PAGOS_TOKEN: z.string().min(32).optional(),
+  // La carpeta local isu-fotos sube ahí las fotos generadas con IA que el dueño aprobó (POST /v1/interno/fotos/:slug).
+  FOTOS_TOKEN: z.string().min(32).optional(),
   // Transferencias que se confirman solas con un CVU por pedido (Talo: panel → Usuario → Credenciales).
   // Las tres juntas; además hay que prenderlo en Ajustes → Transferencias. Pruebas: https://sandbox-api.talo.com.ar
   TALO_API_URL: z.string().url().default("https://api.talo.com.ar"),

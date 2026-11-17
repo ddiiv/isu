@@ -152,7 +152,7 @@ beforeAll(async () => {
   app = await construirApp({
     env: leerEntorno({
       NODE_ENV: "test", LOG_LEVEL: "silent", DATABASE_URL: DB, REDIS_URL: REDIS, CACHE_SEGUNDOS: "0",
-      INTERNO_TOKEN: INTERNO, ADMIN_CLAVE_CIFRADO: CLAVE_CIFRADO, FOTOS_DIR: dirFotos, COMPROBANTES_DIR: dirComprobantes,
+      INTERNO_TOKEN: INTERNO, FOTOS_TOKEN: "f".repeat(40), ADMIN_CLAVE_CIFRADO: CLAVE_CIFRADO, FOTOS_DIR: dirFotos, COMPROBANTES_DIR: dirComprobantes,
       STOCKER_API_URL: urlStocker, STOCKER_TOKEN: "s".repeat(30), MP_ACCESS_TOKEN: "m".repeat(30), MP_WEBHOOK_SECRET: "w".repeat(30),
     }),
     pool, redis, colas,
@@ -344,6 +344,33 @@ describe("fotos", () => {
     expect((await subir(ids["qa-adm-1"]!, "tipo=exhibicion", Buffer.from("x"), "application/pdf")).statusCode).toBe(415);
     const otro = (await pool.query("SELECT id FROM tienda.producto_colores WHERE producto_id = $1", [ids["qa-adm-3"]])).rows[0].id;
     expect((await subir(ids["qa-adm-1"]!, `tipo=color&color=${otro}`, await jpg())).json().error).toBe("color");
+  });
+  it("fotos generadas con IA (isu-fotos): con su clave, siempre con modelo del color pedido, y volver a subir la misma la reemplaza", async () => {
+    const slug = "qa-adm-1";
+    const prod = ids[slug]!;
+    const color = (await pool.query("SELECT id, clave FROM tienda.producto_colores WHERE producto_id = $1 ORDER BY id LIMIT 1", [prod])).rows[0];
+    const subirIa = (q: string, cuerpo: Buffer, clave = "f".repeat(40)) =>
+      app.inject({ method: "POST", url: `/v1/interno/fotos/${slug}?${q}`, headers: { ...IP, authorization: `Bearer ${clave}`, "content-type": "image/jpeg" }, payload: cuerpo });
+    const antes = (await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE producto_id = $1", [prod])).rows[0].n;
+    // Sin clave o con otra: 401, y no entra nada.
+    expect((await subirIa(`color=${color.clave}&origen=ia/X/Frente`, await jpg(), "otra".repeat(10))).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: `/v1/interno/fotos/${slug}?color=${color.clave}&origen=ia/X/Frente`, headers: { ...IP, "content-type": "image/jpeg" }, payload: await jpg() })).statusCode).toBe(401);
+    // Origen inválido o color que no es del producto.
+    expect((await subirIa(`color=${color.clave}&origen=otro/X`, await jpg())).statusCode).toBe(400);
+    expect((await subirIa(`color=no-existe&origen=ia/X/Frente`, await jpg())).statusCode).toBe(404);
+    expect((await subirIa(`color=${color.clave}&origen=ia/X/Frente`, Buffer.from("%PDF-1.4 hola"))).json().error).toBe("foto_invalida");
+    // Entra como exhibición del color.
+    const uno = await subirIa(`color=${color.clave}&origen=ia/X/Frente&alt=Frente`, await jpg());
+    expect(uno.statusCode, uno.body).toBe(201);
+    const fila = (await pool.query("SELECT tipo, color_id, origen, alt, orden FROM tienda.fotos WHERE id = $1", [uno.json().id])).rows[0];
+    expect(fila).toMatchObject({ tipo: "exhibicion", color_id: color.id, origen: "ia/X/Frente", alt: "Frente" });
+    // La misma de nuevo (regenerada): reemplaza, no duplica, y conserva el lugar.
+    const dos = await subirIa(`color=${color.clave}&origen=ia/X/Frente`, await jpg());
+    expect(dos.statusCode, dos.body).toBe(201);
+    const ahora = (await pool.query("SELECT id, orden FROM tienda.fotos WHERE producto_id = $1 AND origen = 'ia/X/Frente'", [prod])).rows;
+    expect(ahora).toEqual([{ id: dos.json().id, orden: fila.orden }]);
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE producto_id = $1", [prod])).rows[0].n).toBe(antes + 1);
+    await pool.query("DELETE FROM tienda.fotos WHERE producto_id = $1 AND origen LIKE 'ia/%'", [prod]);
   });
   it("ordenar y borrar", async () => {
     const fotos = (await req("GET", `/v1/admin/productos/${ids["qa-adm-3"]}`, operador)).json().fotos as Array<{ id: number }>;

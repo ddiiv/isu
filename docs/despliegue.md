@@ -64,3 +64,7 @@ La *Shell* de Railway abre sin las variables del servicio (da «node: command no
 - **WAF:** reglas administradas de Cloudflare activadas; *Bot Fight Mode*; regla de rate limiting en `/v1/*` (p. ej. 600 pedidos/min por IP) como primera barrera, además del límite propio de la API.
 - **admin.**: *Cloudflare Access* (Zero Trust, gratis hasta 50 usuarios) con los emails del equipo: el backoffice ni siquiera es alcanzable desde afuera. Sin caché.
 - Con Cloudflare adelante, `PROXIES_DE_CONFIANZA=2` (Cloudflare + borde de Railway) hace que la API vea la IP real del cliente.
+
+## Fotos generadas con IA (carpeta local isu-fotos)
+
+`FOTOS_TOKEN` en la **API** (32 caracteres o más, al azar: `openssl rand -hex 32`) abre `POST /v1/interno/fotos/:slug` para que la carpeta local `isu-fotos` suba las fotos que el dueño aprobó. La misma clave va en `isu-fotos/.env` (`FOTOS_TOKEN=…`). Entran siempre como «con modelo» del color pedido y registran su origen (`ia/Color/Vista`): subir de nuevo la misma la **reemplaza**, así regenerar no duplica. Quedan en Auditoría como «isu-fotos (IA)». Sin la variable, la puerta está cerrada.
