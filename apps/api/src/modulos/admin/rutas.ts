@@ -12,6 +12,7 @@ import type { CacheCorta } from "../../lib/cache.js";
 import type { Colas } from "../../lib/colas.js";
 import { ErrorHttp } from "../../lib/errores.js";
 import { ipDe } from "../../lib/cliente.js";
+import { iguales } from "../../lib/cripto.js";
 import { leerTiendaCerrada } from "../../lib/tienda.js";
 import { leerAjustes } from "../pedidos/cotizar.js";
 import type { ServicioPedidos } from "../pedidos/servicio.js";
@@ -490,6 +491,65 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     return { ok: true };
   });
 
+  /** Sube una foto a un producto (backoffice y carpeta isu-fotos): procesa, guarda los tres tamaños y registra la fila. */
+  async function subirFoto(a: { email: string }, ipCliente: string, f: { productoId: number; tipo: "color" | "exhibicion"; colorId: number | null; alt?: string | undefined; archivo: Buffer; origen?: string }) {
+    if (!deps.fotos) throw new ErrorHttp(503, "sin_almacen", "No hay almacén de fotos configurado (FOTOS_DIR o R2).");
+    const { tipo, colorId: color, alt } = f;
+    if (tipo === "color" && !color) throw new ErrorHttp(400, "color", "Una foto de color necesita el color.");
+    let proc;
+    try { proc = await procesarFoto(f.archivo); } catch (e) {
+      throw new ErrorHttp(400, "foto_invalida", e instanceof FotoInvalida ? e.message : "No se pudo procesar la imagen.");
+    }
+    // Sin el id del producto: la dirección de la foto es pública.
+    const clave = claveNueva("p");
+    const p = await pool.query<{ nombre: string }>("SELECT nombre FROM tienda.productos WHERE id = $1", [f.productoId]);
+    if (!p.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+    const borrar = async (c = clave) => { for (const w of [400, 800, 1200]) await deps.fotos!.borrar(`${c}-${w}.webp`).catch(() => {}); };
+    // Primero se suben los archivos y DESPUÉS entra la fila, en una transacción corta: el trigger de los
+    // topes bloquea el producto, y tenerlo bloqueado durante la subida a R2 trababa la sincronización.
+    try {
+      for (const t of proc.tamanos) await deps.fotos.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
+    } catch (e) {
+      await borrar();
+      throw e;
+    }
+    const cli = await pool.connect();
+    let id: number;
+    let reemplazada: string | null = null;
+    try {
+      await cli.query("BEGIN");
+      await cli.query("SET LOCAL lock_timeout = '5s'");
+      // Misma foto de la carpeta isu-fotos ya subida: sale la vieja y entra la nueva (en su mismo lugar de orden).
+      let orden: number | null = null;
+      if (f.origen) {
+        const vieja = (await cli.query<{ clave: string; orden: number }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND origen = $2 RETURNING clave, orden", [f.productoId, f.origen])).rows[0];
+        if (vieja) { reemplazada = vieja.clave; orden = vieja.orden; }
+      }
+      if (orden === null) {
+        orden = (await cli.query<{ n: number }>(
+          "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3", [f.productoId, tipo, color])).rows[0]!.n;
+      }
+      // El trigger de la base aplica los topes (5 por color, 5 × colores por producto).
+      id = (await cli.query<{ id: number }>(
+        "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt, origen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+        [f.productoId, tipo, color, orden, clave, proc.ancho, proc.alto, (alt || p.rows[0].nombre).slice(0, 160), f.origen ?? null])).rows[0]!.id;
+      await auditar(cli, a, "subir_foto", "producto", f.productoId, { foto: id, tipo, color, origen: f.origen }, ipCliente);
+      await cli.query("COMMIT");
+    } catch (e) {
+      await cli.query("ROLLBACK").catch(() => {});
+      await borrar();
+      const pg = e as { code?: string; message: string };
+      if (pg.code === "23514") throw new ErrorHttp(409, "tope_fotos", pg.message);
+      if (pg.code === "55P03" || pg.code === "57014") throw new ErrorHttp(503, "ocupado", "El producto se está actualizando. Probá de nuevo en unos segundos.");
+      if (pg.code === "23503") throw new ErrorHttp(400, "color", "Ese color no es de este producto.");
+      throw e;
+    } finally { cli.release(); }
+    await invalidar(await slugsDe([f.productoId]));
+    // La foto reemplazada se borra después de regenerar las páginas (así nunca se ve una foto rota).
+    if (reemplazada) setTimeout(() => void borrar(reemplazada!), 60_000).unref();
+    return { id, clave };
+  }
+
   // ── Fotos ────────────────────────────────────────────────────────
   await app.register(async (sub) => {
     const TIPOS = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "image/avif"];
@@ -499,50 +559,28 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       schema: { params: z.object({ id: Id }), querystring: z.object({ tipo: z.enum(["color", "exhibicion"]), color: Id.optional(), alt: z.string().trim().max(160).optional() }).strict() },
     }, async (req, reply) => {
       const a = await exigir(pool, req, "operador");
-      if (!deps.fotos) throw new ErrorHttp(503, "sin_almacen", "No hay almacén de fotos configurado (FOTOS_DIR o R2).");
       const { tipo, color, alt } = req.query;
-      if (tipo === "color" && !color) throw new ErrorHttp(400, "color", "Una foto de color necesita el color.");
-      let proc;
-      try { proc = await procesarFoto(req.body as Buffer); } catch (e) {
-        throw new ErrorHttp(400, "foto_invalida", e instanceof FotoInvalida ? e.message : "No se pudo procesar la imagen.");
-      }
-      // Sin el id del producto: la dirección de la foto es pública.
-      const clave = claveNueva("p");
-      const p = await pool.query<{ nombre: string }>("SELECT nombre FROM tienda.productos WHERE id = $1", [req.params.id]);
-      if (!p.rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
-      const borrar = async () => { for (const w of [400, 800, 1200]) await deps.fotos!.borrar(`${clave}-${w}.webp`).catch(() => {}); };
-      // Primero se suben los archivos y DESPUÉS entra la fila, en una transacción corta: el trigger de los
-      // topes bloquea el producto, y tenerlo bloqueado durante la subida a R2 trababa la sincronización.
-      try {
-        for (const t of proc.tamanos) await deps.fotos.guardar(`${clave}-${t.ancho}.webp`, t.datos, "image/webp");
-      } catch (e) {
-        await borrar();
-        throw e;
-      }
-      const cli = await pool.connect();
-      let id: number;
-      try {
-        await cli.query("BEGIN");
-        await cli.query("SET LOCAL lock_timeout = '5s'");
-        const orden = await cli.query<{ n: number }>(
-          "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3", [req.params.id, tipo, color ?? null]);
-        // El trigger de la base aplica los topes (5 por color, 5 × colores por producto).
-        id = (await cli.query<{ id: number }>(
-          "INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, ancho, alto, alt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-          [req.params.id, tipo, color ?? null, orden.rows[0]!.n, clave, proc.ancho, proc.alto, (alt || p.rows[0].nombre).slice(0, 160)])).rows[0]!.id;
-        await auditar(cli, a, "subir_foto", "producto", req.params.id, { foto: id, tipo, color }, ip(req));
-        await cli.query("COMMIT");
-      } catch (e) {
-        await cli.query("ROLLBACK").catch(() => {});
-        await borrar();
-        const pg = e as { code?: string; message: string };
-        if (pg.code === "23514") throw new ErrorHttp(409, "tope_fotos", pg.message);
-        if (pg.code === "55P03" || pg.code === "57014") throw new ErrorHttp(503, "ocupado", "El producto se está actualizando. Probá de nuevo en unos segundos.");
-        if (pg.code === "23503") throw new ErrorHttp(400, "color", "Ese color no es de este producto.");
-        throw e;
-      } finally { cli.release(); }
-      await invalidar(await slugsDe([req.params.id]));
-      return reply.code(201).send({ id, clave });
+      return reply.code(201).send(await subirFoto(a, ip(req), { productoId: req.params.id, tipo, colorId: color ?? null, alt, archivo: req.body as Buffer }));
+    });
+
+    /*
+     * Fotos generadas con IA (la carpeta local isu-fotos): entran con FOTOS_TOKEN, sin sesión del backoffice. Siempre
+     * «con modelo» (exhibicion) del color pedido. `origen` es la foto de la carpeta (p. ej. «ia/Negro/Frente»): subir de
+     * nuevo la misma la REEMPLAZA (la vieja se borra a los 60 s), así regenerar no duplica.
+     */
+    sub.withTypeProvider<ZodTypeProvider>().post("/v1/interno/fotos/:slug", {
+      bodyLimit: 26 * 1024 * 1024,
+      schema: { params: z.object({ slug: z.string().regex(/^[a-z0-9-]{1,100}$/) }), querystring: z.object({ color: z.string().regex(/^[a-z0-9-]{1,40}$/), origen: z.string().regex(/^ia\/[A-Za-z0-9_\/-]{1,100}$/), alt: z.string().trim().max(160).optional() }).strict() },
+    }, async (req, reply) => {
+      const h = req.headers.authorization;
+      if (!deps.env.FOTOS_TOKEN || typeof h !== "string" || !iguales(h, `Bearer ${deps.env.FOTOS_TOKEN}`)) throw new ErrorHttp(401, "credencial", "Credencial inválida.");
+      const { rows } = await pool.query<{ id: number; color_id: number | null }>(
+        "SELECT p.id, (SELECT c.id FROM tienda.producto_colores c WHERE c.producto_id = p.id AND c.clave = $2) AS color_id FROM tienda.productos p WHERE p.slug = $1", [req.params.slug, req.query.color]);
+      if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
+      if (!rows[0].color_id) throw new ErrorHttp(404, "color", "Ese producto no tiene ese color.");
+      return reply.code(201).send(await subirFoto({ email: "isu-fotos (IA)" }, req.ip, {
+        productoId: rows[0].id, tipo: "exhibicion", colorId: rows[0].color_id, alt: req.query.alt, archivo: req.body as Buffer, origen: req.query.origen,
+      }));
     });
   });
 
