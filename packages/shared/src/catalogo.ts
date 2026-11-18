@@ -39,6 +39,8 @@ export const ProductoTarjeta = z.object({
   precioHasta: z.number().int(),     // el más alto: si difieren se muestra "desde"
   precioLista: z.number().int().nullable(), // antes del descuento (null = sin descuento)
   descuento: z.number().int().nullable(),   // % de descuento masivo
+  /** Cuándo termina ese descuento (ISO); null = sin fin. Si faltan 48 h o menos, el front lo muestra como relámpago. */
+  descuentoHasta: z.string().nullable().default(null),
   foto: FotoPublica.nullable(),
   fotoHover: FotoPublica.nullable(),
   colores: z.array(ColorTarjeta),
@@ -87,6 +89,7 @@ export const ProductoDetalle = z.object({
   precioHasta: z.number().int(),
   precioLista: z.number().int().nullable(),
   descuento: z.number().int().nullable(),
+  descuentoHasta: z.string().nullable().default(null),
   agotado: z.boolean(),
   guiaTalles: GuiaPublica.nullable(),
   actualizadoEn: z.string(),

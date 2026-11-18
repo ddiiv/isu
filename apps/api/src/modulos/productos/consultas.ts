@@ -53,7 +53,7 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
     return m;
   };
   const V = agrupar(vs.rows), C = agrupar(cs.rows), F = agrupar(fs.rows);
-  const rebajas = await desc.para(ids);
+  const [rebajas, vencen] = await Promise.all([desc.para(ids), desc.vence(ids)]);
 
   const salida: ProductoTarjeta[] = [];
   for (const p of productos) {
@@ -90,6 +90,7 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       precioHasta: Math.max(...precios),
       precioLista: pct ? Math.min(...preciosLista) : null,
       descuento: pct || null,
+      descuentoHasta: pct ? vencen.get(p.id) ?? null : null,
       foto: foto(ordenadas[0]),
       fotoHover: foto(ordenadas[1]),
       colores,
@@ -116,11 +117,17 @@ export const CON_STOCK = "EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.produ
  * Etapa 9: el producto `p` está en Liquidación (le toca un descuento vigente marcado como liquidación).
  * Mismas reglas que lib/descuentos.ts: una categoría de arriba incluye sus subcategorías.
  */
-export const enLiquidacion = (temporada?: Temporada) => `EXISTS (SELECT 1 FROM tienda.descuentos d
-  WHERE d.liquidacion${temporada ? ` AND d.temporada = '${temporada}'` : ""} AND d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
+/** El descuento `d` está vigente y le toca al producto `p`. */
+export const DESCUENTO_VIGENTE_DE_P = `d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
     AND (d.alcance = 'todo' OR (d.alcance = 'productos' AND p.id = ANY(d.producto_ids))
       OR (d.alcance = 'categorias' AND EXISTS (SELECT 1 FROM tienda.producto_categorias pcl JOIN tienda.categorias cl ON cl.id = pcl.categoria_id
-            WHERE pcl.producto_id = p.id AND (cl.id = ANY(d.categoria_ids) OR cl.padre_id = ANY(d.categoria_ids))))))`;
+            WHERE pcl.producto_id = p.id AND (cl.id = ANY(d.categoria_ids) OR cl.padre_id = ANY(d.categoria_ids)))))`;
+export const enLiquidacion = (temporada?: Temporada) => `EXISTS (SELECT 1 FROM tienda.descuentos d
+  WHERE d.liquidacion${temporada ? ` AND d.temporada = '${temporada}'` : ""} AND ${DESCUENTO_VIGENTE_DE_P})`;
+/** Relámpago: un descuento que termina en 48 horas o menos (ver HORAS_RELAMPAGO en el front). */
+export const FIN_RELAMPAGO = "d.hasta IS NOT NULL AND d.hasta <= now() + interval '48 hours'";
+export const EN_RELAMPAGO = `EXISTS (SELECT 1 FROM tienda.descuentos d WHERE ${FIN_RELAMPAGO} AND ${DESCUENTO_VIGENTE_DE_P})`;
+export const HORAS_RELAMPAGO = 48;
 export const EN_LIQUIDACION = enLiquidacion();
 /** El producto `p` está en la categoría $N o en alguna de sus hijas. */
 const EN_CATEGORIA = (n: number) => `EXISTS (SELECT 1 FROM tienda.producto_categorias pcc JOIN tienda.categorias cc ON cc.id = pcc.categoria_id AND cc.visible
@@ -154,7 +161,7 @@ export async function productosDeCategoria(pool: pg.Pool, categoriaId: number, l
  * Etapa 9: "Packs" y "Liquidación" se pueden pedir de una categoría de arriba
  * (/packs/hombre, /liquidacion/mujer); Liquidación, sólo lo que tiene stock.
  */
-export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite: number, categoriaId: number | null = null, temporada?: Temporada): Promise<FilaProducto[]> {
+export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "packs" | "liquidacion" | "relampago", limite: number, categoriaId: number | null = null, temporada?: Temporada): Promise<FilaProducto[]> {
   const enCategoria = categoriaId === null ? "" : ` AND ${EN_CATEGORIA(2)}`;
   const params = categoriaId === null ? [limite] : [limite, categoriaId];
   const { rows } = await pool.query<FilaProducto>(
@@ -164,6 +171,9 @@ export async function coleccion(pool: pg.Pool, cual: "nuevos" | "destacados" | "
       : cual === "liquidacion"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
           WHERE ${PUBLICABLE} AND ${enLiquidacion(temporada)} AND ${CON_STOCK}${enCategoria} ORDER BY p.creado_en DESC, p.id DESC LIMIT $1`
+      : cual === "relampago"
+      ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
+          WHERE ${PUBLICABLE} AND ${EN_RELAMPAGO} AND ${CON_STOCK} ORDER BY p.creado_en DESC, p.id DESC LIMIT $1`
       : cual === "nuevos"
       ? `SELECT p.id, p.slug, p.nombre, p.creado_en, p.nuevo FROM tienda.productos p
           WHERE p.nuevo AND p.visible AND p.en_stocker${enCategoria} ORDER BY p.nuevo_desde DESC NULLS LAST, p.id DESC LIMIT $1`
@@ -279,6 +289,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
   }));
   const conStock = vs.rows.filter((v) => v.stock > 0);
   const pct = (await desc.para([p.id])).get(p.id) ?? 0;
+  const hasta = pct ? (await desc.vence([p.id])).get(p.id) ?? null : null;
   const base = conStock.length ? conStock : vs.rows;
   const precios = base.map((v) => conRebaja(v.precio, pct));
   const m = migas.rows[0];
@@ -310,6 +321,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
     precioHasta: Math.max(...precios),
     precioLista: pct ? Math.min(...base.map((v) => v.precio)) : null,
     descuento: pct || null,
+    descuentoHasta: hasta,
     agotado: conStock.length === 0,
     guiaTalles: guiaDe(p.guia),
     actualizadoEn: new Date(ultimo).toISOString(),

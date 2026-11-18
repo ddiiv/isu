@@ -49,8 +49,10 @@
   --animate-entra-der: entra-der 320ms var(--ease-suave) both;
   --animate-sale-der: sale-der 220ms var(--ease-sale) both;
   --animate-entra-abajo: entra-abajo 320ms var(--ease-suave) both;
+  --animate-pulso-suave: pulso-suave 2.4s ease-in-out infinite;  /* el relámpago: sólo opacidad, sin parpadeo; con movimiento reducido no corre */
   --animate-desliza: desliza 260ms var(--ease-suave) both;
 
+  @keyframes pulso-suave { 50% { opacity: 0.82; } }
   @keyframes fundido { from { opacity: 0; } }
   @keyframes desvanece { to { opacity: 0; } }
   @keyframes sube { from { opacity: 0; transform: translateY(12px); } }

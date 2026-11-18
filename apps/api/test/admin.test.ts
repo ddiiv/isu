@@ -440,6 +440,29 @@ describe("categorías y descuentos", () => {
     await req("PUT", `/v1/admin/descuentos/${r.json().id}`, operador, { nombre: "QA adm jogger", porcentaje: 20, alcance: "productos", productoIds: [ids["qa-adm-2"]], hasta: "2020-01-02T00:00:00Z", desde: "2020-01-01T00:00:00Z" });
     expect((await app.inject("/v1/productos/qa-adm-2")).json().descuento).toBeNull();
   });
+  it("relámpago: el catálogo trae cuándo termina el descuento; si faltan 48 h o menos sale en la colección y en el cartel de /v1/config", async () => {
+    const en = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
+    const cuerpo = { nombre: "QA adm relámpago", porcentaje: 35, alcance: "productos", productoIds: [ids["qa-adm-2"]] };
+    const hasta100 = en(100);
+    const largo = await req("POST", "/v1/admin/descuentos", operador, { ...cuerpo, hasta: hasta100 });
+    expect(largo.statusCode, largo.body).toBe(201);
+    // Termina en 100 h: se informa el fin, pero no es relámpago.
+    expect((await app.inject("/v1/productos/qa-adm-2")).json().descuentoHasta).toBe(hasta100);
+    const slugs = async () => (await app.inject("/v1/productos?coleccion=relampago")).json().productos.map((x: { slug: string }) => x.slug);
+    expect(await slugs()).not.toContain("qa-adm-2");
+    expect((await app.inject("/v1/config")).json().relampago).toBeNull();
+    // Pasa a terminar en 5 h.
+    const hasta = en(5);
+    await req("PUT", `/v1/admin/descuentos/${largo.json().id}`, operador, { ...cuerpo, hasta });
+    const ficha = (await app.inject("/v1/productos/qa-adm-2")).json();
+    expect(ficha.descuentoHasta).toBe(hasta);
+    expect((await app.inject("/v1/productos?categoria=mujer")).json().productos.find((x: { slug: string }) => x.slug === "qa-adm-2").descuentoHasta).toBe(hasta);
+    expect(await slugs()).toContain("qa-adm-2");
+    expect((await app.inject("/v1/config")).json().relampago).toEqual({ porcentaje: 35, hasta });
+    // Sin descuento vigente: no hay fin que mostrar.
+    await req("DELETE", `/v1/admin/descuentos/${largo.json().id}`, operador);
+    expect((await app.inject("/v1/productos/qa-adm-2")).json().descuentoHasta).toBeNull();
+  });
 });
 
 describe("guías de talles", () => {

@@ -4,7 +4,7 @@ import { Migas } from "./Migas";
 import { SinProductos } from "./SinProductos";
 
 /* /nuevos y /destacados: las colecciones que se eligen con casillas en el backoffice (Packs y Liquidación: PaginaSeccion). */
-export async function PaginaColeccion({ cual, titulo, bajada }: { cual: "nuevos" | "destacados"; titulo: string; bajada: string }) {
+export async function PaginaColeccion({ cual, titulo, bajada }: { cual: "nuevos" | "destacados" | "relampago"; titulo: string; bajada: string }) {
   const [config, marcados] = await Promise.all([obtenerConfig(), obtenerColeccion(cual)]);
   // Si todavía nadie marcó "Nuevo" en ningún producto, se muestra lo último que entró.
   const listado = cual === "nuevos" && !marcados.productos.length ? await obtenerNuevos(48) : marcados;

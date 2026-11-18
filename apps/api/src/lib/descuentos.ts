@@ -8,28 +8,30 @@ import { centavos, conDescuento } from "@isu/shared";
  * para productos elegidos, entre dos fechas opcionales. Si a un producto le
  * tocan varios, gana el mayor: nunca se suman.
  */
-interface Regla { porcentaje: number; alcance: "todo" | "categorias" | "productos"; categorias: Set<number>; productos: Set<number> }
+interface Regla { porcentaje: number; hastaMs: number | null; alcance: "todo" | "categorias" | "productos"; categorias: Set<number>; productos: Set<number> }
 
 export interface Descuentos {
   /** porcentaje de descuento (0 = ninguno) de cada producto pedido */
   para(productoIds: number[]): Promise<Map<number, number>>;
+  /** cuándo termina la rebaja que se le aplica a cada producto (sólo los que tienen fin); relámpago = faltan 48 h o menos */
+  vence(productoIds: number[]): Promise<Map<number, string>>;
 }
 
 export function crearDescuentos(pool: pg.Pool, cache: { obtener<T>(k: string, f: () => Promise<T>): Promise<T> }): Descuentos {
   const reglas = () => cache.obtener("descuentos", async (): Promise<Regla[]> => {
-    const { rows } = await pool.query<{ porcentaje: number; alcance: Regla["alcance"]; categoria_ids: number[]; producto_ids: number[] }>(
-      `SELECT d.porcentaje, d.alcance, d.producto_ids,
+    const { rows } = await pool.query<{ porcentaje: number; hasta_ms: number | null; alcance: Regla["alcance"]; categoria_ids: number[]; producto_ids: number[] }>(
+      `SELECT d.porcentaje, d.alcance, d.producto_ids, extract(epoch FROM d.hasta)::float8 * 1000 AS hasta_ms,
               -- una categoría de arriba incluye sus subcategorías
               COALESCE((SELECT array_agg(c.id) FROM tienda.categorias c WHERE c.id = ANY(d.categoria_ids) OR c.padre_id = ANY(d.categoria_ids)), '{}') AS categoria_ids
          FROM tienda.descuentos d
         WHERE d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())`,
     );
-    return rows.map((r) => ({ porcentaje: r.porcentaje, alcance: r.alcance, categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids) }));
+    return rows.map((r) => ({ porcentaje: r.porcentaje, hastaMs: r.hasta_ms, alcance: r.alcance, categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids) }));
   });
 
-  return {
-    async para(ids) {
-      const salida = new Map<number, number>();
+  // Para cada producto, la regla que gana: la de mayor porcentaje (si empatan, la que termina antes).
+  async function ganadoras(ids: number[]) {
+      const salida = new Map<number, Regla>();
       const rs = await reglas();
       if (!rs.length || !ids.length) return salida;
       const porCategoria = new Map<number, number[]>();
@@ -40,16 +42,25 @@ export function crearDescuentos(pool: pg.Pool, cache: { obtener<T>(k: string, f:
         for (const r of rows) porCategoria.set(r.producto_id, [...(porCategoria.get(r.producto_id) ?? []), r.categoria_id]);
       }
       for (const id of ids) {
-        let max = 0;
+        let mejor: Regla | null = null;
         for (const r of rs) {
           const aplica = r.alcance === "todo"
             || (r.alcance === "productos" && r.productos.has(id))
             || (r.alcance === "categorias" && (porCategoria.get(id) ?? []).some((c) => r.categorias.has(c)));
-          if (aplica && r.porcentaje > max) max = r.porcentaje;
+          if (aplica && (!mejor || r.porcentaje > mejor.porcentaje
+            || (r.porcentaje === mejor.porcentaje && r.hastaMs !== null && (mejor.hastaMs === null || r.hastaMs < mejor.hastaMs)))) mejor = r;
         }
-        if (max > 0) salida.set(id, max);
+        if (mejor && mejor.porcentaje > 0) salida.set(id, mejor);
       }
       return salida;
+  }
+
+  return {
+    async para(ids) {
+      return new Map([...await ganadoras(ids)].map(([id, r]) => [id, r.porcentaje]));
+    },
+    async vence(ids) {
+      return new Map([...await ganadoras(ids)].filter(([, r]) => r.hastaMs !== null).map(([id, r]) => [id, new Date(r.hastaMs!).toISOString()]));
     },
   };
 }

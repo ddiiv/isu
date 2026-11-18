@@ -55,6 +55,7 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   hayLiquidacion: false,
   liquidacionEn: [],
   liquidacionTemporadas: [],
+  relampago: null,
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
@@ -123,7 +124,7 @@ export async function obtenerNuevos(cantidad = 8): Promise<ListadoProductos> {
 }
 
 /** Colecciones elegidas a mano en el backoffice (casillas "Destacado", "Nuevo" y "Pack") y la Liquidación (descuentos marcados). */
-export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion", limite = 200, temporada?: "invierno" | "verano"): Promise<ListadoProductos> {
+export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion" | "relampago", limite = 200, temporada?: "invierno" | "verano"): Promise<ListadoProductos> {
   try {
     return (await pedirCatalogo(`/v1/productos?${new URLSearchParams({ coleccion: cual, limite: String(limite), ...(temporada ? { temporada } : {}) })}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
   } catch (err) {
