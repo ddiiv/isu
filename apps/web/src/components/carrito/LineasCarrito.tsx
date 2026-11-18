@@ -187,6 +187,16 @@ export function LineaCupon({ c, Etiqueta = "span" }: { c: Pick<Cotizacion, "cupo
  * checkout vive adentro del formulario de la compra (Enter aplica el cupón,
  * no confirma la compra).
  */
+/* Cupón de mezcla: cuántas prendas van a precio mayorista y cuánto se ahorra (el precio mayorista no se muestra). */
+function AvisoMezcla({ m }: { m: NonNullable<NonNullable<Cotizacion["cupon"]>["mezcla"]> }) {
+  return (
+    <span className="mt-0.5 block text-xs text-tinta-suave">
+      Llevás {m.unidades} {m.unidades === 1 ? "prenda" : "prendas"}: {m.mayorista} {m.mayorista === 1 ? "va" : "van"} a precio mayorista (ahorrás {formatearPesos(m.ahorro)}).
+      {m.faltan && m.siguiente && m.siguiente > m.mayorista ? <b className="block font-bold text-ahorro">Sumá {m.faltan} {m.faltan === 1 ? "prenda más" : "prendas más"} y {m.siguiente} van a precio mayorista.</b> : null}
+    </span>
+  );
+}
+
 export function CampoCupon() {
   const { cupon, ponerCupon, cotizacion, avisoCupon, cotizando } = useCarrito();
   const [abierto, setAbierto] = useState(false);
@@ -200,7 +210,8 @@ export function CampoCupon() {
   if (aplicado) {
     return (
       <div className="flex items-center justify-between gap-3 rounded-xl bg-ahorro-claro px-3 py-2 text-sm">
-        <span>Cupón <b>{aplicado.codigo}</b> aplicado{aplicado.nombre ? <span className="block text-xs text-tinta-suave">{aplicado.nombre}</span> : null}{aplicado.tope ? <span className="block text-xs text-tinta-suave">Hasta {formatearPesos(aplicado.tope)} de descuento</span> : null}</span>
+        <span>Cupón <b>{aplicado.codigo}</b> aplicado{aplicado.nombre ? <span className="block text-xs text-tinta-suave">{aplicado.nombre}</span> : null}{aplicado.tope ? <span className="block text-xs text-tinta-suave">Hasta {formatearPesos(aplicado.tope)} de descuento</span> : null}
+          {aplicado.mezcla ? <AvisoMezcla m={aplicado.mezcla} /> : null}</span>
         <button type="button" onClick={() => { ponerCupon(null); setTexto(""); }} aria-label={`Quitar el cupón ${aplicado.codigo}`} className="shrink-0 font-bold underline">Quitar</button>
       </div>
     );

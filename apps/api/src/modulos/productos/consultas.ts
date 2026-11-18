@@ -17,7 +17,7 @@ import {
 
 
 interface FilaProducto { id: number; slug: string; nombre: string; creado_en: Date; nuevo: boolean }
-interface FilaVariante { producto_id: number; color_id: number | null; talle: string | null; precio: number; stock: number }
+interface FilaVariante { producto_id: number; color_id: number | null; talle: string | null; precio: number; precio_mayorista: number | null; stock: number }
 interface FilaColor { id: number; producto_id: number; clave: string; nombre: string; hex: string | null }
 interface FilaFoto { producto_id: number; tipo: "color" | "exhibicion"; color_id: number | null; clave: string; ancho: number | null; alto: number | null; alt: string | null }
 
@@ -29,7 +29,7 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
   const ids = productos.map((p) => p.id);
   const [vs, cs, fs, extra] = await Promise.all([
     pool.query<FilaVariante>(
-      "SELECT producto_id, color_id, talle, precio, stock FROM tienda.variantes WHERE producto_id = ANY($1::int[]) AND activo ORDER BY orden",
+      "SELECT producto_id, color_id, talle, precio, precio_mayorista, stock FROM tienda.variantes WHERE producto_id = ANY($1::int[]) AND activo ORDER BY orden",
       [ids],
     ),
     pool.query<FilaColor>(
@@ -63,7 +63,7 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
     const agotado = conStock.length === 0;
     if (agotado && !mostrarAgotados) continue;
     const pct = rebajas.get(p.id) ?? 0;
-    const precios = (agotado ? variantes : conStock).map((v) => conRebaja(v.precio, pct));
+    const precios = (agotado ? variantes : conStock).map((v) => conRebaja(v.precio, pct, v.precio_mayorista));
     const preciosLista = (agotado ? variantes : conStock).map((v) => v.precio);
     const fotos = F.get(p.id) ?? [];
     const usados = new Set(variantes.map((v) => v.color_id));
@@ -266,8 +266,8 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
   if (!p) return null;
 
   const [vs, cs, fs, migas] = await Promise.all([
-    pool.query<{ sku: string; color_id: number | null; talle: string | null; precio: number; stock: number; actualizado_en: Date }>(
-      "SELECT sku, color_id, talle, precio, stock, actualizado_en FROM tienda.variantes WHERE producto_id = $1 AND activo ORDER BY orden, id",
+    pool.query<{ sku: string; color_id: number | null; talle: string | null; precio: number; precio_mayorista: number | null; stock: number; actualizado_en: Date }>(
+      "SELECT sku, color_id, talle, precio, precio_mayorista, stock, actualizado_en FROM tienda.variantes WHERE producto_id = $1 AND activo ORDER BY orden, id",
       [p.id],
     ),
     pool.query<FilaColor>("SELECT id, producto_id, clave, nombre, hex FROM tienda.producto_colores WHERE producto_id = $1 AND activo ORDER BY orden, id", [p.id]),
@@ -291,7 +291,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
   const pct = (await desc.para([p.id])).get(p.id) ?? 0;
   const hasta = pct ? (await desc.vence([p.id])).get(p.id) ?? null : null;
   const base = conStock.length ? conStock : vs.rows;
-  const precios = base.map((v) => conRebaja(v.precio, pct));
+  const precios = base.map((v) => conRebaja(v.precio, pct, v.precio_mayorista));
   const m = migas.rows[0];
   const ultimo = Math.max(p.actualizado_en.getTime(), p.guia_en?.getTime() ?? 0, ...vs.rows.map((v) => v.actualizado_en.getTime()));
 
@@ -312,7 +312,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
       sku: v.sku,
       color: v.color_id ? colorPorId.get(v.color_id)?.clave ?? null : null,
       talle: v.talle,
-      precio: conRebaja(v.precio, pct),
+      precio: conRebaja(v.precio, pct, v.precio_mayorista),
       precioLista: pct ? v.precio : null,
       // El número exacto no viaja: con saber si hay (y si quedan pocas) alcanza.
       stock: Math.min(v.stock, STOCK_VISIBLE_MAX),

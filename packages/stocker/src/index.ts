@@ -26,7 +26,8 @@ const texto = (max: number) => z.string().trim().max(max).nullable().optional().
  * Formas del contrato v1 de Stocker (GET /catalogo y GET /stock). Se validan
  * tal cual llegan y se pasan a la forma que usa la tienda: `skuAgrupador` →
  * `sku`, `precioMinorista` → `precio` (en centavos), `publicable` →
- * `cantidad`. El precio mayorista no se lee: la tienda vende al público.
+ * `cantidad`. El precio mayorista se guarda sólo para el piso de los descuentos
+ * (ningún cupón deja una prenda por debajo): es un dato interno, no se publica.
  */
 const Publicable = z.number().int().max(1_000_000).transform((n) => Math.max(0, n));
 
@@ -36,6 +37,7 @@ const VarianteV1 = z.object({
   color: texto(60),
   talle: texto(40),
   precioMinorista: Precio.optional().transform((v) => v ?? null),
+  precioMayorista: Precio.optional().transform((v) => v ?? null),
   publicable: Publicable,
   // Sin el campo, activa (como antes de que Stocker lo mandara).
   activo: z.boolean().optional().default(true),
@@ -53,6 +55,7 @@ const ProductoV1 = z.object({
   genero: texto(40),
   modelo: texto(80),
   precioMinorista: Precio.optional().transform((v) => v ?? null),
+  precioMayorista: Precio.optional().transform((v) => v ?? null),
   variantes: z.array(VarianteV1).max(500),
   /*
    * A la tienda llegan sólo los productos padre. Stocker ya deja afuera los
@@ -73,7 +76,7 @@ const esPadre = (p: z.output<typeof ProductoV1>) =>
   !p.esFeria && !p.esEvento && !p.esCombo && !p.esPack && (p.definicionCombo === undefined || p.definicionCombo === null || p.definicionCombo === "")
   && (p.tipo === undefined || p.tipo === null || TIPOS_PADRE.has(p.tipo.toLowerCase()));
 
-const aVariante = (v: z.output<typeof VarianteV1>) => ({ id: v.id, sku: v.sku, color: v.color, talle: v.talle, precio: v.precioMinorista, cantidad: v.publicable });
+const aVariante = (v: z.output<typeof VarianteV1>) => ({ id: v.id, sku: v.sku, color: v.color, talle: v.talle, precio: v.precioMinorista, mayorista: v.precioMayorista, cantidad: v.publicable });
 
 export const VarianteStocker = VarianteV1.transform(aVariante);
 export type VarianteStocker = z.output<typeof VarianteStocker>;
@@ -87,6 +90,7 @@ const aProducto = (p: z.output<typeof ProductoV1>) => ({
   genero: p.genero,
   modelo: p.modelo,
   precio: p.precioMinorista,
+  mayorista: p.precioMayorista,
   // Una variante dada de baja en Stocker no se vende: es como si no viniera. Tampoco las de pack o combo.
   variantes: p.variantes.filter((v) => v.activo && !v.esPack && !v.esCombo).map(aVariante),
 });

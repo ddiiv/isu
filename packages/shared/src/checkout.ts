@@ -176,6 +176,8 @@ export const CuponCotizado = z.object({
   envioGratis: z.boolean(),
   /** Tope del descuento en centavos (cupón de porcentaje), para decírselo al cliente. */
   tope: z.number().int().nullable().optional(),
+  /** Cupón de mezcla: qué se le cuenta al cliente (cuántas prendas van a precio mayorista y cuánto ahorra; el precio mayorista no viaja). */
+  mezcla: z.object({ unidades: z.number().int(), mayorista: z.number().int(), ahorro: z.number().int(), faltan: z.number().int().nullable(), siguiente: z.number().int().nullable() }).nullable().optional(),
 });
 export type CuponCotizado = z.infer<typeof CuponCotizado>;
 

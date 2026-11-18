@@ -4,11 +4,13 @@ import { z } from "zod";
  * Cupones y promociones por monto (backoffice). Los montos en centavos,
  * como todo en la tienda. Ver la migración 0011 y apps/api/src/lib/cupones.ts.
  */
-export const TIPOS_CUPON = ["porcentaje", "monto", "envio_gratis"] as const;
+export const TIPOS_CUPON = ["porcentaje", "monto", "envio_gratis", "mezcla"] as const;
 export const ALCANCES_CUPON = ["todo", "categorias", "productos"] as const;
 export const CODIGO_CUPON = /^[A-Z0-9][A-Z0-9_-]{2,29}$/;
 
 const IdCupon = z.number().int().positive().max(2_147_483_647);
+/** Mezcla: con `desde` prendas elegibles o más, `mayorista` de ellas (las más baratas) van a precio mayorista. */
+export const TramoMezcla = z.object({ desde: z.number().int().min(2).max(50), mayorista: z.number().int().min(1).max(50) }).strict();
 const Fecha = z.iso.datetime({ offset: true }).nullable().default(null);
 
 export const CuponEntrada = z.object({
@@ -25,7 +27,10 @@ export const CuponEntrada = z.object({
   sobreRebajas: z.boolean().default(true),
   /** compra mínima en centavos (0 = sin mínimo) */
   minimo: z.number().int().min(0).max(1_000_000_000).default(0),
-  /** porcentaje: el descuento no pasa de este monto en centavos (null = sin tope) */
+  /** mezcla: los tramos (de menor a mayor) y el máximo de prendas a mayorista por compra */
+  escala: z.array(TramoMezcla).max(10).default([]),
+  maxMayorista: z.number().int().min(1).max(50).default(5),
+  /** porcentaje o mezcla: el descuento no pasa de este monto en centavos (null = sin tope) */
   tope: z.number().int().min(100).max(1_000_000_000).nullable().default(null),
   desde: Fecha,
   hasta: Fecha,
@@ -37,7 +42,15 @@ export const CuponEntrada = z.object({
   if (c.automatico && c.codigo) mal("codigo", "Una promoción automática no lleva código");
   if (!c.automatico && !c.codigo) mal("codigo", "Poné el código que va a escribir el cliente");
   if (c.tipo === "porcentaje" && (c.valor < 1 || c.valor > 90)) mal("valor", "El porcentaje va de 1 a 90");
-  if (c.tope !== null && c.tipo !== "porcentaje") mal("tope", "El tope es sólo para cupones de porcentaje");
+  if (c.tope !== null && c.tipo !== "porcentaje" && c.tipo !== "mezcla") mal("tope", "El tope es sólo para cupones de porcentaje o de mezcla");
+  if (c.tipo === "mezcla") {
+    if (c.valor !== 0) mal("valor", "La mezcla no lleva valor");
+    if (!c.escala.length) mal("escala", "Cargá al menos un tramo (por ejemplo: desde 3 prendas, 1 a mayorista)");
+    c.escala.forEach((t, i) => {
+      if (t.mayorista > t.desde) mal("escala", `Tramo ${i + 1}: no pueden ir a mayorista más prendas de las que lleva`);
+      if (i > 0 && t.desde <= c.escala[i - 1]!.desde) mal("escala", "Los tramos van de menor a mayor, sin repetir cantidad");
+    });
+  } else if (c.escala.length) mal("escala", "La escala es sólo para cupones de mezcla");
   if (c.tipo === "monto" && c.valor < 100) mal("valor", "El monto tiene que ser de al menos $1");
   if (c.tipo === "envio_gratis" && c.valor !== 0) mal("valor", "El envío gratis no lleva valor");
   if (c.alcance === "categorias" && !c.categoriaIds.length) mal("categoriaIds", "Elegí al menos una categoría");
@@ -49,6 +62,7 @@ export type CuponEntrada = z.infer<typeof CuponEntrada>;
 
 /** Cómo se lee un cupón en una línea: "15% OFF", "$5.000 OFF", "Envío gratis". */
 export function resumenCupon(c: { tipo: (typeof TIPOS_CUPON)[number]; valor: number; tope?: number | null }, pesos: (c: number) => string): string {
+  if (c.tipo === "mezcla") return `Mezcla mayorista${c.tope ? `, hasta ${pesos(c.tope)} de descuento` : ""}`;
   if (c.tipo === "porcentaje") return `${c.valor}% OFF${c.tope ? `, hasta ${pesos(c.tope)} de descuento` : ""}`;
   if (c.tipo === "monto") return `${pesos(c.valor)} OFF`;
   return "Envío gratis";

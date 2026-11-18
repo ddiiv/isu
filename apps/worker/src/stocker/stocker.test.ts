@@ -18,11 +18,11 @@ function catalogo(productos: CatalogoStocker["productos"], generado = ahora()): 
 }
 const remera = (extra: Partial<CatalogoStocker["productos"][number]> = {}) => ({
   id: BASE + 1, sku: "QA-W-REM", titulo: "Remera Oversize Algodón", descripcion: "Algodón peinado", categoria: "Remeras", genero: "Mujer",
-  modelo: null, precio: 1200000,
+  modelo: null, precio: 1200000, mayorista: 700000,
   variantes: [
-    { id: BASE + 11, sku: "QA-W-REM-NEG-M", color: "Negro", talle: "M", precio: 1200000, cantidad: 5 },
-    { id: BASE + 12, sku: "QA-W-REM-NEG-L", color: "Negro", talle: "L", precio: 1200000, cantidad: 0 },
-    { id: BASE + 13, sku: "QA-W-REM-BLA-M", color: "Blanco", talle: "M", precio: 1350000, cantidad: 2 },
+    { id: BASE + 11, sku: "QA-W-REM-NEG-M", color: "Negro", talle: "M", precio: 1200000, mayorista: null, cantidad: 5 },
+    { id: BASE + 12, sku: "QA-W-REM-NEG-L", color: "Negro", talle: "L", precio: 1200000, mayorista: 650000, cantidad: 0 },
+    { id: BASE + 13, sku: "QA-W-REM-BLA-M", color: "Blanco", talle: "M", precio: 1350000, mayorista: null, cantidad: 2 },
   ],
   ...extra,
 });
@@ -60,6 +60,17 @@ describe("catálogo", () => {
       `SELECT pa.slug || '/' || c.slug AS ruta FROM tienda.producto_categorias pc JOIN tienda.categorias c ON c.id = pc.categoria_id
          JOIN tienda.categorias pa ON pa.id = c.padre_id WHERE pc.producto_id = $1`, [p.id])).rows;
     expect(cats).toEqual([{ ruta: "mujer/remeras-y-tops" }]);
+  });
+
+  it("guarda el precio mayorista de cada variante (el de la variante, o el del producto si no trae) y un cambio se aplica", async () => {
+    const mayoristas = async () => (await pool.query(
+      "SELECT v.sku, v.precio_mayorista AS m FROM tienda.variantes v JOIN tienda.productos p ON p.id = v.producto_id WHERE p.stocker_id = $1 ORDER BY v.orden", [BASE + 1])).rows;
+    await aplicarCatalogo(pool, catalogo([remera()]));
+    expect(await mayoristas()).toEqual([{ sku: "QA-W-REM-NEG-M", m: 700000 }, { sku: "QA-W-REM-NEG-L", m: 650000 }, { sku: "QA-W-REM-BLA-M", m: 700000 }]);
+    const p2 = remera();
+    p2.variantes[0]!.mayorista = 720000;
+    expect((await aplicarCatalogo(pool, catalogo([p2]))).cambios).toBeGreaterThan(0);
+    expect((await mayoristas())[0]).toEqual({ sku: "QA-W-REM-NEG-M", m: 720000 });
   });
 
   it("la segunda pasada igual no escribe nada", async () => {
@@ -269,6 +280,8 @@ describe("cliente de Stocker", () => {
     expect(c.productos[0]!.sku).toBe("A");
     expect(c.productos[0]!.variantes[0]!.color).toBeNull();
     expect(c.productos[0]!.variantes[0]!.cantidad).toBe(1);
+    // El mayorista (el piso de los descuentos) se lee: el del producto en centavos, el de la variante sin valor queda null.
+    expect([c.productos[0]!.mayorista, c.productos[0]!.variantes[0]!.mayorista]).toEqual([600000, null]);
   });
   it("lee la respuesta real de Stocker (contrato v1): publicable, activo y precio minorista", async () => {
     // Recorte de GET /api/integraciones/tienda/catalogo de Stocker (04/10/2026).

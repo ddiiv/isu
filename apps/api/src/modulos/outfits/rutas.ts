@@ -67,8 +67,8 @@ export async function rutasOutfits(app: FastifyInstance, deps: { pool: pg.Pool; 
     if (!usables.length) return [];
     const ids = usables.map((p) => p.id);
     const [vs, cs, fs, pct] = await Promise.all([
-      pool.query<{ producto_id: number; sku: string; talle: string | null; precio: number; color_id: number | null }>(
-        "SELECT producto_id, sku, talle, precio, color_id FROM tienda.variantes WHERE producto_id = ANY($1::int[]) AND activo AND stock > 0 ORDER BY orden, id", [ids]),
+      pool.query<{ producto_id: number; sku: string; talle: string | null; precio: number; precio_mayorista: number | null; color_id: number | null }>(
+        "SELECT producto_id, sku, talle, precio, precio_mayorista, color_id FROM tienda.variantes WHERE producto_id = ANY($1::int[]) AND activo AND stock > 0 ORDER BY orden, id", [ids]),
       pool.query<{ id: number; clave: string; nombre: string; hex: string | null }>(
         "SELECT id, clave, nombre, hex FROM tienda.producto_colores WHERE producto_id = ANY($1::int[]) AND activo", [ids]),
       pool.query<{ producto_id: number; tipo: string; color_id: number | null; clave: string; ancho: number | null; alto: number | null; alt: string | null }>(
@@ -89,7 +89,7 @@ export async function rutasOutfits(app: FastifyInstance, deps: { pool: pg.Pool; 
         const d = pct.get(p.id) ?? 0;
         return {
           sku: v.sku, talle: v.talle,
-          precio: conRebaja(v.precio, d),
+          precio: conRebaja(v.precio, d, v.precio_mayorista),
           precioLista: d ? v.precio : null,
           color: c ? { clave: c.clave, nombre: c.nombre, hex: c.hex } : null,
           foto: fotoDe(p.id, v.color_id),

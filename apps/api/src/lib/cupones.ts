@@ -20,7 +20,7 @@ export interface Cupon {
   codigo: string | null;
   nombre: string;
   automatico: boolean;
-  tipo: "porcentaje" | "monto" | "envio_gratis";
+  tipo: "porcentaje" | "monto" | "envio_gratis" | "mezcla";
   valor: number;
   alcance: "todo" | "categorias" | "productos";
   /** ids de categoría, con las subcategorías de las elegidas ya sumadas */
@@ -30,6 +30,10 @@ export interface Cupon {
   minimo: number;
   /** porcentaje: el descuento no pasa de esto (centavos); null = sin tope */
   tope: number | null;
+  /** mezcla: con N prendas elegibles o más, K a precio mayorista (el tramo más alto que alcance) */
+  escala: Array<{ desde: number; mayorista: number }>;
+  /** mezcla: máximo de prendas a mayorista por compra */
+  maxMayorista: number;
   desde: Date | null;
   hasta: Date | null;
   usosMax: number | null;
@@ -43,6 +47,8 @@ export interface LineaParaCupon {
   productoId: number;
   /** por unidad, ya con la rebaja de la prenda */
   precio: number;
+  /** precio mayorista (el piso); null = no cargado. Dato interno: no sale de la API. */
+  mayorista: number | null;
   /** tiene rebaja (descuento masivo) */
   rebajada: boolean;
   cantidad: number;
@@ -54,6 +60,8 @@ export interface CuponAplicado {
   /** descuento por unidad de cada SKU */
   porUnidad: Map<string, number>;
   envioGratis: boolean;
+  /** mezcla: lo que se le cuenta al cliente (sin el precio mayorista) */
+  mezcla?: { unidades: number; mayorista: number; ahorro: number; faltan: number | null; siguiente: number | null };
 }
 
 /** Normaliza lo que escribe el cliente: " verano10 " → "VERANO10". */
@@ -61,7 +69,7 @@ export const normalizarCodigo = (s: string) => s.trim().toUpperCase().replace(/\
 export const CODIGO = /^[A-Z0-9][A-Z0-9_-]{2,29}$/;
 
 const SELECT = `
-  SELECT c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.producto_ids, c.sobre_rebajas, c.minimo, c.tope,
+  SELECT c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.producto_ids, c.sobre_rebajas, c.minimo, c.tope, c.escala, c.max_mayorista,
          c.desde, c.hasta, c.usos_max, c.usos_por_cliente, c.usos, c.activo,
          -- una categoría de arriba incluye sus subcategorías
          COALESCE((SELECT array_agg(k.id) FROM tienda.categorias k WHERE k.id = ANY(c.categoria_ids) OR k.padre_id = ANY(c.categoria_ids)), '{}') AS categoria_ids
@@ -69,12 +77,13 @@ const SELECT = `
 
 interface FilaCupon {
   id: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Cupon["tipo"]; valor: number; alcance: Cupon["alcance"];
-  producto_ids: number[]; categoria_ids: number[]; sobre_rebajas: boolean; minimo: number; tope: string | null; desde: Date | null; hasta: Date | null;
+  producto_ids: number[]; categoria_ids: number[]; sobre_rebajas: boolean; minimo: number; tope: string | null; escala: Array<{ desde: number; mayorista: number }> | null; max_mayorista: number; desde: Date | null; hasta: Date | null;
   usos_max: number | null; usos_por_cliente: number | null; usos: number; activo: boolean;
 }
 const aCupon = (r: FilaCupon): Cupon => ({
   id: r.id, codigo: r.codigo, nombre: r.nombre, automatico: r.automatico, tipo: r.tipo, valor: r.valor, alcance: r.alcance,
   categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids), sobreRebajas: r.sobre_rebajas, minimo: r.minimo, tope: r.tope === null ? null : Number(r.tope),
+  escala: r.escala ?? [], maxMayorista: r.max_mayorista,
   desde: r.desde, hasta: r.hasta, usosMax: r.usos_max, usosPorCliente: r.usos_por_cliente, usos: r.usos, activo: r.activo,
 });
 
@@ -134,25 +143,66 @@ export function aplicarCupon(
   if (!elegibles.length) {
     return { error: c.sobreRebajas || !lineas.some((l) => l.rebajada) ? "Este cupón no aplica a los productos de tu carrito." : "Este cupón no aplica a prendas que ya están en oferta." };
   }
+  // El piso: el descuento de una línea nunca pasa de (precio − mayorista) por unidad. Sin mayorista cargado,
+  // o con un mayorista que no está por debajo del precio, no se puede verificar y la línea no recibe descuento.
+  const pisoUnidad = (l: LineaParaCupon) => (l.mayorista !== null && l.mayorista < l.precio ? l.precio - l.mayorista : 0);
+  const descontables = elegibles.filter((l) => pisoUnidad(l) > 0);
   const porUnidad = new Map<string, number>();
-  // Monto fijo: se reparte en proporción a lo que pesa cada línea, por unidad y al peso.
-  const repartir = (total: number) => {
-    const base = elegibles.reduce((s, l) => s + l.precio * l.cantidad, 0);
-    const monto = Math.min(total, base);
-    for (const l of elegibles) {
-      const deLinea = Math.floor((monto * l.precio * l.cantidad) / base);
-      const unidad = Math.min(l.precio, Math.floor(deLinea / l.cantidad / 100) * 100);
-      porUnidad.set(l.sku, unidad);
+  let mezcla: CuponAplicado["mezcla"];
+  if (c.tipo === "mezcla") {
+    // Unidades elegibles de todas las líneas: el tramo más alto que alcance dice cuántas van a mayorista (hasta el máximo).
+    const unidades = elegibles.reduce((s, l) => s + l.cantidad, 0);
+    const escala = [...c.escala].sort((x, y) => x.desde - y.desde);
+    const tramo = escala.filter((t) => t.desde <= unidades).at(-1);
+    const sig = escala.find((t) => t.desde > unidades);
+    const k = Math.min(tramo?.mayorista ?? 0, c.maxMayorista);
+    if (!k) {
+      const falta = sig ? sig.desde - unidades : null;
+      const cuantas = Math.min(sig?.mayorista ?? 1, c.maxMayorista);
+      return { error: falta
+        ? `Sumá ${falta} ${falta === 1 ? "prenda más" : "prendas más"} y ${cuantas === 1 ? "la más barata va" : `las ${cuantas} más baratas van`} a precio mayorista.`
+        : "Este cupón no aplica a estas prendas." };
     }
-  };
-  if (c.tipo === "porcentaje") {
-    for (const l of elegibles) porUnidad.set(l.sku, l.precio - conDescuento(centavos(l.precio), c.valor));
-    // Con tope: si el porcentaje se pasa, el descuento queda en el tope (repartido igual que un monto).
-    if (c.tope !== null && elegibles.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0) > c.tope) repartir(c.tope);
-  } else repartir(c.valor);
+    // Las K unidades más baratas (por precio ya rebajado) que tengan piso verificable.
+    let quedan = k;
+    const porLinea = new Map<string, number>();
+    for (const l of [...descontables].sort((x, y) => x.precio - y.precio)) {
+      const n = Math.min(l.cantidad, quedan);
+      if (n > 0) { porLinea.set(l.sku, n * pisoUnidad(l)); quedan -= n; }
+    }
+    const bruto = [...porLinea.values()].reduce((s, d) => s + d, 0);
+    // Con tope: se achica en proporción, sin pasarse.
+    if (c.tope !== null && bruto > c.tope) {
+      for (const [sku, d] of porLinea) porLinea.set(sku, Math.floor((c.tope * d) / bruto));
+    }
+    // Por unidad, al peso hacia abajo y sin pasar del piso: el total nunca supera lo que corresponde.
+    for (const l of descontables) {
+      const d = porLinea.get(l.sku) ?? 0;
+      porUnidad.set(l.sku, Math.min(pisoUnidad(l), Math.floor(d / l.cantidad / 100) * 100));
+    }
+    const llevadas = k - quedan;
+    const ahorro = descontables.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0);
+    mezcla = { unidades, mayorista: llevadas, ahorro, faltan: sig ? sig.desde - unidades : null, siguiente: sig ? Math.min(sig.mayorista, c.maxMayorista) : null };
+  } else {
+    // Reparte `total` en proporción a lo que pesa cada línea, por unidad y al peso, sin pasar del piso de cada una.
+    const repartir = (total: number) => {
+      const base = descontables.reduce((s, l) => s + l.precio * l.cantidad, 0);
+      const monto = Math.min(total, base);
+      for (const l of descontables) {
+        const deLinea = Math.floor((monto * l.precio * l.cantidad) / base);
+        porUnidad.set(l.sku, Math.min(pisoUnidad(l), Math.floor(deLinea / l.cantidad / 100) * 100));
+      }
+    };
+    if (c.tipo === "porcentaje") {
+      for (const l of descontables) porUnidad.set(l.sku, Math.min(pisoUnidad(l), l.precio - conDescuento(centavos(l.precio), c.valor)));
+      // Con tope: si el porcentaje se pasa, el descuento queda en el tope (repartido igual que un monto).
+      if (c.tope !== null && descontables.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0) > c.tope) repartir(c.tope);
+    } else repartir(c.valor);
+  }
   const descuento = elegibles.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0);
-  if (descuento <= 0) return { error: "Este cupón no descuenta nada en este carrito." };
-  return { cupon: c, descuento, porUnidad, envioGratis: false };
+  // Sin piso verificable en ninguna prenda no se dice por qué: el precio mayorista no se muestra.
+  if (descuento <= 0) return { error: descontables.length ? "Este cupón no descuenta nada en este carrito." : "Este cupón no aplica a estas prendas." };
+  return { cupon: c, descuento, porUnidad, envioGratis: false, ...(mezcla ? { mezcla } : {}) };
 }
 
 /*
