@@ -254,7 +254,7 @@ export async function cotizar(
   }
   return {
     lineas, packs, subtotal,
-    cupon: aplicado ? { codigo: aplicado.cupon.codigo, nombre: aplicado.cupon.nombre, envioGratis: aplicado.envioGratis } : null,
+    cupon: aplicado ? { codigo: aplicado.cupon.codigo, nombre: aplicado.cupon.nombre, envioGratis: aplicado.envioGratis, tope: aplicado.cupon.tope } : null,
     descuentoCupon, avisoCupon, promoCerca,
     descuento, envio, total: neto + envio,
     envioGratisDesde: a.envioGratisDesde,

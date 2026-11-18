@@ -16,7 +16,7 @@ import { puede, useYo } from "@/components/Marco";
 type Tipo = "porcentaje" | "monto" | "envio_gratis";
 interface Cupon {
   id?: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Tipo; valor: number;
-  alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; minimo: number;
+  alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; minimo: number; tope: number | null;
   desde: string | null; hasta: string | null; usosMax: number | null; usosPorCliente: number | null; activo: boolean;
   usos?: number; vigente?: boolean; creadoPor?: string; creadoEn?: string; pedidosPagados?: number; descontado?: number; vendido?: number;
 }
@@ -24,7 +24,7 @@ interface Uso { numero: string; email: string; estado: string; total: number; de
 
 const vacio: Cupon = {
   codigo: "", nombre: "", automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoriaIds: [], productoIds: [],
-  sobreRebajas: true, minimo: 0, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
+  sobreRebajas: true, minimo: 0, tope: null, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
 };
 const aLocal = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const deLocal = (v: string) => (v ? new Date(v).toISOString() : null);
@@ -52,7 +52,7 @@ export default function Cupones() {
   const cuerpoDe = (c: Cupon) => ({
     automatico: c.automatico, codigo: c.automatico ? null : c.codigo?.trim().toUpperCase() || null, nombre: c.nombre, tipo: c.tipo,
     valor: c.tipo === "envio_gratis" ? 0 : c.valor, alcance: c.alcance, categoriaIds: c.categoriaIds, productoIds: c.productoIds,
-    sobreRebajas: c.sobreRebajas, minimo: c.minimo, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
+    sobreRebajas: c.sobreRebajas, minimo: c.minimo, tope: c.tipo === "porcentaje" ? c.tope : null, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
   });
   async function guardar() {
     if (!f) return;
@@ -171,6 +171,11 @@ export default function Cupones() {
               <Campo etiqueta="Compra mínima" ayuda="Sobre el total de productos ya rebajados. Vacío = sin mínimo." error={err("minimo")}>
                 <EntradaPesos valor={f.minimo || null} onChange={(v) => setF({ ...f, minimo: v ?? 0 })} />
               </Campo>
+              {f.tipo === "porcentaje" && (
+                <Campo etiqueta="Tope del descuento ($)" ayuda="El descuento nunca pasa de este monto. Vacío = sin tope." error={err("tope")}>
+                  <EntradaPesos valor={f.tope} onChange={(v) => setF({ ...f, tope: v })} />
+                </Campo>
+              )}
               <Campo etiqueta="Se aplica a" error={err("categoriaIds") ?? err("productoIds")}>
                 <select className={claseEntrada} value={f.alcance} onChange={(e) => setF({ ...f, alcance: e.target.value as Cupon["alcance"] })}>
                   <option value="todo">Toda la tienda</option><option value="categorias">Categorías</option><option value="productos">Prendas elegidas</option>

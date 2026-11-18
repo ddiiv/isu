@@ -763,11 +763,11 @@ describe("tienda apagada", () => {
 describe("cupones", () => {
   const cupon = async (c: Record<string, unknown>) => {
     const d = { codigo: null, automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoria_ids: [], producto_ids: [], sobre_rebajas: true,
-      minimo: 0, desde: null, hasta: null, usos_max: null, usos_por_cliente: null, activo: true, ...c };
+      minimo: 0, tope: null, desde: null, hasta: null, usos_max: null, usos_por_cliente: null, activo: true, ...c };
     const { rows } = await pool.query(
-      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, sobre_rebajas, minimo, desde, hasta, usos_max, usos_por_cliente, activo, creado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'qa') RETURNING id`,
-      [d.codigo, `QA ${d.codigo ?? "promo"}`, d.automatico, d.tipo, d.valor, d.alcance, d.categoria_ids, d.producto_ids, d.sobre_rebajas, d.minimo, d.desde, d.hasta, d.usos_max, d.usos_por_cliente, d.activo]);
+      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, sobre_rebajas, minimo, desde, hasta, usos_max, usos_por_cliente, activo, tope, creado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'qa') RETURNING id`,
+      [d.codigo, `QA ${d.codigo ?? "promo"}`, d.automatico, d.tipo, d.valor, d.alcance, d.categoria_ids, d.producto_ids, d.sobre_rebajas, d.minimo, d.desde, d.hasta, d.usos_max, d.usos_por_cliente, d.activo, d.tope]);
     return rows[0].id as number;
   };
   const carrito = async (extra: Record<string, unknown>) => (await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 2 }], medioPago: "mercadopago", ...extra })).json();
@@ -779,10 +779,33 @@ describe("cupones", () => {
     await cargarCatalogo();
   });
 
+  it("tope: bajo el tope descuenta el %, sobre el tope queda en el tope, sin tope sigue el %, con mínimo también; el cliente ve el tope", async () => {
+    // Carrito de $20.000 (2 x $10.000): 10% = $2.000.
+    await cupon({ codigo: "QATOPEALTO", tope: 500_000 });
+    expect((await carrito({ cupon: "QATOPEALTO" })).descuentoCupon).toBe(200_000);
+    await cupon({ codigo: "QATOPE", tope: 150_000 });
+    const t = await carrito({ cupon: "QATOPE" });
+    expect([t.descuentoCupon, t.total, t.cupon.tope]).toEqual([150_000, 1_850_000, 150_000]);
+    await cupon({ codigo: "QASINTOPE" });
+    expect((await carrito({ cupon: "QASINTOPE" })).descuentoCupon).toBe(200_000);
+    await cupon({ codigo: "QATOPEMIN", tope: 150_000, minimo: 3_000_000 });
+    expect((await carrito({ cupon: "QATOPEMIN" })).avisoCupon).toMatch(/compras desde/);
+    await cupon({ codigo: "QATOPEMIN2", tope: 150_000, minimo: 1_000_000 });
+    expect((await carrito({ cupon: "QATOPEMIN2" })).descuentoCupon).toBe(150_000);
+    // Varias líneas: el tope se reparte y la suma cierra (por unidad, al peso).
+    const m = await carrito({ cupon: "QATOPE", items: [{ sku: "QA-C-M", cantidad: 2 }, { sku: "QA-C-L", cantidad: 1 }] });
+    expect(m.descuentoCupon).toBeLessThanOrEqual(150_000);
+    expect(m.descuentoCupon).toBeGreaterThan(149_000);
+    // Entre promociones automáticas, "el que más descuenta" ya cuenta con el tope.
+    await cupon({ codigo: null, automatico: true, valor: 50, tope: 100_000 });
+    await cupon({ codigo: null, automatico: true, valor: 10 });
+    expect((await carrito({})).descuentoCupon).toBe(200_000);
+  });
+
   it("porcentaje: se aplica sobre el precio (mayúsculas y espacios no importan); uno que no existe avisa y no cambia nada", async () => {
     await cupon({ codigo: "QA10" });
     const c = await carrito({ cupon: " qa10 " });
-    expect([c.subtotal, c.descuentoCupon, c.total, c.cupon]).toEqual([2_000_000, 200_000, 1_800_000, { codigo: "QA10", nombre: "QA QA10", envioGratis: false }]);
+    expect([c.subtotal, c.descuentoCupon, c.total, c.cupon]).toEqual([2_000_000, 200_000, 1_800_000, { codigo: "QA10", nombre: "QA QA10", envioGratis: false, tope: null }]);
     const x = await carrito({ cupon: "NOEXISTE" });
     expect([x.descuentoCupon, x.total, x.cupon, x.avisoCupon]).toEqual([0, 2_000_000, null, "Ese cupón no existe. Revisá que esté bien escrito."]);
   });

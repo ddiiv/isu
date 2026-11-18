@@ -749,10 +749,22 @@ describe("cupones y promociones", () => {
       { ...base, codigo: "QAADM5", alcance: "categorias", categoriaIds: [] },
       { ...base, codigo: "QAADM6", usos: 99 },
       { ...base, automatico: true, usosPorCliente: 1 },
+      { ...base, codigo: "QAADM7", tope: 0 },
+      { ...base, codigo: "QAADM8", tipo: "monto", valor: 500_000, tope: 100_000 },
     ];
     for (const b of mal) expect((await req("POST", "/v1/admin/cupones", operador, b)).statusCode, JSON.stringify(b)).toBe(400);
     const promo = await req("POST", "/v1/admin/cupones", operador, { nombre: "QA adm envío gratis desde $50.000", tipo: "envio_gratis", valor: 0, automatico: true, minimo: 5_000_000 });
     expect(promo.statusCode, promo.body).toBe(201);
+  });
+  it("tope: se guarda, se lista y se puede sacar; en envío gratis no va", async () => {
+    const r = await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMTOPE", tope: 1_250_000, valor: 25 });
+    expect(r.statusCode, r.body).toBe(201);
+    const id = r.json().id;
+    const lista = async () => (await req("GET", "/v1/admin/cupones", operador)).json().cupones.find((c: { id: number }) => c.id === id);
+    expect((await lista()).tope).toBe(1_250_000);
+    expect((await req("PUT", `/v1/admin/cupones/${id}`, operador, { ...base, codigo: "QAADMTOPE", tope: null })).statusCode).toBe(200);
+    expect((await lista()).tope).toBeNull();
+    expect((await req("POST", "/v1/admin/cupones", operador, { nombre: "QA adm envío", tipo: "envio_gratis", valor: 0, codigo: "QAADM9", tope: 100_000 })).statusCode).toBe(400);
   });
   it("lectura no crea; un cupón usado no se borra (se desactiva)", async () => {
     expect((await req("POST", "/v1/admin/cupones", lectura2, { ...base, codigo: "QAADMLEC" })).json().error).toBe("sin_permiso");

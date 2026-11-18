@@ -200,7 +200,7 @@ export function CampoCupon() {
   if (aplicado) {
     return (
       <div className="flex items-center justify-between gap-3 rounded-xl bg-ahorro-claro px-3 py-2 text-sm">
-        <span>Cupón <b>{aplicado.codigo}</b> aplicado{aplicado.nombre ? <span className="block text-xs text-tinta-suave">{aplicado.nombre}</span> : null}</span>
+        <span>Cupón <b>{aplicado.codigo}</b> aplicado{aplicado.nombre ? <span className="block text-xs text-tinta-suave">{aplicado.nombre}</span> : null}{aplicado.tope ? <span className="block text-xs text-tinta-suave">Hasta {formatearPesos(aplicado.tope)} de descuento</span> : null}</span>
         <button type="button" onClick={() => { ponerCupon(null); setTexto(""); }} aria-label={`Quitar el cupón ${aplicado.codigo}`} className="shrink-0 font-bold underline">Quitar</button>
       </div>
     );
