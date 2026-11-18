@@ -110,6 +110,8 @@ export const ConfigPublica = z.object({
   liquidacionEn: z.array(z.string()).default([]),
   /** Las temporadas (invierno, verano) que tienen algo en liquidación con stock. */
   liquidacionTemporadas: z.array(z.enum(["invierno", "verano"])).default([]),
+  /** El descuento relámpago más grande que está vigente y termina en 48 h o menos (el cartel de arriba del sitio); null = no hay. */
+  relampago: z.object({ porcentaje: z.number().int(), hasta: z.string() }).nullable().default(null),
   /** Cuidados generales de las prendas (la ficha los muestra). */
   cuidados: z.string().max(600).default(""),
   /** Números de la marca para el inicio ("+10 años · diseñando y fabricando"). */

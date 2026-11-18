@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { display, texto } from "@isu/ui/fuentes";
 import { Anuncio } from "@/components/Anuncio";
+import { CartelRelampago } from "@/components/Relampago";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { BotonWhatsapp } from "@/components/BotonWhatsapp";
@@ -54,6 +55,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
       <body>
         <a href="#contenido" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:shadow">Saltar al contenido</a>
         <ProveedorCarrito>
+          <CartelRelampago relampago={config.relampago} />
           <Anuncio texto={config.anuncio} envioGratisDesde={config.envioGratisDesde} />
           <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, hayLiquidacion: config.hayLiquidacion, fotos }} />
           <main id="contenido">{children}</main>

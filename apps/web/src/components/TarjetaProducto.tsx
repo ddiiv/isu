@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { conDescuento, centavos, esClaro, formatearPesos, maxPorcentajePack, rutaPack, type AjustePacks, type ProductoTarjeta } from "@isu/shared/puro";
 import { Foto } from "./Foto";
+import { Cuenta, EtiquetaRelampago } from "./Relampago";
 import { Precio } from "./Precio";
 import { ResumenEstrellas } from "./Estrellas";
 import { evento, item } from "@/lib/ga";
@@ -53,7 +54,10 @@ export function TarjetaProducto({
           {p.agotado && <span className="rounded-full bg-tinta px-2.5 py-1 text-xs font-bold text-white">Agotado</span>}
           {!p.agotado && p.nuevo && <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-marca shadow-sm">Nuevo</span>}
           {!p.agotado && p.liquidacion && <span className="rounded-full bg-tinta px-2.5 py-1 text-xs font-bold text-white">Liquidación</span>}
-          {!p.agotado && p.descuento ? <span className="rounded-full bg-oferta px-2.5 py-1 text-xs font-bold text-white">-{p.descuento}%</span> : null}
+          {!p.agotado && (p.descuento || p.descuentoHasta) ? (
+            <EtiquetaRelampago hasta={p.descuentoHasta} porcentaje={p.descuento}
+              sino={p.descuento ? <span className="rounded-full bg-oferta px-2.5 py-1 text-xs font-bold text-white">-{p.descuento}%</span> : null} />
+          ) : null}
           {!p.agotado && p.pack && !comoPack ? <span className="rounded-full bg-ahorro px-2.5 py-1 text-xs font-bold text-white">También en pack</span> : null}
           {!p.agotado && comoPack ? <span className="rounded-full bg-ahorro px-2.5 py-1 text-xs font-bold text-white">Hasta {maxPack}% OFF</span> : null}
         </div>
@@ -85,6 +89,7 @@ export function TarjetaProducto({
         <h3 className="font-sans text-[15px] font-normal leading-snug">
           <Link href={href} onClick={() => evento("select_item", { item_list_name: lista, items: [item(p, { index: indice, item_list_name: lista })] })} className="underline decoration-transparent underline-offset-4 transition-colors duration-200 hover:decoration-current">{p.nombre}</Link>
         </h3>
+        {!p.agotado && <Cuenta hasta={p.descuentoHasta} soloLector />}
         <ResumenEstrellas promedio={p.resenas.promedio} cantidad={p.resenas.cantidad} className="text-xs" />
         {comoPack ? (
           <div className="space-y-0.5">
@@ -93,7 +98,7 @@ export function TarjetaProducto({
             <p className="text-xs font-bold text-ahorro">📦 Elegí de {packs!.minimo} a {packs!.maximo} unidades</p>
           </div>
         ) : (
-          <Precio precio={p.precio} precioHasta={p.precioHasta} precioLista={p.precioLista} rebaja={p.descuento} descuento={descuento} cuotas={cuotas} />
+          <Precio precio={p.precio} precioHasta={p.precioHasta} precioLista={p.precioLista} rebaja={p.descuento} hasta={p.descuentoHasta} descuento={descuento} cuotas={cuotas} />
         )}
         {p.talles.length > 0 && <p className="text-xs text-tinta-tenue">Talles: {p.talles.join(" · ")}</p>}
       </div>

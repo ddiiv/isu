@@ -6,7 +6,7 @@ import { ListadoProductos, ProductoDetalle, slug } from "@isu/shared";
 import type { CacheCorta } from "../../lib/cache.js";
 import { iguales } from "../../lib/cripto.js";
 import { noEncontrado } from "../../lib/errores.js";
-import { buscar, coleccion, detalle, fotosDelMenu, leerAjuste, paraMayorista, productosDeCategoria, productosNuevos, slugsPublicables, tarjetas } from "./consultas.js";
+import { buscar, coleccion, detalle, fotosDelMenu, HORAS_RELAMPAGO, leerAjuste, paraMayorista, productosDeCategoria, productosNuevos, slugsPublicables, tarjetas } from "./consultas.js";
 import type { Descuentos } from "../../lib/descuentos.js";
 
 /*
@@ -54,7 +54,7 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
           z.object({ nuevos: z.coerce.number().int().min(1).max(24) }).strict(),
           // Colecciones elegidas en el backoffice (sección del inicio y su página).
           z.object({
-            coleccion: z.enum(["nuevos", "destacados", "packs", "liquidacion"]), limite: z.coerce.number().int().min(1).max(200).default(200),
+            coleccion: z.enum(["nuevos", "destacados", "packs", "liquidacion", "relampago"]), limite: z.coerce.number().int().min(1).max(200).default(200),
             // Etapa 9: /packs/hombre, /liquidacion/mujer (una categoría de arriba, con sus hijas).
             categoria: slug.optional(),
             // Sólo Liquidación: la de invierno o la de verano.
@@ -84,7 +84,12 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
           filas = await productosDeCategoria(deps.pool, id, q.limite, !!q.limite);
         }
         const recorte = "nuevos" in q || ("categoria" in q && !!q.limite);
-        const productos = await tarjetas(deps.pool, filas, recorte ? false : await agotadosVisibles(), deps.descuentos);
+        let productos = await tarjetas(deps.pool, filas, recorte ? false : await agotadosVisibles(), deps.descuentos);
+        // Si a la prenda le toca otra rebaja mayor que no vence pronto, no es relámpago.
+        if ("coleccion" in q && q.coleccion === "relampago") {
+          const tope = Date.now() + HORAS_RELAMPAGO * 3_600_000;
+          productos = productos.filter((p) => p.descuentoHasta && Date.parse(p.descuentoHasta) <= tope);
+        }
         return { productos, total: productos.length };
       });
       if (!r) throw noEncontrado("Categoría");

@@ -4,7 +4,7 @@ import type pg from "pg";
 import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, EnlaceLocal, leerPacks, PACKS_POR_DEFECTO, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
 import type { CacheCorta } from "../../lib/cache.js";
-import { CON_STOCK, EN_LIQUIDACION, TEMPORADAS, enLiquidacion } from "../productos/consultas.js";
+import { CON_STOCK, DESCUENTO_VIGENTE_DE_P, EN_LIQUIDACION, FIN_RELAMPAGO, TEMPORADAS, enLiquidacion } from "../productos/consultas.js";
 
 /*
  * GET /v1/config — lo que la tienda necesita saber sin sesión: monto mínimo
@@ -34,6 +34,7 @@ const POR_DEFECTO: ConfigPublica = {
   hayLiquidacion: false,
   liquidacionEn: [],
   liquidacionTemporadas: [],
+  relampago: null,
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
@@ -89,6 +90,12 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
       deps.pool.query(`SELECT 1 FROM tienda.productos p WHERE p.visible AND p.en_stocker AND ${EN_LIQUIDACION} AND ${CON_STOCK} LIMIT 1`),
       ...TEMPORADAS.map((t) => deps.pool.query(`SELECT 1 FROM tienda.productos p WHERE p.visible AND p.en_stocker AND ${enLiquidacion(t)} AND ${CON_STOCK} LIMIT 1`)),
     ]);
+    // El descuento relámpago más grande que le toca a alguna prenda con stock (el cartel de arriba).
+    const relampago = await deps.pool.query<{ porcentaje: number; hasta: Date }>(
+      `SELECT d.porcentaje, d.hasta FROM tienda.descuentos d
+        WHERE ${FIN_RELAMPAGO} AND EXISTS (SELECT 1 FROM tienda.productos p WHERE p.visible AND p.en_stocker AND ${CON_STOCK} AND ${DESCUENTO_VIGENTE_DE_P})
+        ORDER BY d.porcentaje DESC, d.hasta LIMIT 1`);
+    salida.relampago = relampago.rows[0] ? { porcentaje: relampago.rows[0].porcentaje, hasta: relampago.rows[0].hasta.toISOString() } : null;
     salida.hayPacks = !!hayPacks.rowCount;
     salida.packsEn = packsEn;
     salida.hayLiquidacion = !!hayLiquidacion.rowCount;

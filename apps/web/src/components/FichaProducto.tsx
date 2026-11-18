@@ -7,6 +7,7 @@ import { ResumenEstrellas } from "./Estrellas";
 import { BotonGuiaTalles, useRecomendado } from "./GuiaTalles";
 import { Foto, SinFoto } from "./Foto";
 import { Precio } from "./Precio";
+import { EtiquetaRelampago } from "./Relampago";
 import { IconoBanco, IconoCamion, IconoLocal, IconoWhatsapp } from "./iconos";
 import { evento, item } from "@/lib/ga";
 import { useCarrito } from "./carrito/Carrito";
@@ -149,7 +150,9 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
             </a>
           )}
         </div>
-        <div className="mt-5"><Precio precio={precio} precioLista={precioLista} rebaja={p.descuento} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} grande /></div>
+        {/* Con fin de descuento se reserva el lugar de la etiqueta (sin salto al aparecer). */}
+        {p.descuentoHasta && <div className="mt-4 min-h-8"><EtiquetaRelampago hasta={p.descuentoHasta} porcentaje={p.descuento} grande /></div>}
+        <div className="mt-5"><Precio precio={precio} precioLista={precioLista} rebaja={p.descuento} hasta={p.descuentoHasta} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} grande /></div>
 
         {p.pack && (
           <Link href={rutaPack(p.slug, config.packs.minimo)} className="mt-5 flex items-center justify-between gap-3 rounded-2xl border-2 border-ahorro bg-ahorro-claro p-4 hover:bg-white">
