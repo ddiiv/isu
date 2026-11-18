@@ -28,6 +28,8 @@ export interface Cupon {
   productos: Set<number>;
   sobreRebajas: boolean;
   minimo: number;
+  /** porcentaje: el descuento no pasa de esto (centavos); null = sin tope */
+  tope: number | null;
   desde: Date | null;
   hasta: Date | null;
   usosMax: number | null;
@@ -59,7 +61,7 @@ export const normalizarCodigo = (s: string) => s.trim().toUpperCase().replace(/\
 export const CODIGO = /^[A-Z0-9][A-Z0-9_-]{2,29}$/;
 
 const SELECT = `
-  SELECT c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.producto_ids, c.sobre_rebajas, c.minimo,
+  SELECT c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.producto_ids, c.sobre_rebajas, c.minimo, c.tope,
          c.desde, c.hasta, c.usos_max, c.usos_por_cliente, c.usos, c.activo,
          -- una categoría de arriba incluye sus subcategorías
          COALESCE((SELECT array_agg(k.id) FROM tienda.categorias k WHERE k.id = ANY(c.categoria_ids) OR k.padre_id = ANY(c.categoria_ids)), '{}') AS categoria_ids
@@ -67,12 +69,12 @@ const SELECT = `
 
 interface FilaCupon {
   id: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Cupon["tipo"]; valor: number; alcance: Cupon["alcance"];
-  producto_ids: number[]; categoria_ids: number[]; sobre_rebajas: boolean; minimo: number; desde: Date | null; hasta: Date | null;
+  producto_ids: number[]; categoria_ids: number[]; sobre_rebajas: boolean; minimo: number; tope: string | null; desde: Date | null; hasta: Date | null;
   usos_max: number | null; usos_por_cliente: number | null; usos: number; activo: boolean;
 }
 const aCupon = (r: FilaCupon): Cupon => ({
   id: r.id, codigo: r.codigo, nombre: r.nombre, automatico: r.automatico, tipo: r.tipo, valor: r.valor, alcance: r.alcance,
-  categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids), sobreRebajas: r.sobre_rebajas, minimo: r.minimo,
+  categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids), sobreRebajas: r.sobre_rebajas, minimo: r.minimo, tope: r.tope === null ? null : Number(r.tope),
   desde: r.desde, hasta: r.hasta, usosMax: r.usos_max, usosPorCliente: r.usos_por_cliente, usos: r.usos, activo: r.activo,
 });
 
@@ -133,18 +135,21 @@ export function aplicarCupon(
     return { error: c.sobreRebajas || !lineas.some((l) => l.rebajada) ? "Este cupón no aplica a los productos de tu carrito." : "Este cupón no aplica a prendas que ya están en oferta." };
   }
   const porUnidad = new Map<string, number>();
-  if (c.tipo === "porcentaje") {
-    for (const l of elegibles) porUnidad.set(l.sku, l.precio - conDescuento(centavos(l.precio), c.valor));
-  } else {
-    // Monto fijo: se reparte en proporción a lo que pesa cada línea, por unidad y al peso.
+  // Monto fijo: se reparte en proporción a lo que pesa cada línea, por unidad y al peso.
+  const repartir = (total: number) => {
     const base = elegibles.reduce((s, l) => s + l.precio * l.cantidad, 0);
-    const monto = Math.min(c.valor, base);
+    const monto = Math.min(total, base);
     for (const l of elegibles) {
       const deLinea = Math.floor((monto * l.precio * l.cantidad) / base);
       const unidad = Math.min(l.precio, Math.floor(deLinea / l.cantidad / 100) * 100);
       porUnidad.set(l.sku, unidad);
     }
-  }
+  };
+  if (c.tipo === "porcentaje") {
+    for (const l of elegibles) porUnidad.set(l.sku, l.precio - conDescuento(centavos(l.precio), c.valor));
+    // Con tope: si el porcentaje se pasa, el descuento queda en el tope (repartido igual que un monto).
+    if (c.tope !== null && elegibles.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0) > c.tope) repartir(c.tope);
+  } else repartir(c.valor);
   const descuento = elegibles.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0);
   if (descuento <= 0) return { error: "Este cupón no descuenta nada en este carrito." };
   return { cupon: c, descuento, porUnidad, envioGratis: false };

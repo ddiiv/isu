@@ -25,6 +25,8 @@ export const CuponEntrada = z.object({
   sobreRebajas: z.boolean().default(true),
   /** compra mínima en centavos (0 = sin mínimo) */
   minimo: z.number().int().min(0).max(1_000_000_000).default(0),
+  /** porcentaje: el descuento no pasa de este monto en centavos (null = sin tope) */
+  tope: z.number().int().min(100).max(1_000_000_000).nullable().default(null),
   desde: Fecha,
   hasta: Fecha,
   usosMax: z.number().int().min(1).max(10_000_000).nullable().default(null),
@@ -35,6 +37,7 @@ export const CuponEntrada = z.object({
   if (c.automatico && c.codigo) mal("codigo", "Una promoción automática no lleva código");
   if (!c.automatico && !c.codigo) mal("codigo", "Poné el código que va a escribir el cliente");
   if (c.tipo === "porcentaje" && (c.valor < 1 || c.valor > 90)) mal("valor", "El porcentaje va de 1 a 90");
+  if (c.tope !== null && c.tipo !== "porcentaje") mal("tope", "El tope es sólo para cupones de porcentaje");
   if (c.tipo === "monto" && c.valor < 100) mal("valor", "El monto tiene que ser de al menos $1");
   if (c.tipo === "envio_gratis" && c.valor !== 0) mal("valor", "El envío gratis no lleva valor");
   if (c.alcance === "categorias" && !c.categoriaIds.length) mal("categoriaIds", "Elegí al menos una categoría");
@@ -45,8 +48,8 @@ export const CuponEntrada = z.object({
 export type CuponEntrada = z.infer<typeof CuponEntrada>;
 
 /** Cómo se lee un cupón en una línea: "15% OFF", "$5.000 OFF", "Envío gratis". */
-export function resumenCupon(c: { tipo: (typeof TIPOS_CUPON)[number]; valor: number }, pesos: (c: number) => string): string {
-  if (c.tipo === "porcentaje") return `${c.valor}% OFF`;
+export function resumenCupon(c: { tipo: (typeof TIPOS_CUPON)[number]; valor: number; tope?: number | null }, pesos: (c: number) => string): string {
+  if (c.tipo === "porcentaje") return `${c.valor}% OFF${c.tope ? `, hasta ${pesos(c.tope)} de descuento` : ""}`;
   if (c.tipo === "monto") return `${pesos(c.valor)} OFF`;
   return "Envío gratis";
 }

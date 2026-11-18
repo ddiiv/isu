@@ -174,6 +174,8 @@ export const CuponCotizado = z.object({
   codigo: z.string().nullable(),        // null = promoción automática
   nombre: z.string(),
   envioGratis: z.boolean(),
+  /** Tope del descuento en centavos (cupón de porcentaje), para decírselo al cliente. */
+  tope: z.number().int().nullable().optional(),
 });
 export type CuponCotizado = z.infer<typeof CuponCotizado>;
 
