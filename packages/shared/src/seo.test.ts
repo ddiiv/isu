@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, categoriaGoogle, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
+  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, tituloProducto, calificadorProducto, categoriaGoogle, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -332,5 +332,29 @@ describe("reseñas y descripción (etapa 8)", () => {
     expect(t).toContain(", 100% Algodón jersey.");
     expect(t).toMatch(/Disponible en /);
     expect(t).toMatch(/Isuwaya/);
+  });
+});
+
+describe("título de la ficha sin seoTitulo", () => {
+  const migas = (...n: string[]) => n.map((nombre) => ({ nombre, ruta: `/${nombre.toLowerCase()}` }));
+  it("el del backoffice manda; si el nombre ya dice género, no se agrega nada", () => {
+    expect(tituloProducto(producto({ seoTitulo: "Mi título" }))).toBe("Mi título");
+    expect(tituloProducto(producto())).toBe("Abel Pantalón Hombre");
+  });
+  it("agrega el género, y el tipo si el nombre no lo dice", () => {
+    expect(tituloProducto(producto({ nombre: "Visa Remera baby tee", migas: migas("Mujer") }))).toBe("Visa Remera baby tee de mujer");
+    expect(tituloProducto(producto({ nombre: "Moron Short", migas: migas("Hombre", "Shorts y bermudas") }))).toBe("Moron Short de hombre");
+    expect(tituloProducto(producto({ nombre: "Mary", migas: migas("Mujer", "Pantalones y calzas") }))).toBe("Mary: pantalones y calzas de mujer");
+  });
+  it("sin categoría o si no entra, queda el nombre", () => {
+    expect(calificadorProducto(producto({ nombre: "Mary", migas: [] }))).toBe("");
+    expect(tituloProducto(producto({ nombre: "Montreal Pantalón deportivo frizado termosellado", migas: migas("Mujer") }))).toBe("Montreal Pantalón deportivo frizado termosellado");
+  });
+  it("la composición, si está cargada, entra en la descripción", () => {
+    expect(descripcionProducto(producto({ composicion: "100% Algodón" } as never), ctx)).toContain(", 100% Algodón, de Isuwaya");
+  });
+  it("el título del feed lleva el género", () => {
+    const f = itemsFeed(producto({ nombre: "Moron Short", migas: migas("Hombre", "Shorts y bermudas") }), ctx, "d");
+    expect(f[0]!.title).toMatch(/^Moron Short de hombre - /);
   });
 });

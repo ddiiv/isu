@@ -220,6 +220,31 @@ const recortar = (t: string, max = 158) => {
   return `${corte.slice(0, Math.max(corte.lastIndexOf(" "), max - 20))}…`;
 };
 
+const GENERO_EN_NOMBRE = /\b(hombre|mujer|dama|nino|ninos|nina|ninas|nene|nena|unisex|kids)\b/;
+/**
+ * Lo que le falta al nombre para que Google sepa qué es: «de hombre», o
+ * «shorts y bermudas de hombre» si el nombre ni dice el tipo ("Mary"). Sale de
+ * las migas; vacío si el nombre ya lo dice o la prenda no tiene categoría.
+ */
+export function calificadorProducto(p: Pick<ProductoDetalle, "nombre" | "migas">): string {
+  const n = sinTildes(p.nombre);
+  const genero = p.migas[0]?.nombre;
+  if (!genero || GENERO_EN_NOMBRE.test(n)) return "";
+  const hoja = p.migas.length > 1 ? p.migas.at(-1)!.nombre : null;
+  // "Pantalones y calzas" → raíz "pantalon": si el nombre la trae, el tipo ya está dicho.
+  const raiz = hoja ? sinTildes(hoja).split(/\s+/)[0]!.replace(/(es|s)$/, "") : "";
+  const tipo = hoja && !n.includes(raiz) ? `${hoja.toLowerCase()} ` : "";
+  return `${tipo}de ${genero.toLowerCase()}`;
+}
+
+/** El título de la ficha: el del backoffice o, sin él, el nombre más lo que le falta («Mary: pantalones y calzas de mujer»). Con « · Isuwaya» queda en ~60. */
+export function tituloProducto(p: Pick<ProductoDetalle, "nombre" | "migas" | "seoTitulo">, max = 50): string {
+  if (p.seoTitulo) return p.seoTitulo;
+  const q = calificadorProducto(p);
+  const t = q.startsWith("de ") ? `${p.nombre} ${q}` : `${p.nombre}: ${q}`;
+  return q && t.length <= max ? t : p.nombre;
+}
+
 /**
  * La frase que aparece debajo del título en Google. Si la ficha tiene una
  * descripción larga, sale de ahí; si no, se arma con colores, talles y precio
@@ -234,7 +259,8 @@ export function descripcionProducto(p: ProductoDetalle, ctx: Pick<ContextoSeo, "
   const enColores = (n: number) => (colores.length ? ` en ${lista(colores, n)}${colores.length > n ? " y más colores" : ""}` : "");
   const conds = condicionesLista(ctx);
   const versiones: string[] = [];
-  for (const marca of [` de ${ctx.marca}`, ""]) {
+  // La composición, sólo si está cargada, va en la versión más completa; si no entra, se descarta antes que el precio.
+  for (const marca of [...(p.composicion ? [`, ${p.composicion.charAt(0).toLowerCase()}${p.composicion.slice(1)}, de ${ctx.marca}`] : []), ` de ${ctx.marca}`, ""]) {
     for (const n of [4, 2]) {
       for (let k = conds.length; k >= 1; k--) {
         versiones.push(`${p.nombre}${marca}${enColores(n)}${talles ? `, ${talles}` : ""}. ${desde}: ${conds.slice(0, k).join(", ")}.`);
@@ -374,7 +400,7 @@ export function itemsFeed(p: ProductoDetalle, ctx: ContextoSeo, descripcion: str
     items.push({
       id: v.sku,
       item_group_id: p.sku,
-      title: [p.nombre, color, talle && `Talle ${talle}`].filter(Boolean).join(" - ").slice(0, 150),
+      title: [tituloProducto({ ...p, seoTitulo: null }, 100), color, talle && `Talle ${talle}`].filter(Boolean).join(" - ").slice(0, 150),
       description: descripcion.slice(0, 5000),
       link: v.color && p.colores.length > 1 ? `${ctx.sitio}/producto/${p.slug}?color=${v.color}` : `${ctx.sitio}/producto/${p.slug}`,
       image_link: fotos[0] ? ctx.foto(fotos[0], 1200) : opciones.sinFoto!,

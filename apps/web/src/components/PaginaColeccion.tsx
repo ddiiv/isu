@@ -2,6 +2,7 @@ import { obtenerColeccion, obtenerConfig, obtenerNuevos } from "@/lib/api";
 import { Grilla } from "./Grilla";
 import { Migas } from "./Migas";
 import { SinProductos } from "./SinProductos";
+import { TextoCategoria } from "./TextoCategoria";
 
 /* /nuevos y /destacados: las colecciones que se eligen con casillas en el backoffice (Packs y Liquidación: PaginaSeccion). */
 export async function PaginaColeccion({ cual, titulo, bajada }: { cual: "nuevos" | "destacados" | "relampago"; titulo: string; bajada: string }) {
@@ -16,6 +17,8 @@ export async function PaginaColeccion({ cual, titulo, bajada }: { cual: "nuevos"
       {listado.productos.length
         ? <div className="mt-8"><Grilla productos={listado.productos} lista={titulo} descuento={config.descuentoTransferencia} cuotas={config.cuotasSinInteres} /></div>
         : <SinProductos />}
+      {/* Sin texto: sólo la lista de prendas en datos estructurados (CollectionPage). */}
+      <TextoCategoria titulo={titulo} productos={listado.productos} ruta={`/${cual}`} />
     </div>
   );
 }

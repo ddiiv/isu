@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { descripcionProducto, jsonLdProducto, leerRutaPack, maxPorcentajePack, rutaPack, slug as esquemaSlug } from "@isu/shared";
+import { descripcionProducto, tituloProducto, jsonLdProducto, leerRutaPack, maxPorcentajePack, rutaPack, slug as esquemaSlug } from "@isu/shared";
 import { obtenerConfig, obtenerProducto, obtenerResenas } from "@/lib/api";
 import { src } from "@/lib/fotos";
 import { contextoSeo } from "@/lib/seo";
@@ -46,11 +46,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     return { title: titulo, description: descripcion, alternates: { canonical: rutaPack(p.slug, config.packs.minimo) }, openGraph: { type: "website", title: titulo, description: descripcion, url: rutaPack(p.slug, pack), images: imagenes } };
   }
   const descripcion = descripcionProducto(p, contextoSeo(config));
+  const titulo = tituloProducto(p);
   return {
-    title: p.seoTitulo ?? p.nombre,
+    title: titulo,
     description: descripcion,
     alternates: { canonical: `/producto/${p.slug}` },
-    openGraph: { type: "website", title: p.seoTitulo ?? p.nombre, description: descripcion, url: `/producto/${p.slug}`, images: imagenes },
+    openGraph: { type: "website", title: titulo, description: descripcion, url: `/producto/${p.slug}`, images: imagenes },
   };
 }
 

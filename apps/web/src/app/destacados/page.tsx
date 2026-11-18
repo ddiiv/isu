@@ -4,7 +4,7 @@ import { PaginaColeccion } from "@/components/PaginaColeccion";
 export const revalidate = 300;
 export const metadata: Metadata = {
   title: "Destacados",
-  description: "Las prendas favoritas de Isuwaya, elegidas para vos.",
+  description: "Las prendas favoritas de Isuwaya para hombre, mujer y niños, elegidas para vos. Talles reales y envíos a todo el país.",
   alternates: { canonical: "/destacados" },
 };
 
