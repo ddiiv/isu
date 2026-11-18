@@ -117,15 +117,17 @@ export const CON_STOCK = "EXISTS (SELECT 1 FROM tienda.variantes v WHERE v.produ
  * Etapa 9: el producto `p` está en Liquidación (le toca un descuento vigente marcado como liquidación).
  * Mismas reglas que lib/descuentos.ts: una categoría de arriba incluye sus subcategorías.
  */
-/** El descuento `d` está vigente y le toca al producto `p`. */
-export const DESCUENTO_VIGENTE_DE_P = `d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
+/** El descuento `d` está activo, todavía no terminó (vigente o programado) y le toca al producto `p`. */
+export const NO_TERMINADO_DE_P = `d.activo AND (d.hasta IS NULL OR d.hasta > now())
     AND (d.alcance = 'todo' OR (d.alcance = 'productos' AND p.id = ANY(d.producto_ids))
       OR (d.alcance = 'categorias' AND EXISTS (SELECT 1 FROM tienda.producto_categorias pcl JOIN tienda.categorias cl ON cl.id = pcl.categoria_id
             WHERE pcl.producto_id = p.id AND (cl.id = ANY(d.categoria_ids) OR cl.padre_id = ANY(d.categoria_ids)))))`;
+/** El descuento `d` está vigente y le toca al producto `p`. */
+export const DESCUENTO_VIGENTE_DE_P = `(d.desde IS NULL OR d.desde <= now()) AND ${NO_TERMINADO_DE_P}`;
 export const enLiquidacion = (temporada?: Temporada) => `EXISTS (SELECT 1 FROM tienda.descuentos d
   WHERE d.liquidacion${temporada ? ` AND d.temporada = '${temporada}'` : ""} AND ${DESCUENTO_VIGENTE_DE_P})`;
-/** Relámpago: un descuento que termina en 48 horas o menos (ver HORAS_RELAMPAGO en el front). */
-export const FIN_RELAMPAGO = "d.hasta IS NOT NULL AND d.hasta <= now() + interval '48 hours'";
+/** Relámpago: un descuento marcado como tal (dura 48 horas o menos, lo valida el backoffice). */
+export const FIN_RELAMPAGO = "d.relampago";
 export const EN_RELAMPAGO = `EXISTS (SELECT 1 FROM tienda.descuentos d WHERE ${FIN_RELAMPAGO} AND ${DESCUENTO_VIGENTE_DE_P})`;
 export const HORAS_RELAMPAGO = 48;
 export const EN_LIQUIDACION = enLiquidacion();

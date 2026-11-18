@@ -14,6 +14,8 @@ import { ErrorHttp } from "../../lib/errores.js";
 import { ipDe } from "../../lib/cliente.js";
 import { iguales } from "../../lib/cripto.js";
 import { leerTiendaCerrada } from "../../lib/tienda.js";
+import { conRebaja, descuentoMaximo } from "../../lib/descuentos.js";
+import { NO_TERMINADO_DE_P } from "../productos/consultas.js";
 import { leerAjustes } from "../pedidos/cotizar.js";
 import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
@@ -778,7 +780,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const { rows } = await pool.query(
       `SELECT id, nombre, porcentaje, alcance, categoria_ids AS "categoriaIds", producto_ids AS "productoIds", desde, hasta, activo, liquidacion, temporada, creado_por AS "creadoPor",
               (activo AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())) AS vigente
-         FROM tienda.descuentos ORDER BY activo DESC, id DESC`);
+         FROM tienda.descuentos WHERE NOT relampago ORDER BY activo DESC, id DESC`);
     return { descuentos: rows };
   });
   api.post("/v1/admin/descuentos", { schema: { body: Descuento } }, async (req, reply) => {
@@ -793,7 +795,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   api.put("/v1/admin/descuentos/:id", { schema: { params: z.object({ id: Id }), body: Descuento } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const r = await pool.query(
-      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, liquidacion=$10, temporada=$11, actualizado_en=now() WHERE id = $1",
+      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, liquidacion=$10, temporada=$11, actualizado_en=now() WHERE id = $1 AND NOT relampago",
       [req.params.id, ...aFila(req.body)]);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese descuento.");
     await auditar(pool, a, "editar_descuento", "descuento", req.params.id, req.body, ip(req));
@@ -802,11 +804,87 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   });
   api.delete("/v1/admin/descuentos/:id", { schema: { params: z.object({ id: Id }) } }, async (req) => {
     const a = await exigir(pool, req, "operador");
-    const r = await pool.query("DELETE FROM tienda.descuentos WHERE id = $1", [req.params.id]);
+    const r = await pool.query("DELETE FROM tienda.descuentos WHERE id = $1 AND NOT relampago", [req.params.id]);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese descuento.");
     await auditar(pool, a, "borrar_descuento", "descuento", req.params.id, null, ip(req));
     await invalidar([]);
     return { ok: true };
+  });
+
+  // ── Relámpagos: descuentos por tiempo limitado (máx. 48 h), programables por adelantado ──
+  const HORAS_MAX_RELAMPAGO = 48;
+  const Relampago = z.object({
+    nombre: z.string().trim().min(2).max(80),
+    porcentaje: z.number().int().min(1).max(90),
+    productoIds: z.array(Id).min(1).max(500),
+    // Sin inicio: empieza ya. Con inicio futuro queda programado y no se muestra hasta entonces.
+    desde: z.iso.datetime({ offset: true }).nullable().default(null),
+    hasta: z.iso.datetime({ offset: true }),
+    activo: z.boolean().default(true),
+  }).strict().refine((d) => {
+    const ini = d.desde ? Date.parse(d.desde) : Date.now(), fin = Date.parse(d.hasta);
+    return fin > ini && fin - ini <= HORAS_MAX_RELAMPAGO * 3_600_000;
+  }, { message: `Un relámpago dura como máximo ${HORAS_MAX_RELAMPAGO} horas y tiene que terminar después de empezar`, path: ["hasta"] });
+  const filaRelampago = (d: z.infer<typeof Relampago>) => [d.nombre, d.porcentaje, d.productoIds, d.desde ?? new Date().toISOString(), d.hasta, d.activo];
+  api.get("/v1/admin/relampagos", async (req) => {
+    await exigir(pool, req);
+    const { rows } = await pool.query<{ id: number; nombre: string; porcentaje: number; productoIds: number[]; desde: Date; hasta: Date; activo: boolean; estado: string }>(
+      `SELECT id, nombre, porcentaje, producto_ids AS "productoIds", desde, hasta, activo,
+              CASE WHEN NOT activo THEN 'desactivado' WHEN desde > now() THEN 'programado' WHEN hasta > now() THEN 'en_curso' ELSE 'terminado' END AS estado
+         FROM tienda.descuentos WHERE relampago ORDER BY (hasta > now() AND activo) DESC, desde DESC, id DESC LIMIT 200`);
+    // Por producto: precio final y margen sobre el piso mayorista (dato interno, sólo del backoffice) en la variante más ajustada.
+    const ids = [...new Set(rows.flatMap((r) => r.productoIds))];
+    const vs = ids.length ? (await pool.query<{ producto_id: number; nombre: string; precio: number; mayorista: number | null }>(
+      `SELECT p.id AS producto_id, p.nombre, v.precio, v.precio_mayorista AS mayorista FROM tienda.productos p
+         LEFT JOIN tienda.variantes v ON v.producto_id = p.id AND v.activo AND v.stock > 0 WHERE p.id = ANY($1::int[])`, [ids])).rows : [];
+    const productos = (pct: number, pids: number[]) => pids.map((id) => {
+      const filas = vs.filter((v) => v.producto_id === id);
+      const conPrecio = filas.filter((v) => v.precio !== null);
+      const peor = conPrecio.map((v) => ({ v, final: conRebaja(v.precio, pct, v.mayorista) })).sort((a, b) => (a.final - (a.v.mayorista ?? 0)) - (b.final - (b.v.mayorista ?? 0)))[0];
+      return { id, nombre: filas[0]?.nombre ?? `#${id}`, precio: peor?.v.precio ?? null, precioFinal: peor?.final ?? null, mayorista: peor?.v.mayorista ?? null,
+        margenSobrePiso: peor && peor.v.mayorista !== null ? peor.final - peor.v.mayorista : null };
+    });
+    return { relampagos: rows.map((r) => ({ ...r, productos: productos(r.porcentaje, r.productoIds) })) };
+  });
+  api.post("/v1/admin/relampagos", { schema: { body: Relampago } }, async (req, reply) => {
+    const a = await exigir(pool, req, "operador");
+    const { rows } = await pool.query<{ id: number }>(
+      "INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, producto_ids, desde, hasta, activo, relampago, creado_por) VALUES ($1,$2,'productos',$3,$4,$5,$6,true,$7) RETURNING id",
+      [...filaRelampago(req.body), a.email]);
+    await auditar(pool, a, "crear_relampago", "descuento", rows[0]!.id, req.body, ip(req));
+    await invalidar([]);
+    return reply.code(201).send({ id: rows[0]!.id });
+  });
+  api.put("/v1/admin/relampagos/:id", { schema: { params: z.object({ id: Id }), body: Relampago } }, async (req) => {
+    const a = await exigir(pool, req, "operador");
+    const r = await pool.query(
+      "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, producto_ids=$4, desde=$5, hasta=$6, activo=$7, actualizado_en=now() WHERE id = $1 AND relampago",
+      [req.params.id, ...filaRelampago(req.body)]);
+    if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese relámpago.");
+    await auditar(pool, a, "editar_relampago", "descuento", req.params.id, req.body, ip(req));
+    await invalidar([]);
+    return { ok: true };
+  });
+  // Productos visibles, con stock, fuera de otro descuento vigente o programado y con mayorista en todas sus variantes con stock.
+  // % = 80 % del máximo que permite el piso en la variante más ajustada (mínimo 10: si no llega, no se sugiere).
+  api.get("/v1/admin/relampagos/sugerencias", async (req) => {
+    await exigir(pool, req);
+    const { rows } = await pool.query<{ id: number; nombre: string; sku: string | null; precio: number; mayorista: number | null; stock: number }>(
+      `SELECT p.id, p.nombre, p.stocker_padre AS sku, v.precio, v.precio_mayorista AS mayorista, v.stock
+         FROM tienda.productos p JOIN tienda.variantes v ON v.producto_id = p.id AND v.activo AND v.stock > 0
+        WHERE p.visible AND p.en_stocker
+          AND NOT EXISTS (SELECT 1 FROM tienda.descuentos d WHERE ${NO_TERMINADO_DE_P})`);
+    const por = new Map<number, typeof rows>();
+    for (const r of rows) por.set(r.id, [...(por.get(r.id) ?? []), r]);
+    const sugerencias = [...por.values()].flatMap((vs) => {
+      if (vs.some((v) => v.mayorista === null || v.mayorista >= v.precio)) return [];
+      const maximo = Math.min(...vs.map((v) => descuentoMaximo(v.precio, v.mayorista)));
+      const porcentaje = Math.floor(0.8 * maximo);
+      return porcentaje < 10 ? [] : [{ id: vs[0]!.id, nombre: vs[0]!.nombre, sku: vs[0]!.sku, stock: vs.reduce((t, v) => t + v.stock, 0), descuentoMaximo: maximo, porcentaje,
+        precio: Math.min(...vs.map((v) => v.precio)), precioFinal: Math.min(...vs.map((v) => conRebaja(v.precio, porcentaje, v.mayorista))),
+        margenSobrePiso: Math.min(...vs.map((v) => conRebaja(v.precio, porcentaje, v.mayorista) - v.mayorista!)) }];
+    }).sort((a, b) => b.stock - a.stock || b.porcentaje - a.porcentaje).slice(0, 100);
+    return { sugerencias };
   });
 
   // ── Clientes ─────────────────────────────────────────────────────

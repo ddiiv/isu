@@ -13,10 +13,20 @@ todavía pueden sumar un poco sin pasarse. Ninguno baja del mayorista (lo garant
 | Mara Short Nena | ISUMARSHO | $8.000 | 30% | **$5.600** | $5.000 | +$600 | $2.000 | 64% | 70 |
 | Soho Short de Lino Mujer | ISUSOHSHO | $11.000 | 22% | **$8.580** | $8.000 | +$580 | $5.000 | 42% | 48 |
 
-## Cómo cargarlos (Descuentos → Nuevo, 3 descuentos)
+## Cómo cargarlos (Promociones → Relámpagos, desde v1.62)
 
-Elegir «Productos» como alcance, marcar los productos y poner **«Desde» = ahora y «Hasta» = ahora + 48 h (o menos)**.
-Sólo lo que termina en 48 h o menos se muestra como relámpago (rojo, cuenta regresiva, cartel y `/relampago`).
+Los relámpagos ya no son descuentos normales que terminan pronto: tienen su propia pantalla (**Relámpagos**) y una marca
+propia. Un descuento normal, aunque termine en una hora, **no** se muestra como relámpago. Un relámpago dura 48 h como
+máximo (la API lo rechaza si no) y se puede programar a futuro: hasta el inicio no se ve en la tienda.
+
+- **Nuevo relámpago:** nombre, %, productos, inicio, fin (botones de 24 h y 48 h). Cada producto muestra precio final,
+  mayorista (piso) y margen sobre el piso; el mayorista es sólo del backoffice.
+- **Sugerencias:** la pantalla propone productos visibles, con stock, fuera de otro descuento y con mayorista en todas sus
+  variantes con stock, con el 80 % del descuento máximo que permite el piso (mínimo 10 %). Se marcan y «Programar
+  seleccionados» crea un relámpago por cada % con el inicio y la duración elegidos. Nada se publica sin confirmar.
+- Los 4 ya cargados quedaron marcados como relámpago por la migración 0031.
+
+Equivalente de la tabla de abajo (3 relámpagos, mismos productos y %):
 
 | Nombre | % | Productos |
 |---|---|---|
