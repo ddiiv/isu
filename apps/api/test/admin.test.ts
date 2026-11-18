@@ -87,8 +87,8 @@ async function producto(n: number, nombre: string, cat: string, categoria: strin
       colores.set(color, c.rows[0].id);
     }
     i++;
-    await pool.query("INSERT INTO tienda.variantes (producto_id, color_id, stocker_id, sku, talle, precio, stock, orden) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-      [id, colores.get(color), BASE * 10 + n * 100 + i, `QA-ADM-${n}-${i}`, talle, precio, stock, i]);
+    await pool.query("INSERT INTO tienda.variantes (producto_id, color_id, stocker_id, sku, talle, precio, stock, orden, precio_mayorista) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+      [id, colores.get(color), BASE * 10 + n * 100 + i, `QA-ADM-${n}-${i}`, talle, precio, stock, i, Math.floor(precio * 0.4)]); // mayorista bajo: el piso no estorba
   }
   ids[slug] = id;
   return { id, slug, colores };
