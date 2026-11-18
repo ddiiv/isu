@@ -854,10 +854,11 @@ describe("cupones", () => {
       expect([mal.descuentoCupon, mal.avisoCupon]).toEqual([0, "Este cupón no aplica a estas prendas."]);
       // Mezclado: sólo descuenta lo que tiene piso verificable.
       expect((await carrito({ cupon: "QAMITAD", items: [S(1), { sku: "QA-C-NM", cantidad: 3 }] })).descuentoCupon).toBe(300_000);
-      // La rebaja masiva (relámpago, liquidación) tampoco baja de ahí: 90% de $8.000 queda en $5.000.
+      // La rebaja masiva (relámpago, liquidación) tampoco baja de ahí: 90% de $8.000 queda en $5.000;
+      // sin mayorista (o con uno mayor que el precio) no se puede verificar el piso y no hay rebaja.
       await pool.query("INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, creado_por) VALUES ('QA piso', 90, 'todo', 'qa')");
-      const r = await carrito({ items: [S(1), { sku: "QA-C-NM", cantidad: 1 }] });
-      expect(r.lineas.map((l: { sku: string; precio: number }) => [l.sku, l.precio])).toEqual([["QA-C-S", 500_000], ["QA-C-NM", 90_000]]);
+      const r = await carrito({ items: [S(1), { sku: "QA-C-NM", cantidad: 1 }, { sku: "QA-C-MAL", cantidad: 1 }] });
+      expect(r.lineas.map((l: { sku: string; precio: number }) => [l.sku, l.precio])).toEqual([["QA-C-S", 500_000], ["QA-C-NM", 900_000], ["QA-C-MAL", 500_000]]);
     });
 
     it("la transferencia tampoco baja de mayorista: lo que ya está en el piso no recibe el 20%, y sin mayorista cargado no hay descuento", async () => {
