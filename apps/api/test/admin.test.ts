@@ -440,28 +440,66 @@ describe("categorías y descuentos", () => {
     await req("PUT", `/v1/admin/descuentos/${r.json().id}`, operador, { nombre: "QA adm jogger", porcentaje: 20, alcance: "productos", productoIds: [ids["qa-adm-2"]], hasta: "2020-01-02T00:00:00Z", desde: "2020-01-01T00:00:00Z" });
     expect((await app.inject("/v1/productos/qa-adm-2")).json().descuento).toBeNull();
   });
-  it("relámpago: el catálogo trae cuándo termina el descuento; si faltan 48 h o menos sale en la colección y en el cartel de /v1/config", async () => {
+  it("relámpago: separado de los descuentos normales, tope de 48 h y programado no se muestra antes de tiempo", async () => {
     const en = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
-    const cuerpo = { nombre: "QA adm relámpago", porcentaje: 35, alcance: "productos", productoIds: [ids["qa-adm-2"]] };
-    const hasta100 = en(100);
-    const largo = await req("POST", "/v1/admin/descuentos", operador, { ...cuerpo, hasta: hasta100 });
-    expect(largo.statusCode, largo.body).toBe(201);
-    // Termina en 100 h: se informa el fin, pero no es relámpago.
-    expect((await app.inject("/v1/productos/qa-adm-2")).json().descuentoHasta).toBe(hasta100);
     const slugs = async () => (await app.inject("/v1/productos?coleccion=relampago")).json().productos.map((x: { slug: string }) => x.slug);
+    const ficha = async () => (await app.inject("/v1/productos/qa-adm-2")).json();
+    // Un descuento normal que termina pronto YA NO es relámpago.
+    const normal = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm corto", porcentaje: 35, alcance: "productos", productoIds: [ids["qa-adm-2"]], hasta: en(5) });
+    expect(normal.statusCode, normal.body).toBe(201);
+    expect((await ficha()).descuento).toBe(35);
+    expect((await ficha()).descuentoHasta).toBeNull();
     expect(await slugs()).not.toContain("qa-adm-2");
     expect((await app.inject("/v1/config")).json().relampago).toBeNull();
-    // Pasa a terminar en 5 h.
-    const hasta = en(5);
-    await req("PUT", `/v1/admin/descuentos/${largo.json().id}`, operador, { ...cuerpo, hasta });
-    const ficha = (await app.inject("/v1/productos/qa-adm-2")).json();
-    expect(ficha.descuentoHasta).toBe(hasta);
-    expect((await app.inject("/v1/productos?categoria=mujer")).json().productos.find((x: { slug: string }) => x.slug === "qa-adm-2").descuentoHasta).toBe(hasta);
+    // Y la pantalla de descuentos normales no lista ni toca los relámpagos (ni al revés).
+    await req("DELETE", `/v1/admin/descuentos/${normal.json().id}`, operador);
+    const cuerpo = { nombre: "QA adm relámpago", porcentaje: 35, productoIds: [ids["qa-adm-2"]] };
+    expect((await req("POST", "/v1/admin/relampagos", operador, { ...cuerpo, hasta: en(49) })).statusCode).toBe(400);
+    expect((await req("POST", "/v1/admin/relampagos", operador, { ...cuerpo, desde: en(10), hasta: en(60) })).statusCode).toBe(400);
+    expect((await req("POST", "/v1/admin/relampagos", operador, { ...cuerpo, desde: en(10), hasta: en(5) })).statusCode).toBe(400);
+    // Programado: empieza en 2 h y dura 24 h; todavía no se ve.
+    const desde = en(2), hasta = en(26);
+    const prog = await req("POST", "/v1/admin/relampagos", operador, { ...cuerpo, desde, hasta });
+    expect(prog.statusCode, prog.body).toBe(201);
+    expect((await ficha()).descuento).toBeNull();
+    expect(await slugs()).not.toContain("qa-adm-2");
+    expect((await app.inject("/v1/config")).json().relampago).toBeNull();
+    const lista = (await req("GET", "/v1/admin/relampagos", operador)).json().relampagos.find((r: { id: number }) => r.id === prog.json().id);
+    expect(lista).toMatchObject({ estado: "programado", porcentaje: 35 });
+    expect(lista.productos[0]).toMatchObject({ id: ids["qa-adm-2"], precio: 2_000_000, precioFinal: 1_300_000, mayorista: 800_000, margenSobrePiso: 500_000 });
+    expect((await req("GET", "/v1/admin/descuentos", operador)).json().descuentos.some((d: { id: number }) => d.id === prog.json().id)).toBe(false);
+    expect((await req("PUT", `/v1/admin/descuentos/${prog.json().id}`, operador, { nombre: "QA adm x", porcentaje: 5, alcance: "todo" })).statusCode).toBe(404);
+    // Empieza ya: sale en la colección, con fin y cartel.
+    const ya = en(-0.01);
+    expect((await req("PUT", `/v1/admin/relampagos/${prog.json().id}`, operador, { ...cuerpo, desde: ya, hasta })).statusCode).toBe(200);
+    const f = await ficha();
+    expect(f.descuentoHasta).toBe(hasta);
+    expect(f.descuento).toBe(35);
     expect(await slugs()).toContain("qa-adm-2");
     expect((await app.inject("/v1/config")).json().relampago).toEqual({ porcentaje: 35, hasta });
-    // Sin descuento vigente: no hay fin que mostrar.
-    await req("DELETE", `/v1/admin/descuentos/${largo.json().id}`, operador);
-    expect((await app.inject("/v1/productos/qa-adm-2")).json().descuentoHasta).toBeNull();
+    // Desactivado: sin descuento ni fin.
+    await req("PUT", `/v1/admin/relampagos/${prog.json().id}`, operador, { ...cuerpo, desde: ya, hasta, activo: false });
+    expect((await ficha()).descuentoHasta).toBeNull();
+    expect(await slugs()).not.toContain("qa-adm-2");
+  });
+  it("relámpagos: sugerencias con el piso mayorista (80 % del máximo, mínimo 10) y sin productos ya rebajados", async () => {
+    const sug = async () => (await req("GET", "/v1/admin/relampagos/sugerencias", operador)).json().sugerencias as Array<{ id: number; porcentaje: number; descuentoMaximo: number; margenSobrePiso: number }>;
+    // Mayorista = 40 % del precio: máximo 60 % -> sugerido floor(0,8 × 60) = 48.
+    expect((await sug()).find((s) => s.id === ids["qa-adm-2"])).toMatchObject({ porcentaje: 48, descuentoMaximo: 60 });
+    // Piso ajustado (máximo 12 %): 0,8 × 12 = 9 < 10 -> no se sugiere.
+    await pool.query("UPDATE tienda.variantes SET precio_mayorista = precio * 88 / 100 WHERE producto_id = $1 AND stocker_id = (SELECT min(stocker_id) FROM tienda.variantes WHERE producto_id = $1)", [ids["qa-adm-2"]]);
+    expect((await sug()).some((s) => s.id === ids["qa-adm-2"])).toBe(false);
+    // Una variante con stock sin mayorista: tampoco.
+    await pool.query("UPDATE tienda.variantes SET precio_mayorista = precio * 40 / 100 WHERE producto_id = $1", [ids["qa-adm-2"]]);
+    expect((await sug()).some((s) => s.id === ids["qa-adm-2"])).toBe(true);
+    await pool.query("UPDATE tienda.variantes SET precio_mayorista = NULL WHERE producto_id = $1 AND stocker_id = (SELECT min(stocker_id) FROM tienda.variantes WHERE producto_id = $1)", [ids["qa-adm-2"]]);
+    expect((await sug()).some((s) => s.id === ids["qa-adm-2"])).toBe(false);
+    await pool.query("UPDATE tienda.variantes SET precio_mayorista = precio * 40 / 100 WHERE producto_id = $1", [ids["qa-adm-2"]]);
+    // Ya tiene un descuento programado: tampoco.
+    const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm futuro", porcentaje: 10, alcance: "productos", productoIds: [ids["qa-adm-2"]], desde: new Date(Date.now() + 86_400_000).toISOString() });
+    expect((await sug()).some((s) => s.id === ids["qa-adm-2"])).toBe(false);
+    await req("DELETE", `/v1/admin/descuentos/${d.json().id}`, operador);
+    expect((await sug()).some((s) => s.id === ids["qa-adm-2"])).toBe(true);
   });
 });
 

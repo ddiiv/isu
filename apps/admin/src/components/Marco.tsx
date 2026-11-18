@@ -37,6 +37,7 @@ const ICONOS: Record<string, string> = {
   talles: "M3 8h18v8H3zM7 8v3m4-3v4m4-4v3m4-3v4",
   portada: "M4 5h16v14H4zm0 10 4-4 3 3 3-3 6 6",
   resenas: "m12 4 2.5 5 5.5.8-4 3.9.9 5.5L12 16.6 7.1 19.2l.9-5.5-4-3.9 5.5-.8z",
+  relampagos: "M13 2 4 14h7l-1 8 9-12h-7z",
   descuentos: "M5 19 19 5M7.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm9 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
   cupones: "M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4zm10 0v10",
   asistente: "M5 5h14v10H9l-4 4z M9 10h.01M12 10h.01M15 10h.01",
@@ -71,6 +72,7 @@ const GRUPOS: Array<{ titulo: string | null; items: Item[] }> = [
   ] },
   { titulo: "Promociones", items: [
     { href: "/descuentos", texto: "Descuentos", rol: "lectura", icono: "descuentos" },
+    { href: "/relampagos", texto: "Relámpagos", rol: "lectura", icono: "relampagos" },
     { href: "/cupones", texto: "Cupones", rol: "lectura", icono: "cupones" },
   ] },
   { titulo: "Tienda", items: [
