@@ -75,12 +75,16 @@ async function cargarCatalogo() {
   await pool.query("DELETE FROM tienda.productos WHERE stocker_id >= $1 AND stocker_id < $2", [BASE, BASE + 100]);
   const p = await pool.query("INSERT INTO tienda.productos (stocker_id, stocker_padre, nombre, slug, visible) VALUES ($1,'QA-C','Remera compra','qa-remera-compra',true) RETURNING id", [BASE + 1]);
   const c = await pool.query("INSERT INTO tienda.producto_colores (producto_id, clave, nombre) VALUES ($1,'negro','Negro') RETURNING id", [p.rows[0].id]);
-  const v = async (sku: string, talle: string, precio: number, stock: number, sid: number) =>
-    pool.query("INSERT INTO tienda.variantes (producto_id, color_id, stocker_id, sku, talle, precio, stock) VALUES ($1,$2,$3,$4,$5,$6,$7)", [p.rows[0].id, c.rows[0].id, sid, sku, talle, precio, stock]);
-  await v("QA-C-M", "M", 1_000_000, 5, BASE * 10 + 1);   // $10.000
-  await v("QA-C-L", "L", 1_200_000, 1, BASE * 10 + 2);   // $12.000
+  const v = async (sku: string, talle: string, precio: number, stock: number, sid: number, mayorista: number | null = null) =>
+    pool.query("INSERT INTO tienda.variantes (producto_id, color_id, stocker_id, sku, talle, precio, stock, precio_mayorista) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", [p.rows[0].id, c.rows[0].id, sid, sku, talle, precio, stock, mayorista]);
+  await v("QA-C-M", "M", 1_000_000, 5, BASE * 10 + 1, 600_000);   // $10.000, mayorista $6.000
+  await v("QA-C-L", "L", 1_200_000, 1, BASE * 10 + 2, 700_000);   // $12.000, mayorista $7.000
   await v("QA-C-XL", "XL", 1_200_000, 0, BASE * 10 + 3);
-  stocker.stock = new Map([["QA-C-M", 5], ["QA-C-L", 1], ["QA-C-XL", 0]]);
+  // Para los cupones con piso: precios distintos, uno sin mayorista cargado y uno con mayorista mayor que el precio.
+  await v("QA-C-S", "S", 800_000, 20, BASE * 10 + 4, 500_000);     // $8.000, mayorista $5.000
+  await v("QA-C-NM", "NM", 900_000, 20, BASE * 10 + 5);           // sin mayorista
+  await v("QA-C-MAL", "MAL", 500_000, 20, BASE * 10 + 6, 600_000); // mayorista $6.000 > precio $5.000
+  stocker.stock = new Map([["QA-C-M", 5], ["QA-C-L", 1], ["QA-C-XL", 0], ["QA-C-S", 20], ["QA-C-NM", 20], ["QA-C-MAL", 20]]);
 }
 const limpiarPedidos = async () => {
   await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
@@ -763,11 +767,11 @@ describe("tienda apagada", () => {
 describe("cupones", () => {
   const cupon = async (c: Record<string, unknown>) => {
     const d = { codigo: null, automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoria_ids: [], producto_ids: [], sobre_rebajas: true,
-      minimo: 0, tope: null, desde: null, hasta: null, usos_max: null, usos_por_cliente: null, activo: true, ...c };
+      minimo: 0, tope: null, escala: null, max_mayorista: 5, desde: null, hasta: null, usos_max: null, usos_por_cliente: null, activo: true, ...c };
     const { rows } = await pool.query(
-      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, sobre_rebajas, minimo, desde, hasta, usos_max, usos_por_cliente, activo, tope, creado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'qa') RETURNING id`,
-      [d.codigo, `QA ${d.codigo ?? "promo"}`, d.automatico, d.tipo, d.valor, d.alcance, d.categoria_ids, d.producto_ids, d.sobre_rebajas, d.minimo, d.desde, d.hasta, d.usos_max, d.usos_por_cliente, d.activo, d.tope]);
+      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, sobre_rebajas, minimo, desde, hasta, usos_max, usos_por_cliente, activo, tope, escala, max_mayorista, creado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'qa') RETURNING id`,
+      [d.codigo, `QA ${d.codigo ?? "promo"}`, d.automatico, d.tipo, d.valor, d.alcance, d.categoria_ids, d.producto_ids, d.sobre_rebajas, d.minimo, d.desde, d.hasta, d.usos_max, d.usos_por_cliente, d.activo, d.tope, d.escala ? JSON.stringify(d.escala) : null, d.max_mayorista]);
     return rows[0].id as number;
   };
   const carrito = async (extra: Record<string, unknown>) => (await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 2 }], medioPago: "mercadopago", ...extra })).json();
@@ -805,7 +809,7 @@ describe("cupones", () => {
   it("porcentaje: se aplica sobre el precio (mayúsculas y espacios no importan); uno que no existe avisa y no cambia nada", async () => {
     await cupon({ codigo: "QA10" });
     const c = await carrito({ cupon: " qa10 " });
-    expect([c.subtotal, c.descuentoCupon, c.total, c.cupon]).toEqual([2_000_000, 200_000, 1_800_000, { codigo: "QA10", nombre: "QA QA10", envioGratis: false, tope: null }]);
+    expect([c.subtotal, c.descuentoCupon, c.total, c.cupon]).toEqual([2_000_000, 200_000, 1_800_000, { codigo: "QA10", nombre: "QA QA10", envioGratis: false, tope: null, mezcla: null }]);
     const x = await carrito({ cupon: "NOEXISTE" });
     expect([x.descuentoCupon, x.total, x.cupon, x.avisoCupon]).toEqual([0, 2_000_000, null, "Ese cupón no existe. Revisá que esté bien escrito."]);
   });
@@ -831,7 +835,107 @@ describe("cupones", () => {
     // Un monto mayor que la compra la deja en $0, no en negativo.
     await cupon({ codigo: "QAMUCHO", tipo: "monto", valor: 99_000_000 });
     const m = await carrito({ cupon: "QAMUCHO" });
-    expect([m.descuentoCupon, m.total]).toEqual([2_000_000, 0]);
+    // …y nunca más que (precio − mayorista) por prenda: 2 × ($10.000 − $6.000).
+    expect([m.descuentoCupon, m.total]).toEqual([800_000, 1_200_000]);
+  });
+
+  describe("piso del mayorista y cupón de mezcla", () => {
+    const S = (n: number) => ({ sku: "QA-C-S", cantidad: n });   // $8.000, mayorista $5.000: 3.000 de margen por prenda
+    const mezcla = (extra: Record<string, unknown> = {}) => cupon({ codigo: "QAMEZ", tipo: "mezcla", valor: 0, escala: [{ desde: 3, mayorista: 1 }, { desde: 5, mayorista: 2 }, { desde: 8, mayorista: 4 }], ...extra });
+
+    it("el descuento de cada línea no pasa de (precio − mayorista); sin mayorista cargado, o con uno mayor que el precio, la línea no recibe descuento", async () => {
+      await cupon({ codigo: "QAMITAD", valor: 50 });
+      // 50% de $8.000 son $4.000, pero el margen es $3.000.
+      expect((await carrito({ cupon: "QAMITAD", items: [S(2)] })).descuentoCupon).toBe(600_000);
+      // Sin mayorista cargado: no se puede verificar el piso, no hay descuento (y no se dice por qué).
+      const sin = await carrito({ cupon: "QAMITAD", items: [{ sku: "QA-C-NM", cantidad: 2 }] });
+      expect([sin.descuentoCupon, sin.avisoCupon]).toEqual([0, "Este cupón no aplica a estas prendas."]);
+      const mal = await carrito({ cupon: "QAMITAD", items: [{ sku: "QA-C-MAL", cantidad: 2 }] });
+      expect([mal.descuentoCupon, mal.avisoCupon]).toEqual([0, "Este cupón no aplica a estas prendas."]);
+      // Mezclado: sólo descuenta lo que tiene piso verificable.
+      expect((await carrito({ cupon: "QAMITAD", items: [S(1), { sku: "QA-C-NM", cantidad: 3 }] })).descuentoCupon).toBe(300_000);
+      // La rebaja masiva (relámpago, liquidación) tampoco baja de ahí: 90% de $8.000 queda en $5.000.
+      await pool.query("INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, creado_por) VALUES ('QA piso', 90, 'todo', 'qa')");
+      const r = await carrito({ items: [S(1), { sku: "QA-C-NM", cantidad: 1 }] });
+      expect(r.lineas.map((l: { sku: string; precio: number }) => [l.sku, l.precio])).toEqual([["QA-C-S", 500_000], ["QA-C-NM", 90_000]]);
+    });
+
+    it("mezcla: los tramos llevan a mayorista las prendas más baratas (2, 3, 4, 5, 7 y 8 prendas)", async () => {
+      await mezcla();
+      const d = async (n: number) => (await carrito({ cupon: "QAMEZ", items: [S(n)] }));
+      const falta = await d(2);
+      expect([falta.descuentoCupon, falta.avisoCupon]).toEqual([0, "Sumá 1 prenda más y la más barata va a precio mayorista."]);
+      expect(falta.cupon).toBeNull();
+      for (const [n, esperado] of [[3, 300_000], [4, 300_000], [5, 600_000], [7, 599_900], [8, 1_200_000]] as const) {
+        const r = await d(n);
+        expect([n, r.descuentoCupon, r.total], `${n} prendas`).toEqual([n, esperado, n * 800_000 - esperado]);
+      }
+      // Lo que se le cuenta al cliente, sin el precio mayorista.
+      expect((await d(5)).cupon.mezcla).toEqual({ unidades: 5, mayorista: 2, ahorro: 600_000, faltan: 3, siguiente: 4 });
+      // (7 prendas: $6.000 de ahorro repartidos en 7 unidades al peso hacia abajo: $1 menos, nunca de más.)
+      // Ya con el último tramo: nada más que sumar.
+      expect((await d(8)).cupon.mezcla).toMatchObject({ mayorista: 4, faltan: null, siguiente: null });
+    });
+
+    it("mezcla: van a mayorista las MÁS BARATAS, aunque haya varias unidades por línea", async () => {
+      await mezcla();
+      // 3 prendas: 1 S ($8.000, margen $3.000) y 2 M ($10.000, margen $4.000): la más barata es la S.
+      expect((await carrito({ cupon: "QAMEZ", items: [S(1), { sku: "QA-C-M", cantidad: 2 }] })).descuentoCupon).toBe(300_000);
+      // 5 prendas: 1 S y 4 M; a mayorista las 2 más baratas: la S y una M.
+      expect((await carrito({ cupon: "QAMEZ", items: [S(1), { sku: "QA-C-M", cantidad: 4 }] })).descuentoCupon).toBe(700_000);
+      // Una sola línea con 5 unidades: 2 a mayorista, repartido entre las 5 (120.000 de $… cada una) y la suma cierra.
+      const una = await carrito({ cupon: "QAMEZ", items: [S(5)] });
+      expect(una.lineas[0].subtotal - una.descuentoCupon).toBe(5 * 800_000 - 600_000);
+    });
+
+    it("mezcla: el tope en pesos y el máximo de prendas a mayorista", async () => {
+      await mezcla({ tope: 150_000 });
+      expect((await carrito({ cupon: "QAMEZ", items: [S(5)] })).descuentoCupon).toBe(150_000);
+      await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
+      await mezcla({ max_mayorista: 1 });
+      expect((await carrito({ cupon: "QAMEZ", items: [S(8)] })).descuentoCupon).toBe(300_000);
+    });
+
+    it("mezcla: respeta el mínimo, el alcance y las rebajas; sin mayorista cargado no hay descuento", async () => {
+      await mezcla({ minimo: 10_000_000 });
+      expect((await carrito({ cupon: "QAMEZ", items: [S(3)] })).avisoCupon).toMatch(/compras desde/);
+      await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
+      await mezcla({ alcance: "productos", producto_ids: [999_999_999] });
+      expect((await carrito({ cupon: "QAMEZ", items: [S(3)] })).avisoCupon).toBe("Este cupón no aplica a los productos de tu carrito.");
+      await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA %'");
+      await mezcla();
+      const sin = await carrito({ cupon: "QAMEZ", items: [{ sku: "QA-C-NM", cantidad: 4 }] });
+      expect([sin.descuentoCupon, sin.avisoCupon]).toEqual([0, "Este cupón no aplica a estas prendas."]);
+    });
+
+    it("un solo cupón por compra: entre la mezcla escrita y una promoción automática gana la que más descuenta", async () => {
+      await mezcla();
+      await cupon({ codigo: null, automatico: true, valor: 10 });   // 10% de 3 × $8.000 = $2.400 < $3.000 de la mezcla
+      const g = await carrito({ cupon: "QAMEZ", items: [S(3)] });
+      expect([g.descuentoCupon, g.cupon.codigo, g.avisoCupon]).toEqual([300_000, "QAMEZ", null]);
+      await cupon({ codigo: null, automatico: true, valor: 40 });   // 40% con piso: 3 × $3.000 = $9.000 > $3.000
+      const p = await carrito({ cupon: "QAMEZ", items: [S(3)] });
+      expect([p.descuentoCupon, p.cupon.codigo]).toEqual([900_000, null]);
+      expect(p.avisoCupon).toMatch(/^La promoción/);
+    });
+
+    it("el precio mayorista no sale en ninguna respuesta pública", async () => {
+      await pool.query("UPDATE tienda.variantes SET precio_mayorista = 612345 WHERE sku IN ('QA-C-NM', 'QA-C-S')");
+      await mezcla();
+      const cuerpos = [
+        (await app.inject("/v1/productos/qa-remera-compra")).body,
+        (await app.inject("/v1/productos?coleccion=nuevos")).body,
+        (await app.inject("/v1/productos?categoria=mujer")).body,
+        (await app.inject("/v1/config")).body,
+        (await post("/v1/carrito", { items: [S(5), { sku: "QA-C-NM", cantidad: 1 }], cupon: "QAMEZ", medioPago: "mercadopago" })).body,
+        (await post("/v1/carrito", { items: [S(1)], medioPago: "mercadopago" })).body,
+      ];
+      for (const b of cuerpos) {
+        expect(b).not.toMatch(/612345|precio_?[Mm]ayorista/);
+      }
+      // Y la ficha existe de verdad (no es un 404 que "no filtra" por no devolver nada).
+      expect(JSON.parse(cuerpos[0]!).variantes.length).toBeGreaterThan(3);
+    });
   });
 
   it("orden: rebaja de la prenda → cupón → transferencia", async () => {
@@ -947,6 +1051,7 @@ describe("cupones", () => {
   });
 
   it("probar códigos a ciegas tiene freno por IP", async () => {
+    await redis.flushdb(); // los carritos de arriba ya gastaron el límite general por minuto de esta IP
     let ultimo = 200;
     for (let i = 0; i < 42; i++) ultimo = (await post("/v1/carrito", { items: [{ sku: "QA-C-M", cantidad: 1 }], cupon: `ADIVINO${i}` })).statusCode;
     expect(ultimo).toBe(429);

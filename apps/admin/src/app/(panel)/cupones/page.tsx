@@ -13,10 +13,11 @@ import { puede, useYo } from "@/components/Marco";
  * gana el que más le descuenta. Va después de la rebaja de la prenda y antes
  * del descuento por transferencia.
  */
-type Tipo = "porcentaje" | "monto" | "envio_gratis";
+type Tipo = "porcentaje" | "monto" | "envio_gratis" | "mezcla";
+interface Tramo { desde: number; mayorista: number }
 interface Cupon {
   id?: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Tipo; valor: number;
-  alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; minimo: number; tope: number | null;
+  alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; minimo: number; tope: number | null; escala: Tramo[]; maxMayorista: number;
   desde: string | null; hasta: string | null; usosMax: number | null; usosPorCliente: number | null; activo: boolean;
   usos?: number; vigente?: boolean; creadoPor?: string; creadoEn?: string; pedidosPagados?: number; descontado?: number; vendido?: number;
 }
@@ -24,7 +25,7 @@ interface Uso { numero: string; email: string; estado: string; total: number; de
 
 const vacio: Cupon = {
   codigo: "", nombre: "", automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoriaIds: [], productoIds: [],
-  sobreRebajas: true, minimo: 0, tope: null, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
+  sobreRebajas: true, minimo: 0, tope: null, escala: [], maxMayorista: 5, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
 };
 const aLocal = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const deLocal = (v: string) => (v ? new Date(v).toISOString() : null);
@@ -52,7 +53,7 @@ export default function Cupones() {
   const cuerpoDe = (c: Cupon) => ({
     automatico: c.automatico, codigo: c.automatico ? null : c.codigo?.trim().toUpperCase() || null, nombre: c.nombre, tipo: c.tipo,
     valor: c.tipo === "envio_gratis" ? 0 : c.valor, alcance: c.alcance, categoriaIds: c.categoriaIds, productoIds: c.productoIds,
-    sobreRebajas: c.sobreRebajas, minimo: c.minimo, tope: c.tipo === "porcentaje" ? c.tope : null, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
+    sobreRebajas: c.sobreRebajas, minimo: c.minimo, tope: c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, escala: c.tipo === "mezcla" ? c.escala : [], maxMayorista: c.maxMayorista ?? 5, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
   });
   async function guardar() {
     if (!f) return;
@@ -154,8 +155,8 @@ export default function Cupones() {
               </Campo>
               <div className="grid grid-cols-2 gap-3">
                 <Campo etiqueta="Descuento">
-                  <select className={claseEntrada} value={f.tipo} onChange={(e) => { const t = e.target.value as Tipo; setF({ ...f, tipo: t, valor: t === "porcentaje" ? 10 : t === "monto" ? 500_000 : 0 }); }}>
-                    <option value="porcentaje">Porcentaje</option><option value="monto">Monto fijo</option><option value="envio_gratis">Envío gratis</option>
+                  <select className={claseEntrada} value={f.tipo} onChange={(e) => { const t = e.target.value as Tipo; setF({ ...f, tipo: t, valor: t === "porcentaje" ? 10 : t === "monto" ? 500_000 : 0, escala: t === "mezcla" && !f.escala.length ? [{ desde: 3, mayorista: 1 }] : f.escala }); }}>
+                    <option value="porcentaje">Porcentaje</option><option value="monto">Monto fijo</option><option value="envio_gratis">Envío gratis</option><option value="mezcla">Mezcla (prendas a precio mayorista)</option>
                   </select>
                 </Campo>
                 {f.tipo === "porcentaje" && (
@@ -171,7 +172,34 @@ export default function Cupones() {
               <Campo etiqueta="Compra mínima" ayuda="Sobre el total de productos ya rebajados. Vacío = sin mínimo." error={err("minimo")}>
                 <EntradaPesos valor={f.minimo || null} onChange={(v) => setF({ ...f, minimo: v ?? 0 })} />
               </Campo>
-              {f.tipo === "porcentaje" && (
+              {f.tipo === "mezcla" && (
+                <fieldset className="space-y-2 text-sm">
+                  <legend className="font-bold">Escala</legend>
+                  <ul className="space-y-2">
+                    {f.escala.map((t, i) => (
+                      <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
+                        Desde <input type="number" min={2} max={50} aria-label={`Tramo ${i + 1}: cantidad de prendas`} className={`${claseEntrada} w-20`} value={t.desde || ""}
+                          onChange={(e) => setF({ ...f, escala: f.escala.map((x, j) => (j === i ? { ...x, desde: Math.trunc(Number(e.target.value)) || 0 } : x)) })} />
+                        prendas: <input type="number" min={1} max={50} aria-label={`Tramo ${i + 1}: prendas a mayorista`} className={`${claseEntrada} w-20`} value={t.mayorista || ""}
+                          onChange={(e) => setF({ ...f, escala: f.escala.map((x, j) => (j === i ? { ...x, mayorista: Math.trunc(Number(e.target.value)) || 0 } : x)) })} />
+                        a mayorista
+                        <Boton variante="borde" onClick={() => setF({ ...f, escala: f.escala.filter((_, j) => j !== i) })}>Quitar</Boton>
+                      </li>
+                    ))}
+                  </ul>
+                  {f.escala.length < 10 && (
+                    <Boton variante="borde" onClick={() => { const u = f.escala.at(-1); setF({ ...f, escala: [...f.escala, { desde: (u?.desde ?? 1) + 2, mayorista: (u?.mayorista ?? 0) + 1 }] }); }}>Agregar tramo</Boton>
+                  )}
+                  <p className="text-xs text-tinta-tenue">Con N prendas elegibles o más, las K más baratas van a precio mayorista (se usa el tramo más alto que alcance). Nunca por debajo del mayorista de cada prenda.</p>
+                  {err("escala") && <p className="text-xs font-bold text-oferta">{err("escala")}</p>}
+                </fieldset>
+              )}
+              {f.tipo === "mezcla" && (
+                <Campo etiqueta="Máximo de prendas a mayorista" ayuda="Por compra, aunque el tramo diga más." error={err("maxMayorista")}>
+                  <input type="number" min={1} max={50} className={claseEntrada} value={f.maxMayorista || ""} onChange={(e) => setF({ ...f, maxMayorista: Math.trunc(Number(e.target.value)) || 0 })} />
+                </Campo>
+              )}
+              {(f.tipo === "porcentaje" || f.tipo === "mezcla") && (
                 <Campo etiqueta="Tope del descuento ($)" ayuda="El descuento nunca pasa de este monto. Vacío = sin tope." error={err("tope")}>
                   <EntradaPesos valor={f.tope} onChange={(v) => setF({ ...f, tope: v })} />
                 </Campo>

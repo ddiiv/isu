@@ -255,29 +255,30 @@ async function aplicarProducto(
     colorId: idsColor.get(claveColor(v.color).clave) ?? null,
     talle: v.talle,
     precio: (v.precio ?? p.precio) as number,
+    mayorista: v.mayorista ?? p.mayorista ?? null,
     stock: v.cantidad,
     orden,
   }));
   const vr = await cli.query(
-    `INSERT INTO tienda.variantes AS v (producto_id, stocker_id, sku, color_id, talle, precio, stock, stock_en, orden, activo)
-       SELECT $1, x.sid, x.sku, x.color, x.talle, x.precio, x.stock, $8::timestamptz, x.orden, true
-         FROM unnest($2::int[], $3::text[], $4::int[], $5::text[], $6::int[], $7::int[], $9::int[])
-              AS x(sid, sku, color, talle, precio, stock, orden)
+    `INSERT INTO tienda.variantes AS v (producto_id, stocker_id, sku, color_id, talle, precio, stock, stock_en, orden, activo, precio_mayorista)
+       SELECT $1, x.sid, x.sku, x.color, x.talle, x.precio, x.stock, $8::timestamptz, x.orden, true, x.mayorista
+         FROM unnest($2::int[], $3::text[], $4::int[], $5::text[], $6::int[], $7::int[], $9::int[], $10::int[])
+              AS x(sid, sku, color, talle, precio, stock, orden, mayorista)
      ON CONFLICT (stocker_id) DO UPDATE SET
          producto_id = EXCLUDED.producto_id, sku = EXCLUDED.sku, color_id = EXCLUDED.color_id,
          -- un talle oculto en la tienda sigue inactivo aunque Stocker lo tenga
-         talle = EXCLUDED.talle, precio = EXCLUDED.precio, orden = EXCLUDED.orden, activo = NOT v.oculta,
+         talle = EXCLUDED.talle, precio = EXCLUDED.precio, precio_mayorista = EXCLUDED.precio_mayorista, orden = EXCLUDED.orden, activo = NOT v.oculta,
          stock    = CASE WHEN v.stock_en <= EXCLUDED.stock_en THEN EXCLUDED.stock ELSE v.stock END,
          stock_en = GREATEST(v.stock_en, EXCLUDED.stock_en),
          actualizado_en = now()
-       WHERE (v.producto_id, v.sku, v.color_id, v.talle, v.precio, v.orden, v.activo,
+       WHERE (v.producto_id, v.sku, v.color_id, v.talle, v.precio, v.precio_mayorista, v.orden, v.activo,
               CASE WHEN v.stock_en <= EXCLUDED.stock_en THEN EXCLUDED.stock ELSE v.stock END)
          IS DISTINCT FROM
-             (EXCLUDED.producto_id, EXCLUDED.sku, EXCLUDED.color_id, EXCLUDED.talle, EXCLUDED.precio, EXCLUDED.orden, NOT v.oculta, v.stock)`,
+             (EXCLUDED.producto_id, EXCLUDED.sku, EXCLUDED.color_id, EXCLUDED.talle, EXCLUDED.precio, EXCLUDED.precio_mayorista, EXCLUDED.orden, NOT v.oculta, v.stock)`,
     [
       productoId,
       vs.map((v) => v.stockerId), vs.map((v) => v.sku), vs.map((v) => v.colorId), vs.map((v) => v.talle),
-      vs.map((v) => v.precio), vs.map((v) => v.stock), generado, vs.map((v) => v.orden),
+      vs.map((v) => v.precio), vs.map((v) => v.stock), generado, vs.map((v) => v.orden), vs.map((v) => v.mayorista),
     ],
   );
   n += vr.rowCount ?? 0;

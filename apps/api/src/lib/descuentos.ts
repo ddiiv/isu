@@ -65,6 +65,12 @@ export function crearDescuentos(pool: pg.Pool, cache: { obtener<T>(k: string, f:
   };
 }
 
-/** Precio con descuento, redondeado al peso hacia abajo (como el de transferencia). */
-export const conRebaja = (precio: number, porcentaje: number) =>
-  porcentaje > 0 ? conDescuento(centavos(precio), porcentaje) : precio;
+/**
+ * Precio con descuento, redondeado al peso hacia abajo (como el de transferencia). `mayorista` es el piso:
+ * la rebaja no lo baja. Sin mayorista cargado (o mayor que el precio) no hay piso que aplicar y rige la rebaja.
+ */
+export const conRebaja = (precio: number, porcentaje: number, mayorista: number | null = null) => {
+  if (porcentaje <= 0) return precio;
+  const r = conDescuento(centavos(precio), porcentaje);
+  return mayorista !== null && mayorista < precio ? Math.max(r, mayorista) : r;
+};

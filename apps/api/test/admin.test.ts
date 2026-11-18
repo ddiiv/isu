@@ -789,6 +789,23 @@ describe("cupones y promociones", () => {
     expect((await lista()).tope).toBeNull();
     expect((await req("POST", "/v1/admin/cupones", operador, { nombre: "QA adm envío", tipo: "envio_gratis", valor: 0, codigo: "QAADM9", tope: 100_000 })).statusCode).toBe(400);
   });
+  it("mezcla: se guarda con su escala y se valida (tramos en orden, mayorista no mayor que la cantidad, sin valor)", async () => {
+    const m = { nombre: "QA adm mezcla", tipo: "mezcla", valor: 0, codigo: "QAADMMEZ", escala: [{ desde: 3, mayorista: 1 }, { desde: 5, mayorista: 2 }], tope: 1_500_000, maxMayorista: 3 };
+    const r = await req("POST", "/v1/admin/cupones", operador, m);
+    expect(r.statusCode, r.body).toBe(201);
+    const id = r.json().id;
+    expect((await req("GET", "/v1/admin/cupones", operador)).json().cupones.find((c: { id: number }) => c.id === id))
+      .toMatchObject({ tipo: "mezcla", escala: m.escala, tope: 1_500_000, maxMayorista: 3 });
+    expect((await req("PUT", `/v1/admin/cupones/${id}`, operador, { ...m, escala: [{ desde: 2, mayorista: 1 }] })).statusCode).toBe(200);
+    const mal = [
+      { ...m, codigo: "QAADMM1", escala: [] },
+      { ...m, codigo: "QAADMM2", escala: [{ desde: 5, mayorista: 2 }, { desde: 3, mayorista: 1 }] },
+      { ...m, codigo: "QAADMM3", escala: [{ desde: 3, mayorista: 4 }] },
+      { ...m, codigo: "QAADMM4", valor: 10 },
+      { nombre: "QA adm 10", tipo: "porcentaje", valor: 10, codigo: "QAADMM5", escala: [{ desde: 3, mayorista: 1 }] },
+    ];
+    for (const b of mal) expect((await req("POST", "/v1/admin/cupones", operador, b)).statusCode, JSON.stringify(b)).toBe(400);
+  });
   it("lectura no crea; un cupón usado no se borra (se desactiva)", async () => {
     expect((await req("POST", "/v1/admin/cupones", lectura2, { ...base, codigo: "QAADMLEC" })).json().error).toBe("sin_permiso");
     const id = (await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMUSADO" })).json().id;

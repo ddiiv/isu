@@ -66,7 +66,7 @@ export async function leerAjustes(pool: pg.Pool): Promise<Ajustes> {
 }
 
 export interface Fila {
-  sku: string; precio: number; stock: number; talle: string | null; color: string | null; nombre: string; slug: string;
+  sku: string; precio: number; mayorista: number | null; stock: number; talle: string | null; color: string | null; nombre: string; slug: string;
   producto_id: number; foto: string | null; peso_gramos: number | null; alto_cm: number | null; ancho_cm: number | null; largo_cm: number | null; pack: boolean;
 }
 
@@ -107,7 +107,7 @@ export async function cotizar(
   const todos = new Set([...sueltas.keys(), ...[...grupos.values()].flatMap((g) => [...g.prendas.keys()])]);
 
   const { rows } = await pool.query<Fila>(
-    `SELECT v.sku, v.precio, v.stock, v.talle, c.nombre AS color, p.nombre, p.slug, p.id AS producto_id, p.peso_gramos, p.alto_cm, p.ancho_cm, p.largo_cm, p.pack,
+    `SELECT v.sku, v.precio, v.precio_mayorista AS mayorista, v.stock, v.talle, c.nombre AS color, p.nombre, p.slug, p.id AS producto_id, p.peso_gramos, p.alto_cm, p.ancho_cm, p.largo_cm, p.pack,
             (SELECT f.clave FROM tienda.fotos f WHERE f.producto_id = p.id
                ORDER BY (f.tipo = 'color' AND f.color_id = v.color_id) DESC, (f.tipo = 'exhibicion') DESC, f.orden, f.id LIMIT 1) AS foto
        FROM tienda.variantes v
@@ -158,14 +158,14 @@ export async function cotizar(
     const f = filas.get(sku);
     if (!f) continue;
     const rebaja = rebajas.get(f.producto_id) ?? 0;
-    const precio = conRebaja(f.precio, rebaja);
+    const precio = conRebaja(f.precio, rebaja, f.mayorista);
     lineas.push({
       sku, clave: sku, productoSlug: f.slug, nombre: f.nombre, color: colorDe(f), talle: f.talle,
       foto: f.foto, precio, precioLista: rebaja ? f.precio : null, cantidad, disponible: Math.min(libre(sku, f.stock, cantidad), 20), subtotal: precio * cantidad, pack: null,
     });
     if (!conProblema.has(sku)) {
       subtotal += precio * cantidad;
-      paraCupon.push({ sku, productoId: f.producto_id, precio, rebajada: rebaja > 0, cantidad });
+      paraCupon.push({ sku, productoId: f.producto_id, precio, mayorista: f.mayorista, rebajada: rebaja > 0, cantidad });
     }
   }
 
@@ -180,7 +180,7 @@ export async function cotizar(
     let listaPack = 0;
     const detalle: PackCotizado["prendas"] = [];
     for (const { sku, n, f } of prendas) {
-      const precio = conRebaja(f!.precio, pct);
+      const precio = conRebaja(f!.precio, pct, f!.mayorista);
       precioPack += precio * n;
       listaPack += f!.precio * n;
       detalle.push({ sku, color: colorDe(f!), talle: f!.talle, foto: f!.foto, cantidad: n, precio });
@@ -199,7 +199,7 @@ export async function cotizar(
       subtotal += precioPack * g.cantidad;
       for (const { sku, n, f } of prendas) {
         // Para el cupón, cada prenda del pack es una línea con su clave: una prenda en pack cuenta como rebajada.
-        paraCupon.push({ sku: `${clave}|${sku}`, productoId: f!.producto_id, precio: conRebaja(f!.precio, pct), rebajada: pct > 0, cantidad: n * g.cantidad });
+        paraCupon.push({ sku: `${clave}|${sku}`, productoId: f!.producto_id, precio: conRebaja(f!.precio, pct, f!.mayorista), mayorista: f!.mayorista, rebajada: pct > 0, cantidad: n * g.cantidad });
       }
     }
   }
@@ -254,7 +254,7 @@ export async function cotizar(
   }
   return {
     lineas, packs, subtotal,
-    cupon: aplicado ? { codigo: aplicado.cupon.codigo, nombre: aplicado.cupon.nombre, envioGratis: aplicado.envioGratis, tope: aplicado.cupon.tope } : null,
+    cupon: aplicado ? { codigo: aplicado.cupon.codigo, nombre: aplicado.cupon.nombre, envioGratis: aplicado.envioGratis, tope: aplicado.cupon.tope, mezcla: aplicado.mezcla ?? null } : null,
     descuentoCupon, avisoCupon, promoCerca,
     descuento, envio, total: neto + envio,
     envioGratisDesde: a.envioGratisDesde,

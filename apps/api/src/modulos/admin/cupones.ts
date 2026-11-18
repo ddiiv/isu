@@ -18,14 +18,15 @@ import { auditar, exigir } from "./sesion.js";
 const Id = z.coerce.number().int().positive().max(2_147_483_647);
 
 const COLUMNAS = `c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.categoria_ids AS "categoriaIds", c.producto_ids AS "productoIds",
-  c.sobre_rebajas AS "sobreRebajas", c.minimo, c.tope::float8 AS tope, c.desde, c.hasta, c.usos_max AS "usosMax", c.usos_por_cliente AS "usosPorCliente", c.usos, c.activo,
+  c.sobre_rebajas AS "sobreRebajas", c.minimo, c.tope::float8 AS tope, c.escala, c.max_mayorista AS "maxMayorista", c.desde, c.hasta, c.usos_max AS "usosMax", c.usos_por_cliente AS "usosPorCliente", c.usos, c.activo,
   c.creado_por AS "creadoPor", c.creado_en AS "creadoEn",
   (c.activo AND (c.desde IS NULL OR c.desde <= now()) AND (c.hasta IS NULL OR c.hasta > now()) AND (c.usos_max IS NULL OR c.usos < c.usos_max)) AS vigente`;
 
 const aFila = (c: CuponEntrada) => [
   c.automatico ? null : c.codigo, c.nombre, c.automatico, c.tipo, c.tipo === "envio_gratis" ? 0 : c.valor, c.alcance,
   c.alcance === "categorias" ? c.categoriaIds : [], c.alcance === "productos" ? c.productoIds : [],
-  c.sobreRebajas, c.minimo, c.tipo === "porcentaje" ? c.tope : null, c.desde, c.hasta, c.usosMax, c.automatico ? null : c.usosPorCliente, c.activo,
+  c.tipo === "mezcla" ? JSON.stringify(c.escala) : null, c.maxMayorista,
+  c.sobreRebajas, c.minimo, c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, c.desde, c.hasta, c.usosMax, c.automatico ? null : c.usosPorCliente, c.activo,
 ];
 
 function repetido(e: unknown): never {
@@ -53,9 +54,9 @@ export async function rutasCuponesAdmin(app: FastifyInstance, deps: { pool: pg.P
   api.post("/v1/admin/cupones", { schema: { body: CuponEntrada } }, async (req, reply) => {
     const a = await exigir(pool, req, "operador");
     const { rows } = await pool.query<{ id: number }>(
-      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, sobre_rebajas, minimo, tope, desde, hasta,
+      `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, escala, max_mayorista, sobre_rebajas, minimo, tope, desde, hasta,
                                    usos_max, usos_por_cliente, activo, creado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
       [...aFila(req.body), a.email]).catch(repetido);
     await auditar(pool, a, "crear_cupon", "cupon", rows[0]!.id, req.body, ip(req));
     return reply.code(201).send({ id: rows[0]!.id });
@@ -64,8 +65,8 @@ export async function rutasCuponesAdmin(app: FastifyInstance, deps: { pool: pg.P
   api.put("/v1/admin/cupones/:id", { schema: { params: z.object({ id: Id }), body: CuponEntrada } }, async (req) => {
     const a = await exigir(pool, req, "operador");
     const r = await pool.query(
-      `UPDATE tienda.cupones SET codigo=$2, nombre=$3, automatico=$4, tipo=$5, valor=$6, alcance=$7, categoria_ids=$8, producto_ids=$9, sobre_rebajas=$10,
-              minimo=$11, tope=$12, desde=$13, hasta=$14, usos_max=$15, usos_por_cliente=$16, activo=$17, actualizado_en=now()
+      `UPDATE tienda.cupones SET codigo=$2, nombre=$3, automatico=$4, tipo=$5, valor=$6, alcance=$7, categoria_ids=$8, producto_ids=$9, escala=$10, max_mayorista=$11,
+              sobre_rebajas=$12, minimo=$13, tope=$14, desde=$15, hasta=$16, usos_max=$17, usos_por_cliente=$18, activo=$19, actualizado_en=now()
         WHERE id = $1`, [req.params.id, ...aFila(req.body)]).catch(repetido);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese cupón.");
     await auditar(pool, a, "editar_cupon", "cupon", req.params.id, req.body, ip(req));
