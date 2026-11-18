@@ -860,6 +860,20 @@ describe("cupones", () => {
       expect(r.lineas.map((l: { sku: string; precio: number }) => [l.sku, l.precio])).toEqual([["QA-C-S", 500_000], ["QA-C-NM", 90_000]]);
     });
 
+    it("la transferencia tampoco baja de mayorista: lo que ya está en el piso no recibe el 20%, y sin mayorista cargado no hay descuento", async () => {
+      const T = (items: { sku: string; cantidad: number }[], extra: Record<string, unknown> = {}) => carrito({ items, medioPago: "transferencia", ...extra });
+      // 2 × $8.000 (mayorista $5.000): el 20% ($3.200) entra entero, quedan $12.800 ≥ $10.000.
+      expect((await T([S(2)])).descuento).toBe(320_000);
+      // Con el cupón del 50% cada una ya está en $5.000 (el piso): la transferencia no descuenta nada.
+      await cupon({ codigo: "QAMITAD", valor: 50 });
+      expect((await T([S(2)], { cupon: "QAMITAD" })).descuento).toBe(0);
+      // Sin mayorista cargado, o mayor que el precio: nada.
+      expect((await T([{ sku: "QA-C-NM", cantidad: 2 }])).descuento).toBe(0);
+      expect((await T([{ sku: "QA-C-MAL", cantidad: 2 }])).descuento).toBe(0);
+      // Mezclado ($17.000): el 20% serían $3.400, pero sólo la línea con piso verificable puede bajar: $3.000 de margen.
+      expect((await T([S(1), { sku: "QA-C-NM", cantidad: 1 }])).descuento).toBe(300_000);
+    });
+
     it("mezcla: los tramos llevan a mayorista las prendas más baratas (2, 3, 4, 5, 7 y 8 prendas)", async () => {
       await mezcla();
       const d = async (n: number) => (await carrito({ cupon: "QAMEZ", items: [S(n)] }));

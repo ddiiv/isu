@@ -57,7 +57,7 @@ async function cargarCatalogo() {
   await pool.query("DELETE FROM tienda.productos WHERE stocker_id >= $1 AND stocker_id < $2", [BASE, BASE + 100]);
   const p = await pool.query("INSERT INTO tienda.productos (stocker_id, stocker_padre, nombre, slug, visible) VALUES ($1,'QA-T','Remera transferencia','qa-remera-transferencia',true) RETURNING id", [BASE + 1]);
   const c = await pool.query("INSERT INTO tienda.producto_colores (producto_id, clave, nombre) VALUES ($1,'negro','Negro') RETURNING id", [p.rows[0].id]);
-  await pool.query("INSERT INTO tienda.variantes (producto_id, color_id, stocker_id, sku, talle, precio, stock) VALUES ($1,$2,$3,'QA-T-M','M',1000000,20)", [p.rows[0].id, c.rows[0].id, BASE * 10 + 1]);
+  await pool.query("INSERT INTO tienda.variantes (producto_id, color_id, stocker_id, sku, talle, precio, stock, precio_mayorista) VALUES ($1,$2,$3,'QA-T-M','M',1000000,20,600000)", [p.rows[0].id, c.rows[0].id, BASE * 10 + 1]);
   stocker.stock = new Map([["QA-T-M", 20]]);
 }
 const limpiar = async () => {

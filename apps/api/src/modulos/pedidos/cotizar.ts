@@ -242,8 +242,14 @@ export async function cotizar(
   const cobrado = new Map(lineas.map((l) => [l.clave, l.precio - (aplicado?.porUnidad.get(l.clave) ?? 0)]));
 
   const trasCupon = subtotal - descuentoCupon;
+  // Piso mayorista: la transferencia tampoco deja una prenda por debajo del mayorista. Sin mayorista
+  // válido (o ≥ lo que ya paga), esa línea no recibe nada del descuento.
+  const piso = paraCupon.reduce((t, l) => {
+    const paga = l.precio - (aplicado?.porUnidad.get(l.sku) ?? 0);
+    return t + (l.mayorista !== null && l.mayorista < paga ? l.mayorista : paga) * l.cantidad;
+  }, 0);
   const descuento = opciones.medioPago === "transferencia" && trasCupon > 0
-    ? trasCupon - conDescuento(centavos(trasCupon), a.descuentoTransferencia)
+    ? Math.min(trasCupon - conDescuento(centavos(trasCupon), a.descuentoTransferencia), Math.max(0, trasCupon - piso))
     : 0;
   const neto = trasCupon - descuento;
   const gratis = a.envioGratisDesde !== null && neto >= a.envioGratisDesde;
