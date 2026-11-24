@@ -494,7 +494,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   });
 
   /** Sube una foto a un producto (backoffice y carpeta isu-fotos): procesa, guarda los tres tamaños y registra la fila. */
-  async function subirFoto(a: { email: string }, ipCliente: string, f: { productoId: number; tipo: "color" | "exhibicion"; colorId: number | null; alt?: string | undefined; archivo: Buffer; origen?: string }) {
+  async function subirFoto(a: { email: string }, ipCliente: string, f: { productoId: number; tipo: "color" | "exhibicion"; colorId: number | null; alt?: string | undefined; archivo: Buffer; origen?: string; reemplazarViejas?: boolean }) {
     if (!deps.fotos) throw new ErrorHttp(503, "sin_almacen", "No hay almacén de fotos configurado (FOTOS_DIR o R2).");
     const { tipo, colorId: color, alt } = f;
     if (tipo === "color" && !color) throw new ErrorHttp(400, "color", "Una foto de color necesita el color.");
@@ -518,6 +518,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const cli = await pool.connect();
     let id: number;
     let reemplazada: string | null = null;
+    let viejas: string[] = [];
     try {
       await cli.query("BEGIN");
       await cli.query("SET LOCAL lock_timeout = '5s'");
@@ -527,6 +528,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         const vieja = (await cli.query<{ clave: string; orden: number }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND origen = $2 RETURNING clave, orden", [f.productoId, f.origen])).rows[0];
         if (vieja) { reemplazada = vieja.clave; orden = vieja.orden; }
       }
+      // Las fotos de isu-fotos reemplazan las que el color traía de antes (las que no vienen de isu-fotos): si no, el tope de 5 por color no deja entrar las nuevas.
+      if (f.reemplazarViejas && color) viejas = (await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND color_id = $2 AND origen IS NULL RETURNING clave", [f.productoId, color])).rows.map((r) => r.clave);
       if (orden === null) {
         orden = (await cli.query<{ n: number }>(
           "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3", [f.productoId, tipo, color])).rows[0]!.n;
@@ -549,6 +552,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     await invalidar(await slugsDe([f.productoId]));
     // La foto reemplazada se borra después de regenerar las páginas (así nunca se ve una foto rota).
     if (reemplazada) setTimeout(() => void borrar(reemplazada!), 60_000).unref();
+    for (const v of viejas) setTimeout(() => void borrar(v), 60_000).unref();
     return { id, clave };
   }
 
@@ -572,7 +576,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
      */
     sub.withTypeProvider<ZodTypeProvider>().post("/v1/interno/fotos/:slug", {
       bodyLimit: 26 * 1024 * 1024,
-      schema: { params: z.object({ slug: z.string().regex(/^[a-z0-9-]{1,100}$/) }), querystring: z.object({ color: z.string().regex(/^[a-z0-9-]{1,40}$/), origen: z.string().regex(/^ia\/[A-Za-z0-9_\/-]{1,100}$/), alt: z.string().trim().max(160).optional() }).strict() },
+      schema: { params: z.object({ slug: z.string().regex(/^[a-z0-9-]{1,100}$/) }), querystring: z.object({ color: z.string().regex(/^[a-z0-9-]{1,40}$/), origen: z.string().regex(/^ia\/[A-Za-z0-9_\/-]{1,100}$/), alt: z.string().trim().max(160).optional(), tipo: z.enum(["color", "exhibicion"]).default("exhibicion"), reemplazar: z.literal("1").optional() }).strict() },
     }, async (req, reply) => {
       const h = req.headers.authorization;
       if (!deps.env.FOTOS_TOKEN || typeof h !== "string" || !iguales(h, `Bearer ${deps.env.FOTOS_TOKEN}`)) throw new ErrorHttp(401, "credencial", "Credencial inválida.");
@@ -581,7 +585,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       if (!rows[0]) throw new ErrorHttp(404, "no_encontrado", "No existe ese producto.");
       if (!rows[0].color_id) throw new ErrorHttp(404, "color", "Ese producto no tiene ese color.");
       return reply.code(201).send(await subirFoto({ email: "isu-fotos (IA)" }, req.ip, {
-        productoId: rows[0].id, tipo: "exhibicion", colorId: rows[0].color_id, alt: req.query.alt, archivo: req.body as Buffer, origen: req.query.origen,
+        productoId: rows[0].id, tipo: req.query.tipo, colorId: rows[0].color_id, alt: req.query.alt, archivo: req.body as Buffer, origen: req.query.origen, reemplazarViejas: req.query.reemplazar === "1",
       }));
     });
   });

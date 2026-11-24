@@ -364,12 +364,21 @@ describe("fotos", () => {
     expect(uno.statusCode, uno.body).toBe(201);
     const fila = (await pool.query("SELECT tipo, color_id, origen, alt, orden FROM tienda.fotos WHERE id = $1", [uno.json().id])).rows[0];
     expect(fila).toMatchObject({ tipo: "exhibicion", color_id: color.id, origen: "ia/X/Frente", alt: "Frente" });
+    // tipo=color: la prenda sola, que es la que se ve en el selector de color.
+    const sola = await subirIa(`color=${color.clave}&origen=ia/X/Solo-Frente&tipo=color`, await jpg());
+    expect(sola.statusCode, sola.body).toBe(201);
+    expect((await pool.query("SELECT tipo FROM tienda.fotos WHERE id = $1", [sola.json().id])).rows[0].tipo).toBe("color");
+    expect((await subirIa(`color=${color.clave}&origen=ia/X/Otra&tipo=raro`, await jpg())).statusCode).toBe(400);
+    // reemplazar=1: salen las fotos viejas del color (sin origen) y entran las nuevas.
+    const vieja = (await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, alt) VALUES ($1,'color',$2,9,'p/vieja-test/x','vieja') RETURNING id", [prod, color.id])).rows[0].id;
+    expect((await subirIa(`color=${color.clave}&origen=ia/X/Costado&reemplazar=1`, await jpg())).statusCode).toBe(201);
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE id = $1", [vieja])).rows[0].n).toBe(0);
     // La misma de nuevo (regenerada): reemplaza, no duplica, y conserva el lugar.
     const dos = await subirIa(`color=${color.clave}&origen=ia/X/Frente`, await jpg());
     expect(dos.statusCode, dos.body).toBe(201);
     const ahora = (await pool.query("SELECT id, orden FROM tienda.fotos WHERE producto_id = $1 AND origen = 'ia/X/Frente'", [prod])).rows;
     expect(ahora).toEqual([{ id: dos.json().id, orden: fila.orden }]);
-    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE producto_id = $1", [prod])).rows[0].n).toBe(antes + 1);
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE producto_id = $1", [prod])).rows[0].n).toBe(antes + 3);
     await pool.query("DELETE FROM tienda.fotos WHERE producto_id = $1 AND origen LIKE 'ia/%'", [prod]);
   });
   it("ordenar y borrar", async () => {
