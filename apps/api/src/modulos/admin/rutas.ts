@@ -528,8 +528,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         const vieja = (await cli.query<{ clave: string; orden: number }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND origen = $2 RETURNING clave, orden", [f.productoId, f.origen])).rows[0];
         if (vieja) { reemplazada = vieja.clave; orden = vieja.orden; }
       }
-      // Las fotos de isu-fotos reemplazan las que el color traía de antes (las que no vienen de isu-fotos): si no, el tope de 5 por color no deja entrar las nuevas.
-      if (f.reemplazarViejas && color) viejas = (await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND color_id = $2 AND origen IS NULL RETURNING clave", [f.productoId, color])).rows.map((r) => r.clave);
+      // Las fotos de isu-fotos reemplazan las que el color traía de antes (las que no vienen de isu-fotos, con o sin origen de la importación): si no, el tope de 5 por color no deja entrar las nuevas.
+      if (f.reemplazarViejas && color) viejas = (await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND color_id = $2 AND (origen IS NULL OR origen NOT LIKE 'ia/%') RETURNING clave", [f.productoId, color])).rows.map((r) => r.clave);
       if (orden === null) {
         orden = (await cli.query<{ n: number }>(
           "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3", [f.productoId, tipo, color])).rows[0]!.n;
