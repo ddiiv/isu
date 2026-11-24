@@ -376,8 +376,10 @@ describe("fotos", () => {
     expect((await subirIa(`color=${color.clave}&origen=ia/X/Solo-Frente&tipo=color`, await jpg())).statusCode).toBe(201);
     // reemplazar=1: salen las fotos viejas del color (sin origen) y entran las nuevas.
     const vieja = (await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, alt, origen) VALUES ($1,'color',$2,9,'p/vieja-test/x','vieja','importada/1') RETURNING id", [prod, color.id])).rows[0].id;
+    const general = (await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, orden, clave, alt) VALUES ($1,'exhibicion',9,'p/general-test/x','general') RETURNING id", [prod])).rows[0].id;
     expect((await subirIa(`color=${color.clave}&origen=ia/X/Costado&reemplazar=1`, await jpg())).statusCode).toBe(201);
     expect((await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE id = $1", [vieja])).rows[0].n).toBe(0);
+    expect((await pool.query("SELECT count(*)::int AS n FROM tienda.fotos WHERE id = $1", [general])).rows[0].n).toBe(0);
     // La misma de nuevo (regenerada): reemplaza, no duplica, y conserva el lugar.
     const dos = await subirIa(`color=${color.clave}&origen=ia/X/Frente`, await jpg());
     expect(dos.statusCode, dos.body).toBe(201);

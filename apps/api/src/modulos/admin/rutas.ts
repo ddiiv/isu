@@ -529,7 +529,8 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
         if (vieja) { reemplazada = vieja.clave; orden = vieja.orden; }
       }
       // Las fotos de isu-fotos reemplazan las que el color traía de antes (las que no vienen de isu-fotos, con o sin origen de la importación): si no, el tope de 5 por color no deja entrar las nuevas.
-      if (f.reemplazarViejas && color) viejas = (await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND color_id = $2 AND (origen IS NULL OR origen NOT LIKE 'ia/%') RETURNING clave", [f.productoId, color])).rows.map((r) => r.clave);
+      // También salen las generales viejas del producto (con modelo y sin color).
+      if (f.reemplazarViejas && color) viejas = (await cli.query<{ clave: string }>("DELETE FROM tienda.fotos WHERE producto_id = $1 AND (color_id = $2 OR (tipo = 'exhibicion' AND color_id IS NULL)) AND (origen IS NULL OR origen NOT LIKE 'ia/%') RETURNING clave", [f.productoId, color])).rows.map((r) => r.clave);
       if (orden === null) {
         orden = (await cli.query<{ n: number }>(
           "SELECT COALESCE(max(orden) + 1, 0)::int AS n FROM tienda.fotos WHERE producto_id = $1 AND tipo = $2 AND color_id IS NOT DISTINCT FROM $3", [f.productoId, tipo, color])).rows[0]!.n;
