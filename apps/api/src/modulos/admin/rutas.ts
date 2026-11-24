@@ -569,6 +569,21 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
       return reply.code(201).send(await subirFoto(a, ip(req), { productoId: req.params.id, tipo, colorId: color ?? null, alt, archivo: req.body as Buffer }));
     });
 
+    // isu-fotos saca una foto que subió (p. ej. unisex: quedan sólo las elegidas). Sólo las de origen «ia/».
+    sub.withTypeProvider<ZodTypeProvider>().delete("/v1/interno/fotos/:slug", {
+      schema: { params: z.object({ slug: z.string().regex(/^[a-z0-9-]{1,100}$/) }), querystring: z.object({ origen: z.string().regex(/^ia\/[A-Za-z0-9_\/-]{1,100}$/) }).strict() },
+    }, async (req) => {
+      const h = req.headers.authorization;
+      if (!deps.env.FOTOS_TOKEN || typeof h !== "string" || !iguales(h, `Bearer ${deps.env.FOTOS_TOKEN}`)) throw new ErrorHttp(401, "credencial", "Credencial inválida.");
+      const { rows } = await pool.query<{ clave: string; producto_id: number }>(
+        "DELETE FROM tienda.fotos WHERE origen = $2 AND producto_id = (SELECT id FROM tienda.productos WHERE slug = $1) RETURNING clave, producto_id", [req.params.slug, req.query.origen]);
+      if (rows[0]) {
+        await invalidar(await slugsDe([rows[0].producto_id]));
+        setTimeout(() => { for (const w of [400, 800, 1200]) void deps.fotos?.borrar(`${rows[0]!.clave}-${w}.webp`).catch(() => {}); }, 60_000).unref();
+      }
+      return { ok: true, borradas: rows.length };
+    });
+
     /*
      * Fotos generadas con IA (la carpeta local isu-fotos): entran con FOTOS_TOKEN, sin sesión del backoffice. Siempre
      * «con modelo» (exhibicion) del color pedido. `origen` es la foto de la carpeta (p. ej. «ia/Negro/Frente»): subir de

@@ -369,6 +369,11 @@ describe("fotos", () => {
     expect(sola.statusCode, sola.body).toBe(201);
     expect((await pool.query("SELECT tipo FROM tienda.fotos WHERE id = $1", [sola.json().id])).rows[0].tipo).toBe("color");
     expect((await subirIa(`color=${color.clave}&origen=ia/X/Otra&tipo=raro`, await jpg())).statusCode).toBe(400);
+    // Sacar una foto subida por isu-fotos: con la clave, y sólo las de origen ia/.
+    const quitar = (o: string, clave = "f".repeat(40)) => app.inject({ method: "DELETE", url: `/v1/interno/fotos/${slug}?origen=${o}`, headers: { ...IP, authorization: `Bearer ${clave}` } });
+    expect((await quitar("ia/X/Costado", "otra".repeat(10))).statusCode).toBe(401);
+    expect((await quitar("ia/X/Solo-Frente")).json().borradas).toBe(1);
+    expect((await subirIa(`color=${color.clave}&origen=ia/X/Solo-Frente&tipo=color`, await jpg())).statusCode).toBe(201);
     // reemplazar=1: salen las fotos viejas del color (sin origen) y entran las nuevas.
     const vieja = (await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, color_id, orden, clave, alt, origen) VALUES ($1,'color',$2,9,'p/vieja-test/x','vieja','importada/1') RETURNING id", [prod, color.id])).rows[0].id;
     expect((await subirIa(`color=${color.clave}&origen=ia/X/Costado&reemplazar=1`, await jpg())).statusCode).toBe(201);
