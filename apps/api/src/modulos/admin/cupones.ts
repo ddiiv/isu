@@ -18,7 +18,7 @@ import { auditar, exigir } from "./sesion.js";
 const Id = z.coerce.number().int().positive().max(2_147_483_647);
 
 const COLUMNAS = `c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.categoria_ids AS "categoriaIds", c.producto_ids AS "productoIds",
-  c.sobre_rebajas AS "sobreRebajas", c.acumula, c.minimo, c.tope::float8 AS tope, c.escala, c.max_mayorista AS "maxMayorista", c.desde, c.hasta, c.usos_max AS "usosMax", c.usos_por_cliente AS "usosPorCliente", c.usos, c.activo,
+  c.sobre_rebajas AS "sobreRebajas", c.acumula, c.minimo, c.tope::float8 AS tope, c.escala, c.max_mayorista AS "maxMayorista", c.desde, c.hasta, c.usos_max AS "usosMax", c.usos_por_cliente AS "usosPorCliente", c.usos, c.activo, c.visible, c.descripcion,
   c.creado_por AS "creadoPor", c.creado_en AS "creadoEn",
   (c.activo AND (c.desde IS NULL OR c.desde <= now()) AND (c.hasta IS NULL OR c.hasta > now()) AND (c.usos_max IS NULL OR c.usos < c.usos_max)) AS vigente`;
 
@@ -26,7 +26,7 @@ const aFila = (c: CuponEntrada) => [
   c.automatico ? null : c.codigo, c.nombre, c.automatico, c.tipo, c.tipo === "envio_gratis" ? 0 : c.valor, c.alcance,
   c.alcance === "categorias" ? c.categoriaIds : [], c.alcance === "productos" ? c.productoIds : [],
   c.tipo === "mezcla" ? JSON.stringify(c.escala) : null, c.maxMayorista,
-  c.sobreRebajas, c.minimo, c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, c.desde, c.hasta, c.usosMax, c.automatico ? null : c.usosPorCliente, c.activo, c.acumula,
+  c.sobreRebajas, c.minimo, c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, c.desde, c.hasta, c.usosMax, c.automatico ? null : c.usosPorCliente, c.activo, c.acumula, c.automatico ? false : c.visible, c.descripcion,
 ];
 
 function repetido(e: unknown): never {
@@ -47,7 +47,7 @@ export async function rutasCuponesAdmin(app: FastifyInstance, deps: { pool: pg.P
               (SELECT count(*)::int FROM tienda.pedidos p WHERE p.cupon_id = c.id AND p.pagado_en IS NOT NULL) AS "pedidosPagados",
               (SELECT COALESCE(sum(p.descuento_cupon + p.envio_bonificado), 0)::bigint FROM tienda.pedidos p WHERE p.cupon_id = c.id AND p.pagado_en IS NOT NULL) AS "descontado",
               (SELECT COALESCE(sum(p.total), 0)::bigint FROM tienda.pedidos p WHERE p.cupon_id = c.id AND p.pagado_en IS NOT NULL) AS "vendido"
-         FROM tienda.cupones c ORDER BY c.activo DESC, c.id DESC`);
+         FROM tienda.cupones c WHERE c.cliente_id IS NULL ORDER BY c.activo DESC, c.id DESC`);
     return { cupones: rows.map((r) => ({ ...r, descontado: Number(r.descontado), vendido: Number(r.vendido) })) };
   });
 
@@ -55,8 +55,8 @@ export async function rutasCuponesAdmin(app: FastifyInstance, deps: { pool: pg.P
     const a = await exigir(pool, req, "operador");
     const { rows } = await pool.query<{ id: number }>(
       `INSERT INTO tienda.cupones (codigo, nombre, automatico, tipo, valor, alcance, categoria_ids, producto_ids, escala, max_mayorista, sobre_rebajas, minimo, tope, desde, hasta,
-                                   usos_max, usos_por_cliente, activo, acumula, creado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
+                                   usos_max, usos_por_cliente, activo, acumula, visible, descripcion, creado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING id`,
       [...aFila(req.body), a.email]).catch(repetido);
     await auditar(pool, a, "crear_cupon", "cupon", rows[0]!.id, req.body, ip(req));
     return reply.code(201).send({ id: rows[0]!.id });
@@ -66,8 +66,8 @@ export async function rutasCuponesAdmin(app: FastifyInstance, deps: { pool: pg.P
     const a = await exigir(pool, req, "operador");
     const r = await pool.query(
       `UPDATE tienda.cupones SET codigo=$2, nombre=$3, automatico=$4, tipo=$5, valor=$6, alcance=$7, categoria_ids=$8, producto_ids=$9, escala=$10, max_mayorista=$11,
-              sobre_rebajas=$12, minimo=$13, tope=$14, desde=$15, hasta=$16, usos_max=$17, usos_por_cliente=$18, activo=$19, acumula=$20, actualizado_en=now()
-        WHERE id = $1`, [req.params.id, ...aFila(req.body)]).catch(repetido);
+              sobre_rebajas=$12, minimo=$13, tope=$14, desde=$15, hasta=$16, usos_max=$17, usos_por_cliente=$18, activo=$19, acumula=$20, visible=$21, descripcion=$22, actualizado_en=now()
+        WHERE id = $1 AND cliente_id IS NULL`, [req.params.id, ...aFila(req.body)]).catch(repetido);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese cupón.");
     await auditar(pool, a, "editar_cupon", "cupon", req.params.id, req.body, ip(req));
     return { ok: true };
@@ -77,7 +77,7 @@ export async function rutasCuponesAdmin(app: FastifyInstance, deps: { pool: pg.P
     const a = await exigir(pool, req, "operador");
     const usado = await pool.query("SELECT 1 FROM tienda.pedidos WHERE cupon_id = $1 LIMIT 1", [req.params.id]);
     if (usado.rowCount) throw new ErrorHttp(409, "usado", "Este cupón ya se usó en pedidos: desactivalo en vez de borrarlo (así queda el registro).");
-    const r = await pool.query("DELETE FROM tienda.cupones WHERE id = $1", [req.params.id]);
+    const r = await pool.query("DELETE FROM tienda.cupones WHERE id = $1 AND cliente_id IS NULL", [req.params.id]);
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese cupón.");
     await auditar(pool, a, "borrar_cupon", "cupon", req.params.id, null, ip(req));
     return { ok: true };

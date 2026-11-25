@@ -2,10 +2,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatearPesos, type RuletaEstado, type RuletaResultado } from "@isu/shared/puro";
 import { api, ErrorApi } from "@/lib/cliente-api";
+import { leerDispositivo } from "@/lib/dispositivo";
 
 /*
- * Ruleta de descuentos de «Mi cuenta». El navegador NO decide nada: pide el giro a la API (con la sesión de la cuenta), que sortea y
- * crea el cupón personal; acá sólo se dibuja la rueda y se la frena donde dijo el servidor. Una vez por semana por cuenta.
+ * Ruleta de descuentos. El navegador NO decide nada: pide el giro a la API, que sortea y crea el cupón; acá sólo se dibuja la rueda y se la
+ * frena donde dijo el servidor. Con cuenta: la sesión (cupón personal, una vez por semana por cuenta). Sin cuenta: el identificador de este
+ * navegador (localStorage), también una vez por semana, con un tope por conexión en el servidor. La misma tarjeta sirve para los dos.
  */
 const COLORES = ["fill-oferta", "fill-ahorro", "fill-marca", "fill-tinta-suave"];
 const VUELTAS = 5;
@@ -28,7 +30,16 @@ export function Ruleta() {
   const [copiado, setCopiado] = useState<string | null>(null);
   const [sinMovimiento, setSinMovimiento] = useState(false);
 
-  const cargar = useCallback(() => api<RuletaEstado>("cuenta/ruleta").then(setEstado).catch(() => setEstado(null)), []);
+  // Con sesión: la ruleta de la cuenta (la tienda contesta 204 si no hay sesión). Sin sesión: la del dispositivo.
+  const [invitado, setInvitado] = useState(false);
+  const cargar = useCallback(async () => {
+    try {
+      const cuenta = await api<RuletaEstado | undefined>("cuenta/ruleta");
+      if (cuenta) { setInvitado(false); setEstado(cuenta); return; }
+      setInvitado(true);
+      setEstado(await api<RuletaEstado>(`ruleta?d=${leerDispositivo(true)}`));
+    } catch { setEstado(null); }
+  }, []);
   useEffect(() => {
     void cargar();
     setSinMovimiento(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -43,7 +54,7 @@ export function Ruleta() {
     if (girando || !estado?.disponible) return;
     setError(null); setResultado(null); setGirando(true);
     try {
-      const r = await api<RuletaResultado>("cuenta/ruleta/girar", { cuerpo: {} });
+      const r = await api<RuletaResultado>(invitado ? "ruleta/girar" : "cuenta/ruleta/girar", { cuerpo: invitado ? { dispositivo: leerDispositivo(true) } : {} });
       // Se frena dentro del gajo que dijo el servidor (el punto exacto dentro del gajo es sólo estético).
       const destino = VUELTAS * 360 + (360 - (r.indice + 0.5 + (Math.random() - 0.5) * 0.6) * g);
       setAngulo((a) => a - (a % 360) + destino);
@@ -85,12 +96,12 @@ export function Ruleta() {
             <div role="status" className="mt-4 space-y-2">
               <p className="text-xl font-bold">{resultado.cupon ? `¡Ganaste ${resultado.premio.etiqueta}!` : resultado.premio.etiqueta}</p>
               {resultado.cupon ? (
-                <p className="text-tinta-suave">Es tu cupón: escribilo en el carrito al comprar. Sólo lo podés usar vos, una vez{resultado.cupon.hasta ? `, hasta el ${fechaCorta(resultado.cupon.hasta)}` : ""}{resultado.cupon.minimo > 0 ? `, en compras desde ${formatearPesos(resultado.cupon.minimo)}` : ""}.</p>
+                <p className="text-tinta-suave">{invitado ? "Es tu cupón: lo ves en el carrito, o escribilo al comprar. Se usa una vez" : "Es tu cupón: escribilo en el carrito al comprar. Sólo lo podés usar vos, una vez"}{resultado.cupon.hasta ? `, hasta el ${fechaCorta(resultado.cupon.hasta)}` : ""}{resultado.cupon.minimo > 0 ? `, en compras desde ${formatearPesos(resultado.cupon.minimo)}` : ""}.</p>
               ) : <p className="text-tinta-suave">Esta vez no hubo premio, pero seguís participando.</p>}
               <p className="text-sm text-tinta-tenue">Volvé a girar el {fechaCorta(resultado.proximoGiro)}.</p>
             </div>
           ) : estado.disponible ? (
-            <p className="mt-3 text-tinta-suave">Girá y ganá un descuento para tu próxima compra. Podés girar una vez por semana{estado.evento ? ` mientras dure ${estado.evento}` : ""}.</p>
+            <p className="mt-3 text-tinta-suave">Girá y ganá un descuento para tu próxima compra. Podés girar una vez por semana{estado.evento ? ` mientras dure ${estado.evento}` : ""}.{invitado ? " Sin cuenta, el cupón queda guardado en este navegador; con cuenta lo tenés siempre." : ""}</p>
           ) : (
             <p className="mt-3 text-tinta-suave">{estado.proximoGiro ? `Ya giraste esta semana. Volvé el ${fechaCorta(estado.proximoGiro)}.` : "La ruleta no está disponible por ahora."}</p>
           )}

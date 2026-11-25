@@ -110,6 +110,8 @@ const limpiar = async () => {
   await pool.query("DELETE FROM tienda.eventos WHERE clave LIKE 'qa-adm%'");
   // Ruleta: las cuentas de prueba (se llevan sus giros y cupones personales) y la ruleta como la deja la migración.
   await pool.query("DELETE FROM tienda.clientes WHERE email LIKE 'qa-adm-ruleta%'");
+  await pool.query("DELETE FROM tienda.ruleta_giros WHERE cliente_id IS NULL");
+  await pool.query("DELETE FROM tienda.cupones WHERE creado_por = 'ruleta' AND cliente_id IS NULL");
   await pool.query("UPDATE tienda.ruleta SET manual = false, con_eventos = true, cada_dias = 7, vence_dias = 30");
   await pool.query("DELETE FROM tienda.transferencias_recibidas WHERE externo LIKE 'qa-adm-%'");
 };
@@ -1834,6 +1836,8 @@ describe("ruleta (0037)", () => {
     expect(fila).toMatchObject({ tipo: "porcentaje", valor: 10, usos_max: 1, acumula: false, evento_id: null, email: "qa-adm-ruleta-a@test.com" });
     expect(Math.round((new Date(fila.hasta).getTime() - Date.now()) / 86_400_000)).toBe(30);
 
+    // Los cupones personales de la ruleta no ensucian la lista del backoffice (ni se editan desde ahí).
+    expect((await req("GET", "/v1/admin/cupones", operador)).json().cupones.some((c: { codigo: string | null }) => c.codigo === r.cupon.codigo)).toBe(false);
     // Una vez por semana: el segundo giro inmediato se rechaza y dice cuándo.
     const otra = await sesion("POST", "/v1/cuenta/ruleta/girar", a);
     expect([otra.statusCode, otra.json().error]).toEqual([409, "ruleta_espera"]);
@@ -1887,10 +1891,105 @@ describe("ruleta (0037)", () => {
     expect((await carro(b, g.cupon.codigo)).avisoCupon).toBe("Ese cupón ya no está vigente.");
   });
 
+  it("sin cuenta también se puede girar (con el identificador del navegador): uno por dispositivo y semana, y un tope por conexión", async () => {
+    const { randomBytes } = await import("node:crypto");
+    const token = () => randomBytes(24).toString("base64url");
+    const inv = (method: "GET" | "POST", url: string, ip: string, payload?: unknown) =>
+      app.inject({ method, url, headers: { "x-isu-interno": INTERNO, "x-isu-ip": ip }, ...(payload !== undefined ? { payload: payload as object } : {}) });
+    const girar = (t: string, ip: string) => inv("POST", "/v1/ruleta/girar", ip, { dispositivo: t });
+    expect((await premios(SOLO_10)).statusCode).toBe(200);
+    expect((await config({ manual: true })).statusCode).toBe(200);
+    await pool.query("DELETE FROM tienda.ruleta_giros WHERE cliente_id IS NULL");
+    // Un identificador inventado o corto no sirve.
+    expect((await inv("GET", "/v1/ruleta?d=corto", "10.7.7.1")).statusCode).toBe(400);
+    expect((await girar("corto", "10.7.7.1")).statusCode).toBe(400);
+
+    const t1 = token();
+    const e0 = (await inv("GET", `/v1/ruleta?d=${t1}`, "10.7.7.1")).json();
+    expect([e0.disponible, e0.cupones]).toEqual([true, []]);
+    const g = await girar(t1, "10.7.7.1");
+    expect(g.statusCode, g.body).toBe(200);
+    const cod = g.json().cupon.codigo as string;
+    const fila = (await pool.query("SELECT cliente_id, usos_max, tipo, valor FROM tienda.cupones WHERE codigo = $1", [cod])).rows[0];
+    expect(fila).toMatchObject({ cliente_id: null, usos_max: 1, tipo: "porcentaje", valor: 10 });
+    // Se guarda el hash del identificador y de la IP, nunca el valor en claro.
+    const giro = (await pool.query("SELECT dispositivo, ip_hash FROM tienda.ruleta_giros WHERE cupon_id = (SELECT id FROM tienda.cupones WHERE codigo = $1)", [cod])).rows[0];
+    expect([giro.dispositivo === t1, giro.ip_hash.includes("10.7.7.1"), giro.dispositivo.length]).toEqual([false, false, 64]);
+
+    // El mismo dispositivo no gira dos veces en la semana; y sólo ve SUS cupones.
+    const otra = await girar(t1, "10.7.7.1");
+    expect([otra.statusCode, otra.json().error]).toEqual([409, "ruleta_espera"]);
+    expect((await inv("GET", `/v1/ruleta?d=${t1}`, "10.7.7.1")).json()).toMatchObject({ disponible: false, motivo: "espera", cupones: [{ codigo: cod }] });
+    const t2 = token();
+    expect((await inv("GET", `/v1/ruleta?d=${t2}`, "10.7.7.1")).json().cupones).toEqual([]);
+
+    // El cupón del invitado es un código de un solo uso: sirve sin sesión.
+    expect((await carro(undefined, cod)).descuentoCupon).toBe(400_000);
+
+    // Tope por conexión: borrar el localStorage no da giros infinitos desde la misma IP.
+    expect((await girar(t2, "10.7.7.1")).statusCode).toBe(200);
+    expect((await girar(token(), "10.7.7.1")).statusCode).toBe(200);
+    const tope = await girar(token(), "10.7.7.1");
+    expect([tope.statusCode, tope.json().error]).toEqual([409, "ruleta_espera"]);
+    expect(tope.json().proximoGiro).toBeTruthy();
+    // Otra conexión sí; y una cuenta con sesión no se ve afectada por el tope de la conexión.
+    expect((await girar(token(), "10.7.7.2")).statusCode).toBe(200);
+    const cuenta = await registrar("inv");
+    expect((await sesion("POST", "/v1/cuenta/ruleta/girar", cuenta)).statusCode).toBe(200);
+    // Cerrada: el invitado tampoco puede.
+    expect((await config({ manual: false })).statusCode).toBe(200);
+    const cerrada = await girar(token(), "10.7.7.3");
+    expect([cerrada.statusCode, cerrada.json().error]).toEqual([409, "ruleta_apagada"]);
+  });
+
   it("el sorteo respeta los pesos (con una fuente de azar fija) y nunca elige un premio de peso 0", async () => {
     const { elegirPremio } = await import("../src/lib/ruleta.js");
     const ps = [{ id: 1, etiqueta: "A", tipo: "porcentaje" as const, valor: 5, minimo: 0, peso: 70 }, { id: 2, etiqueta: "B", tipo: "nada" as const, valor: 0, minimo: 0, peso: 30 }];
     expect([0, 69, 70, 99].map((x) => elegirPremio(ps, () => x).premio.etiqueta)).toEqual(["A", "A", "B", "B"]);
     expect(() => elegirPremio([{ ...ps[0]!, peso: 0 }], () => 0)).toThrow();
+  });
+});
+
+describe("cupones visibles en la tienda (0038)", () => {
+  const publico = async () => (await app.inject({ method: "GET", url: "/v1/cupones", headers: { "x-isu-interno": INTERNO, "x-isu-ip": "10.6.6.6" } })).json();
+  const base = { automatico: false, tipo: "porcentaje", valor: 15 };
+  it("sólo se muestra lo que el dueño marcó como visible (nunca un código secreto ni un cupón de la ruleta)", async () => {
+    await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA adm%'");
+    const vis = await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMVIS", nombre: "QA adm visible", visible: true, descripcion: "Para tu primera compra", minimo: 1_000_000 });
+    const sec = await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMSEC", nombre: "QA adm secreto" });
+    const vencido = await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMVEN", nombre: "QA adm vencido", visible: true, desde: "2020-01-01T00:00:00Z", hasta: "2020-01-02T00:00:00Z" });
+    const auto = await req("POST", "/v1/admin/cupones", operador, { automatico: true, tipo: "porcentaje", valor: 5, nombre: "QA adm promo auto", minimo: 5_000_000 });
+    expect([vis.statusCode, sec.statusCode, vencido.statusCode, auto.statusCode]).toEqual([201, 201, 201, 201]);
+    const p = await publico();
+    expect(p.cupones.map((c: { codigo: string }) => c.codigo)).toEqual(["QAADMVIS"]);
+    expect(p.cupones[0]).toMatchObject({ nombre: "QA adm visible", descripcion: "Para tu primera compra", detalle: "15% OFF", minimo: 1_000_000, hasta: null });
+    expect(p.promociones.map((x: { nombre: string }) => x.nombre)).toContain("QA adm promo auto");
+    expect(p.promociones.find((x: { nombre: string }) => x.nombre === "QA adm promo auto")).toMatchObject({ detalle: "5% OFF", minimo: 5_000_000 });
+    // Las promos del evento sólo salen con el evento vigente.
+    expect(p.promociones.map((x: { nombre: string }) => x.nombre)).not.toContain("2da unidad al 50%");
+    expect(JSON.stringify(p)).not.toContain("RULETA-");
+    expect(p.ruleta).toEqual({ abierta: false, evento: null });
+    // Se aplica en el carrito como cualquier otro: lo visible no cambia las reglas.
+    const c = (await app.inject({ method: "POST", url: "/v1/carrito", headers: { "x-isu-interno": INTERNO, "x-isu-ip": "10.6.6.6" }, payload: { items: [{ sku: "QA-ADM-2-1", cantidad: 1 }, { sku: "QA-ADM-2-2", cantidad: 1 }], medioPago: "mercadopago", cupon: "QAADMVIS" } })).json();
+    expect([c.cupon?.codigo, c.descuentoCupon]).toEqual(["QAADMVIS", 600_000]);
+  });
+
+  it("«visible» es sólo para cupones con código: una promo automática lo rechaza; se puede volver a ocultar", async () => {
+    const mal = await req("POST", "/v1/admin/cupones", operador, { automatico: true, tipo: "porcentaje", valor: 5, nombre: "QA adm mal", visible: true });
+    expect(mal.statusCode).toBe(400);
+    const lista = (await req("GET", "/v1/admin/cupones", operador)).json().cupones as Array<{ id: number; codigo: string | null; visible: boolean }>;
+    const vis = lista.find((c) => c.codigo === "QAADMVIS")!;
+    expect(vis.visible).toBe(true);
+    const ocultar = await req("PUT", `/v1/admin/cupones/${vis.id}`, operador, { ...base, codigo: "QAADMVIS", nombre: "QA adm visible", visible: false });
+    expect(ocultar.statusCode, ocultar.body).toBe(200);
+    expect((await publico()).cupones).toEqual([]);
+    // Sólo un operador cambia lo que se muestra.
+    expect((await req("PUT", `/v1/admin/cupones/${vis.id}`, lectura2, { ...base, codigo: "QAADMVIS", nombre: "QA adm visible", visible: true })).statusCode).toBe(403);
+  });
+
+  it("con una ruleta abierta, la tienda lo avisa (sin datos de nadie)", async () => {
+    expect((await req("PUT", "/v1/admin/ruleta", operador, { manual: true, conEventos: true, cadaDias: 7, venceDias: 30 })).statusCode).toBe(200);
+    expect((await publico()).ruleta).toEqual({ abierta: true, evento: null });
+    expect((await req("PUT", "/v1/admin/ruleta", operador, { manual: false, conEventos: true, cadaDias: 7, venceDias: 30 })).statusCode).toBe(200);
   });
 });

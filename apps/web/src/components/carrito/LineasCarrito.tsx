@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useId, useState } from "react";
-import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion } from "@isu/shared/puro";
+import { useEffect, useId, useState } from "react";
+import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion, type CuponesPublicos, type RuletaEstado } from "@isu/shared/puro";
+import { api } from "@/lib/cliente-api";
+import { leerDispositivo } from "@/lib/dispositivo";
 import { Foto } from "../Foto";
 import { useCarrito, usoDe, type AvisoStock, type LineaCarrito } from "./Carrito";
 
@@ -197,6 +199,28 @@ function AvisoMezcla({ m }: { m: NonNullable<NonNullable<Cotizacion["cupon"]>["m
   );
 }
 
+/** Cupones que se pueden tocar para aplicar: los que la tienda muestra y, con sesión, los que ganó la cuenta en la ruleta (sin usar). */
+function useCuponesDisponibles(activo: boolean) {
+  const [lista, setLista] = useState<Array<{ codigo: string; nombre: string; propio: boolean }>>([]);
+  useEffect(() => {
+    if (!activo) return;
+    let vivo = true;
+    // Los de la cuenta (con sesión) o, sin sesión, los que ganó este navegador en la ruleta (si alguna vez giró).
+    const suyos = api<RuletaEstado | undefined>("cuenta/ruleta").then((m) => {
+      const d = m ? null : leerDispositivo(false);
+      return m ?? (d ? api<RuletaEstado>(`ruleta?d=${d}`) : undefined);
+    });
+    void Promise.allSettled([api<CuponesPublicos>("cupones"), suyos]).then(([pub, mio]) => {
+      if (!vivo) return;
+      const propios = mio.status === "fulfilled" && mio.value ? mio.value.cupones.map((c) => ({ codigo: c.codigo, nombre: c.nombre.replace(/^Ruleta: /, ""), propio: true })) : [];
+      const publicos = pub.status === "fulfilled" ? pub.value.cupones.map((c) => ({ codigo: c.codigo, nombre: c.detalle, propio: false })) : [];
+      setLista([...propios, ...publicos].filter((c, i, a) => a.findIndex((x) => x.codigo === c.codigo) === i).slice(0, 6));
+    });
+    return () => { vivo = false; };
+  }, [activo]);
+  return lista;
+}
+
 export function CampoCupon() {
   const { cupon, ponerCupon, cotizacion, avisoCupon, cotizando } = useCarrito();
   const [abierto, setAbierto] = useState(false);
@@ -206,6 +230,7 @@ export function CampoCupon() {
   const aplicar = () => { if (texto.trim()) ponerCupon(texto); };
   // "La promoción X te descuenta más…" es informativo; el resto, un error.
   const informativo = avisoCupon?.startsWith("La promoción");
+  const disponibles = useCuponesDisponibles(!aplicado && (abierto || !!avisoCupon || !!cupon));
 
   if (aplicado) {
     return (
@@ -228,6 +253,20 @@ export function CampoCupon() {
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); aplicar(); } }}
             className="min-w-0 flex-1 rounded-xl border border-linea bg-white px-3 py-2.5 text-base uppercase outline-none placeholder:normal-case focus:border-tinta aria-[invalid=true]:border-oferta" />
           <button type="button" onClick={aplicar} disabled={cotizando || !texto.trim()} className="boton-borde shrink-0 px-4 py-2.5 disabled:opacity-50">Aplicar</button>
+        </div>
+      )}
+      {disponibles.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs text-tinta-tenue">Cupones disponibles</p>
+          <ul className="mt-1 flex flex-wrap gap-2">
+            {disponibles.map((c) => (
+              <li key={c.codigo}>
+                <button type="button" onClick={() => ponerCupon(c.codigo)} disabled={cotizando} title={c.propio ? "Ganado en la ruleta: sólo lo usás vos" : undefined}
+                  className="rounded-full border border-linea px-3 py-1.5 text-left text-xs hover:border-tinta disabled:opacity-50"><b className="font-mono">{c.codigo}</b> · {c.nombre}{c.propio ? " · tuyo" : ""}</button>
+              </li>
+            ))}
+          </ul>
+          <Link href="/cupones" className="mt-1 inline-block text-xs underline">Ver todos los cupones</Link>
         </div>
       )}
       {avisoCupon && <p id={`${id}-aviso`} role={informativo ? "status" : "alert"} className={`mt-1.5 ${informativo ? "text-tinta-suave" : "font-bold text-oferta"}`}>{avisoCupon}</p>}

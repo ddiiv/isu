@@ -19,6 +19,11 @@ const REGLAS: Regla[] = [
   { metodo: "POST", patron: new RegExp(`^pedidos/${NUM}/comprobante$`), api: (m) => `/v1/pedidos/${m[1]}/comprobante`, binario: true },
   { metodo: "GET", patron: /^cuenta$/, api: () => "/v1/cuenta" },
   { metodo: "PATCH", patron: /^cuenta$/, api: () => "/v1/cuenta" },
+  // Cupones que la tienda muestra (visibles, promociones, ruleta abierta): público.
+  { metodo: "GET", patron: /^cupones$/, api: () => "/v1/cupones" },
+  // Ruleta sin cuenta: el identificador del navegador (d) y el sorteo, siempre en la API.
+  { metodo: "GET", patron: /^ruleta$/, api: () => "/v1/ruleta", consulta: ["d"] },
+  { metodo: "POST", patron: /^ruleta\/girar$/, api: () => "/v1/ruleta/girar" },
   // Ruleta de descuentos: siempre con la sesión de la cuenta (la API devuelve 401 sin ella).
   { metodo: "GET", patron: /^cuenta\/ruleta$/, api: () => "/v1/cuenta/ruleta" },
   { metodo: "POST", patron: /^cuenta\/ruleta\/girar$/, api: () => "/v1/cuenta/ruleta/girar" },
@@ -67,7 +72,7 @@ async function pasar(req: NextRequest, ctx: { params: Promise<{ ruta: string[] }
     }
   }
   // ¿Hay sesión? Sin cookie, ni se pregunta: 204 (un 401 ensucia la consola de cada invitado).
-  if (req.method === "GET" && ruta === "cuenta" && !req.cookies.get(COOKIE_SESION)?.value) {
+  if (req.method === "GET" && (ruta === "cuenta" || ruta === "cuenta/ruleta") && !req.cookies.get(COOKIE_SESION)?.value) {
     return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } });
   }
   const extra: Record<string, string> = {};

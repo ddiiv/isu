@@ -1,5 +1,5 @@
 import "server-only";
-import { BannerPublico, ConfigPublica, CategoriaNodo, ListadoProductos, PACKS_POR_DEFECTO, ProductoDetalle, ResenasInicio, ResenasProducto, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
+import { BannerPublico, ConfigPublica, CuponesPublicos, CategoriaNodo, ListadoProductos, PACKS_POR_DEFECTO, ProductoDetalle, ResenasInicio, ResenasProducto, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
 import { z } from "zod";
 
 /*
@@ -85,6 +85,8 @@ export function apiDisponible(): Promise<boolean> {
 }
 
 export const obtenerConfig = () => pedir("/v1/config", ConfigPublica, CONFIG_RESPALDO);
+const CUPONES_RESPALDO: CuponesPublicos = { cupones: [], promociones: [], ruleta: { abierta: false, evento: null } };
+export const obtenerCupones = () => pedir("/v1/cupones", CuponesPublicos, CUPONES_RESPALDO);
 export const obtenerCategorias = () => pedir("/v1/categorias", z.array(CategoriaNodo), CATEGORIAS_RESPALDO);
 
 /*

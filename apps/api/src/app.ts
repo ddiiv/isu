@@ -19,6 +19,7 @@ import { rutasProductos } from "./modulos/productos/rutas.js";
 import { rutasFotos } from "./modulos/fotos/rutas.js";
 import { rutasCuentas } from "./modulos/cuentas/rutas.js";
 import { rutasRuleta } from "./modulos/cuentas/ruleta.js";
+import { rutasCuponesPublicos } from "./modulos/cupones/rutas.js";
 import { rutasRuletaAdmin } from "./modulos/admin/ruleta.js";
 import { rutasPedidos } from "./modulos/pedidos/rutas.js";
 import { rutasCarritos } from "./modulos/carritos/rutas.js";
@@ -146,6 +147,7 @@ export async function construirApp(deps: Dependencias) {
   const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador, secreto: env.INTERNO_TOKEN, talo });
   await rutasCuentas(app, { pool, redis, env, colas });
   await rutasRuleta(app, { pool, redis, env });
+  await rutasCuponesPublicos(app, { pool, cache });
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
   await rutasEnvios(app, { pool, redis, env, cotizador, transportes, descuentos });

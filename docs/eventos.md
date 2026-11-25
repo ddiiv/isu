@@ -87,6 +87,11 @@ la tienda vuelve a la normalidad sin tocar cada fila. Lo que no está atado a ni
   `acumula = false` (rige el mejor precio, no se suma a la rebaja). Sólo lo aplica la cuenta que lo ganó: a otra cuenta le dice «Ese cupón
   no existe» y a un invitado «Ingresá a tu cuenta». Si salió de un evento queda atado a él: vale mientras el evento siga vigente y
   nunca más allá de `vence_dias`. Entre un cupón y las promos del evento sigue rigiendo «uno por compra, el que más descuenta».
+- **Sin cuenta (0039):** también se puede girar. El navegador guarda un identificador al azar en localStorage (`lib/dispositivo.ts`) y manda sólo eso; la API
+  guarda su hash y decide: un giro por dispositivo y semana, y como localStorage se puede borrar, un tope de 3 giros por conexión (IP, guardada sólo como
+  hash con sal) en esa ventana. El cupón de un invitado es un código de un solo uso que ve ese dispositivo (`GET /v1/ruleta?d=…`, `POST /v1/ruleta/girar`); no
+  es de una cuenta. Una cuenta con sesión gira por su cuenta (no la afecta el tope de la conexión). Límite conocido: quien usa varias conexiones y borra
+  localStorage puede juntar algunos giros más; el costo es poco (cupones chicos de un solo uso) y el tope por conexión lo acota.
 - **Quién ve qué:** `GET /v1/cuenta/ruleta` y `POST /v1/cuenta/ruleta/girar` piden la sesión de la cuenta y sólo trabajan con SU cuenta (no
   reciben ningún id). El backoffice (`/v1/admin/ruleta…`) pide sesión con doble factor y rol; muestra sólo totales por premio, nunca qué
   cuenta ganó qué.
@@ -94,3 +99,15 @@ la tienda vuelve a la normalidad sin tocar cada fila. Lo que no está atado a ni
   2da unidad al 50% 6 · «Seguís participando» 8 · «Casi ganás» 5.
 - **Web:** tarjeta «Ruleta» en Mi cuenta (`components/cuenta/Ruleta.tsx`), con «Mis cupones» y botón copiar. Con «menos movimiento» la
   rueda salta al resultado sin girar.
+
+# Cupones visibles en la tienda (migración 0038)
+
+Tres clases de cupón:
+- **Con código secreto:** se escribe en el carrito (como siempre). Es el cupón común, sin tildar «Mostrarlo en la tienda».
+- **Visibles:** en Backoffice → Cupones, «Mostrarlo en la tienda» (con un texto opcional). Salen en `/cupones` y como botones en el carrito
+  («Cupones disponibles», que se aplican con un toque), siempre que estén vigentes. Sólo cupones con código: las promociones automáticas
+  salen solas en `/cupones`.
+- **De la ruleta:** personales (los de una cuenta) o de invitado. Se ven en Mi cuenta y en el carrito de quien los ganó; nunca en `/cupones` ni en el
+  backoffice (la lista de Cupones no los incluye). Cuando hay una ruleta abierta, `/cupones` muestra la rueda para girar con o sin cuenta.
+- API pública: `GET /v1/cupones` (visibles, promos vigentes y si hay ruleta abierta; sin datos de clientes ni cupones secretos). Hay una caché corta: un
+  cambio de visibilidad tarda hasta un minuto en verse.

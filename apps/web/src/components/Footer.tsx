@@ -20,6 +20,7 @@ export function Footer({ config, categorias }: { config: ConfigPublica; categori
           {categorias.map((c) => <Link key={c.id} href={`/${c.slug}`} className="block text-tinta-suave hover:text-marca">{c.nombre}</Link>)}
           {config.evento?.clave === "navidad" && <Link href="/amigo-invisible" className="block text-tinta-suave hover:text-marca">Amigo invisible</Link>}
           <Link href="/nuevos" className="block text-tinta-suave hover:text-marca">Nuevos</Link>
+          <Link href="/cupones" className="block text-tinta-suave hover:text-marca">Cupones y promociones</Link>
           <Link href="/outfits" className="block text-tinta-suave hover:text-marca">Armá tu outfit</Link>
           <Link href="/venta-por-mayor" className="block text-tinta-suave hover:text-marca">Venta por mayor</Link>
         </nav>

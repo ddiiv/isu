@@ -18,14 +18,14 @@ interface Tramo { desde: number; mayorista: number }
 interface Cupon {
   id?: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Tipo; valor: number;
   alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; acumula: boolean; minimo: number; tope: number | null; escala: Tramo[]; maxMayorista: number;
-  desde: string | null; hasta: string | null; usosMax: number | null; usosPorCliente: number | null; activo: boolean;
+  desde: string | null; hasta: string | null; usosMax: number | null; usosPorCliente: number | null; activo: boolean; visible: boolean; descripcion: string | null;
   usos?: number; vigente?: boolean; creadoPor?: string; creadoEn?: string; pedidosPagados?: number; descontado?: number; vendido?: number;
 }
 interface Uso { numero: string; email: string; estado: string; total: number; descuento: number; creadoEn: string; vigente: boolean }
 
 const vacio: Cupon = {
   codigo: "", nombre: "", automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoriaIds: [], productoIds: [],
-  sobreRebajas: true, acumula: true, minimo: 0, tope: null, escala: [], maxMayorista: 5, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
+  sobreRebajas: true, acumula: true, minimo: 0, tope: null, escala: [], maxMayorista: 5, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true, visible: false, descripcion: null,
 };
 const aLocal = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const deLocal = (v: string) => (v ? new Date(v).toISOString() : null);
@@ -53,7 +53,7 @@ export default function Cupones() {
   const cuerpoDe = (c: Cupon) => ({
     automatico: c.automatico, codigo: c.automatico ? null : c.codigo?.trim().toUpperCase() || null, nombre: c.nombre, tipo: c.tipo,
     valor: c.tipo === "envio_gratis" ? 0 : c.valor, alcance: c.alcance, categoriaIds: c.categoriaIds, productoIds: c.productoIds,
-    sobreRebajas: c.sobreRebajas, acumula: c.tipo === "porcentaje" || c.tipo === "segunda_unidad" ? c.acumula : true, minimo: c.minimo, tope: c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, escala: c.tipo === "mezcla" ? c.escala : [], maxMayorista: c.maxMayorista ?? 5, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
+    sobreRebajas: c.sobreRebajas, acumula: c.tipo === "porcentaje" || c.tipo === "segunda_unidad" ? c.acumula : true, minimo: c.minimo, tope: c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, escala: c.tipo === "mezcla" ? c.escala : [], maxMayorista: c.maxMayorista ?? 5, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo, visible: !c.automatico && c.visible, descripcion: !c.automatico && c.visible ? c.descripcion?.trim() || null : null,
   });
   async function guardar() {
     if (!f) return;
@@ -107,6 +107,7 @@ export default function Cupones() {
                   <span className="font-bold">{c.automatico ? c.nombre : <code className="rounded bg-fondo-suave px-1.5 py-0.5">{c.codigo}</code>}</span>{" "}
                   <Insignia clase="bg-oferta text-white">{resumenCupon(c, pesos)}</Insignia>{" "}
                   {c.automatico && <Insignia clase="bg-marca-claro text-marca">Automática</Insignia>}{" "}
+                  {!c.automatico && c.visible && <Insignia clase="bg-marca-claro text-marca">Visible en la tienda</Insignia>}{" "}
                   {c.vigente ? <Insignia clase="bg-ahorro-claro text-ahorro">Vigente</Insignia>
                     : <Insignia>{!c.activo ? "Pausado" : c.usosMax !== null && (c.usos ?? 0) >= c.usosMax ? "Agotado" : "Fuera de fecha"}</Insignia>}
                   {!c.automatico && <span className="block text-sm">{c.nombre}</span>}
@@ -174,6 +175,17 @@ export default function Cupones() {
                   ayuda="En cada prenda rige el mejor precio para el cliente (el de la rebaja o el de esta promoción), nunca los dos. Es lo que usa Navidad." />
               )}
               {f.tipo === "envio_gratis" && <p className="text-xs text-tinta-tenue">Deja el envío en $0 con cualquier transporte, salvo Mercado Envíos (lo cobra Mercado Pago en su checkout).</p>}
+              {!f.automatico && (
+                <div className="space-y-2 rounded-xl border border-linea p-3">
+                  <Casilla etiqueta="Mostrarlo en la tienda" marcada={f.visible} onChange={(v) => setF({ ...f, visible: v })}
+                    ayuda="Sale en la página de Cupones y en el carrito, con un botón para aplicarlo. Sin tildar, el código es secreto: sólo lo usa quien lo conoce." />
+                  {f.visible && (
+                    <Campo etiqueta="Texto para mostrar (opcional)" ayuda="Una línea, por ejemplo «Para tu primera compra».">
+                      <input maxLength={160} className={claseEntrada} value={f.descripcion ?? ""} onChange={(e) => setF({ ...f, descripcion: e.target.value })} />
+                    </Campo>
+                  )}
+                </div>
+              )}
               <Campo etiqueta="Compra mínima" ayuda="Sobre el total de productos ya rebajados. Vacío = sin mínimo." error={err("minimo")}>
                 <EntradaPesos valor={f.minimo || null} onChange={(v) => setF({ ...f, minimo: v ?? 0 })} />
               </Campo>

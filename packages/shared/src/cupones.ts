@@ -38,6 +38,10 @@ export const CuponEntrada = z.object({
   usosPorCliente: z.number().int().min(1).max(1000).nullable().default(null),
   /** false = no se suma a la rebaja de la prenda: en cada prenda rige el mejor precio para el cliente (sólo porcentaje y 2da unidad). */
   acumula: z.boolean().default(true),
+  /** true = la tienda lo muestra en /cupones y en el carrito, con un botón para aplicarlo (sólo con código). false = código secreto. */
+  visible: z.boolean().default(false),
+  /** una línea para mostrarlo («Para tu primera compra») */
+  descripcion: z.string().trim().max(160).nullable().default(null).transform((v) => v || null),
   activo: z.boolean().default(true),
 }).strict().superRefine((c, ctx) => {
   const mal = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
@@ -63,6 +67,7 @@ export const CuponEntrada = z.object({
   if (c.alcance === "categorias" && !c.categoriaIds.length) mal("categoriaIds", "Elegí al menos una categoría");
   if (c.alcance === "productos" && !c.productoIds.length) mal("productoIds", "Elegí al menos una prenda");
   if (c.desde && c.hasta && new Date(c.hasta) <= new Date(c.desde)) mal("hasta", "La fecha de fin tiene que ser posterior al inicio");
+  if (c.visible && c.automatico) mal("visible", "Las promociones automáticas se muestran solas: «visible» es para cupones con código");
   if (c.automatico && c.usosPorCliente) mal("usosPorCliente", "El tope por cliente es para cupones con código");
 });
 export type CuponEntrada = z.infer<typeof CuponEntrada>;
@@ -75,3 +80,11 @@ export function resumenCupon(c: { tipo: (typeof TIPOS_CUPON)[number]; valor: num
   if (c.tipo === "monto") return `${pesos(c.valor)} OFF`;
   return "Envío gratis";
 }
+
+/** Lo que la tienda muestra de los cupones: los visibles (con código), las promociones automáticas y si hay una ruleta abierta. */
+export const CuponesPublicos = z.object({
+  cupones: z.array(z.object({ codigo: z.string(), nombre: z.string(), descripcion: z.string().nullable(), detalle: z.string(), minimo: z.number().int(), hasta: z.string().nullable() })),
+  promociones: z.array(z.object({ nombre: z.string(), detalle: z.string(), minimo: z.number().int(), hasta: z.string().nullable() })),
+  ruleta: z.object({ abierta: z.boolean(), evento: z.string().nullable() }),
+});
+export type CuponesPublicos = z.infer<typeof CuponesPublicos>;
