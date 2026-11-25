@@ -22,7 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: url(`/producto/${p.slug}`), lastModified: new Date(p.actualizadoEn), changeFrequency: "daily" as const, priority: 0.6,
       images: p.fotos.map((clave) => absoluta(src({ clave, ancho: null, alto: null, alt: null }, 1200))),
     })),
-    ...["/nuevos", "/destacados", "/packs", "/outfits", "/cupones", ...(config.hayLiquidacion ? ["/liquidacion"] : []), ...(config.evento?.clave === "navidad" ? ["/amigo-invisible"] : [])].map((p) => ({ url: url(p), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.7 })),
+    ...["/nuevos", "/destacados", "/packs", "/outfits", "/cupones", ...(config.hayRuleta ? ["/ruleta"] : []), ...(config.hayLiquidacion ? ["/liquidacion"] : []), ...(config.evento?.clave === "navidad" ? ["/amigo-invisible"] : [])].map((p) => ({ url: url(p), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.7 })),
     // Etapa 9: packs y liquidación por categoría (sólo las que tienen algo).
     ...config.packsEn.map((c) => ({ url: url(`/packs/${c}`), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.6 })),
     ...config.liquidacionTemporadas.map((t) => ({ url: url(`/liquidacion/${t}`), lastModified: ahora, changeFrequency: "daily" as const, priority: 0.6 })),

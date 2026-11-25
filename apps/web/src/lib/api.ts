@@ -56,6 +56,7 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   liquidacionEn: [],
   liquidacionTemporadas: [],
   relampago: null,
+  hayRuleta: false,
   cuidados: "",
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
@@ -85,7 +86,7 @@ export function apiDisponible(): Promise<boolean> {
 }
 
 export const obtenerConfig = () => pedir("/v1/config", ConfigPublica, CONFIG_RESPALDO);
-const CUPONES_RESPALDO: CuponesPublicos = { cupones: [], promociones: [], ruleta: { abierta: false, evento: null } };
+const CUPONES_RESPALDO: CuponesPublicos = { cupones: [], promociones: [], ruleta: { abierta: false, evento: null, cadaDias: 7, venceDias: 30 } };
 export const obtenerCupones = () => pedir("/v1/cupones", CuponesPublicos, CUPONES_RESPALDO);
 export const obtenerCategorias = () => pedir("/v1/categorias", z.array(CategoriaNodo), CATEGORIAS_RESPALDO);
 

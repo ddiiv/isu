@@ -27,7 +27,7 @@ import { SITIO } from "@/lib/sitio";
 // Al menú del celular (que viaja al navegador) sólo lo que muestra: no los textos de cada categoría.
 const paraMenu = (c: CategoriaNodo): CategoriaNodo => ({ id: c.id, nombre: c.nombre, slug: c.slug, hijas: c.hijas.map(paraMenu) });
 
-export interface DatosMenu { hayPacks: boolean; hayLiquidacion: boolean; fotos: Record<string, FotoDelMenu[]> }
+export interface DatosMenu { hayPacks: boolean; hayLiquidacion: boolean; hayRuleta?: boolean; fotos: Record<string, FotoDelMenu[]> }
 
 const desplegable = "invisible absolute left-1/2 top-full z-50 -translate-x-1/2 translate-y-1 rounded-2xl border border-linea bg-white p-2 opacity-0 shadow-xl transition duration-200 ease-suave group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100";
 const item = "block rounded-xl px-3 py-2 hover:bg-fondo-suave";
@@ -35,13 +35,15 @@ const item = "block rounded-xl px-3 py-2 hover:bg-fondo-suave";
 /** `evento`: la clave del evento de temporada vigente (navidad…) o null. */
 export function Header({ categorias, menu, evento = null }: { categorias: CategoriaNodo[]; menu: DatosMenu; evento?: string | null }) {
   const { hayPacks, hayLiquidacion, fotos } = menu;
+  // La ruleta se enlaza sólo mientras haya una abierta (a mano o por un evento).
+  const hayRuleta = !!menu.hayRuleta;
   // Edición Navidad: la sección «Amigo invisible» se enlaza sólo mientras el evento esté vigente.
   const amigoInvisible = evento === "navidad";
   return (
     <header className="encabezado sticky top-0 z-40 border-b border-linea/70 bg-white">
       <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:px-10 xl:h-20">
         <div className="flex items-center gap-3">
-          <MenuMovil categorias={categorias.map(paraMenu)} fotos={fotos} hayPacks={hayPacks} hayLiquidacion={hayLiquidacion} amigoInvisible={amigoInvisible} />
+          <MenuMovil categorias={categorias.map(paraMenu)} fotos={fotos} hayPacks={hayPacks} hayLiquidacion={hayLiquidacion} amigoInvisible={amigoInvisible} hayRuleta={hayRuleta} />
           <Logo className="hidden xl:flex" gorro={evento === "navidad"} />
         </div>
 
@@ -78,6 +80,7 @@ export function Header({ categorias, menu, evento = null }: { categorias: Catego
               );
             })}
             {amigoInvisible && <li><Link href="/amigo-invisible" className="py-7 font-bold text-oferta underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Amigo invisible</Link></li>}
+            {hayRuleta && <li><Link href="/ruleta" className="py-7 font-bold text-marca-vivo underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Ruleta</Link></li>}
             {hayPacks && <li><Link href="/packs" className="py-7 font-bold text-ahorro underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Packs</Link></li>}
             {hayLiquidacion && <li><Link href="/liquidacion" className="py-7 font-bold text-oferta underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Liquidación</Link></li>}
           </ul>
@@ -104,6 +107,7 @@ export function Header({ categorias, menu, evento = null }: { categorias: Catego
             </li>
           ))}
           {amigoInvisible && <li className="shrink-0"><Link href="/amigo-invisible" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-oferta">Amigo invisible</Link></li>}
+          {hayRuleta && <li className="shrink-0"><Link href="/ruleta" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-marca-vivo">Ruleta</Link></li>}
           {hayPacks && <li className="shrink-0"><Link href="/packs" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-ahorro">Packs</Link></li>}
           {hayLiquidacion && <li className="shrink-0"><Link href="/liquidacion" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-oferta">Liquidación</Link></li>}
         </ul>

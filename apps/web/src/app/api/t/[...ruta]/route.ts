@@ -21,6 +21,8 @@ const REGLAS: Regla[] = [
   { metodo: "PATCH", patron: /^cuenta$/, api: () => "/v1/cuenta" },
   // Cupones que la tienda muestra (visibles, promociones, ruleta abierta): público.
   { metodo: "GET", patron: /^cupones$/, api: () => "/v1/cupones" },
+  // «Cupones disponibles» del carrito: cada cupón evaluado contra el carrito (con la sesión o el identificador del navegador).
+  { metodo: "POST", patron: /^cupones\/evaluar$/, api: () => "/v1/cupones/evaluar" },
   // Ruleta sin cuenta: el identificador del navegador (d) y el sorteo, siempre en la API.
   { metodo: "GET", patron: /^ruleta$/, api: () => "/v1/ruleta", consulta: ["d"] },
   { metodo: "POST", patron: /^ruleta\/girar$/, api: () => "/v1/ruleta/girar" },

@@ -1,8 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
+import type { Redis } from "ioredis";
 import { ConfigRuleta, ListaPremios } from "@isu/shared";
 import type { Entorno } from "../../entorno.js";
+import type { CacheCorta } from "../../lib/cache.js";
+import type { Colas } from "../../lib/colas.js";
 import { ipDe } from "../../lib/cliente.js";
 import { detallePremio } from "../../lib/ruleta.js";
 import { auditar, exigir } from "./sesion.js";
@@ -11,10 +14,16 @@ import { auditar, exigir } from "./sesion.js";
  * Backoffice de la ruleta: cuándo aparece, cada cuánto, cuánto dura el cupón, y los premios con su probabilidad.
  * Sólo agregados (cuántos giros, qué salió): no muestra qué cuenta ganó qué.
  */
-export async function rutasRuletaAdmin(app: FastifyInstance, deps: { pool: pg.Pool; env: Entorno }) {
+export async function rutasRuletaAdmin(app: FastifyInstance, deps: { pool: pg.Pool; env: Entorno; redis: Redis; colas: Colas; cache: CacheCorta; canalInvalidar: string }) {
   const api = app.withTypeProvider<ZodTypeProvider>();
   const { pool } = deps;
   const ip = (req: FastifyRequest) => ipDe(req, deps.env.INTERNO_TOKEN);
+  /** Prender o apagar la ruleta cambia lo que ve la tienda (el enlace /ruleta y /cupones): caché y páginas. */
+  async function invalidar() {
+    deps.cache.limpiar();
+    await deps.redis.publish(deps.canalInvalidar, JSON.stringify({ etiquetas: ["catalogo"] })).catch(() => 0);
+    await deps.colas.stocker("invalidar", { slugs: [] });
+  }
 
   api.get("/v1/admin/ruleta", async (req) => {
     await exigir(pool, req);
@@ -43,6 +52,7 @@ export async function rutasRuletaAdmin(app: FastifyInstance, deps: { pool: pg.Po
     const b = req.body;
     await pool.query("UPDATE tienda.ruleta SET manual = $1, con_eventos = $2, cada_dias = $3, vence_dias = $4, actualizado_por = $5, actualizado_en = now() WHERE id = 1", [b.manual, b.conEventos, b.cadaDias, b.venceDias, a.email]);
     await auditar(pool, a, "configurar_ruleta", "ruleta", null, b, ip(req));
+    await invalidar();
     return { ok: true };
   });
 
@@ -67,6 +77,7 @@ export async function rutasRuletaAdmin(app: FastifyInstance, deps: { pool: pg.Po
       await cli.query("ROLLBACK").catch(() => {});
       throw e;
     } finally { cli.release(); }
+    await invalidar();
     return { ok: true };
   });
 }

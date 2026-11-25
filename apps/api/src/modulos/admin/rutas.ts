@@ -934,7 +934,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   }).strict();
   const AJUSTES: Record<string, z.ZodType> = {
     // hayPacks, packsEn, hayLiquidacion y liquidacionEn no se guardan: salen de los productos y los descuentos.
-    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "liquidacionTemporadas", "relampago", "direcciones", "evento"].includes(k))),
+    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "liquidacionTemporadas", "relampago", "direcciones", "evento", "hayRuleta"].includes(k))),
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),

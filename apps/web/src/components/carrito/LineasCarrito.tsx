@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
-import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion, type CuponesPublicos, type RuletaEstado } from "@isu/shared/puro";
+import { conDescuento, centavos, formatearPesos, MAX_PACKS_POR_LINEA, rutaPack, type Cotizacion, type CuponesEvaluados } from "@isu/shared/puro";
 import { api } from "@/lib/cliente-api";
 import { leerDispositivo } from "@/lib/dispositivo";
 import { Foto } from "../Foto";
-import { useCarrito, usoDe, type AvisoStock, type LineaCarrito } from "./Carrito";
+import { itemDe, useCarrito, usoDe, type AvisoStock, type LineaCarrito } from "./Carrito";
 
 /*
  * Si el + no deja sumar porque la misma variante también está en otra línea
@@ -199,26 +199,69 @@ function AvisoMezcla({ m }: { m: NonNullable<NonNullable<Cotizacion["cupon"]>["m
   );
 }
 
-/** Cupones que se pueden tocar para aplicar: los que la tienda muestra y, con sesión, los que ganó la cuenta en la ruleta (sin usar). */
-function useCuponesDisponibles(activo: boolean) {
-  const [lista, setLista] = useState<Array<{ codigo: string; nombre: string; propio: boolean }>>([]);
+type Evaluado = CuponesEvaluados["cupones"][number];
+
+/**
+ * «Cupones disponibles», como en las tiendas grandes: cada cupón (los que la tienda muestra y los que este cliente ganó en la ruleta,
+ * con su cuenta o con el identificador de su navegador) evaluado contra ESTE carrito. La API cotiza el mismo carrito con cada uno, así
+ * que «Ahorrás $X» y «Te faltan $Y» son lo que de verdad pasaría. Se vuelve a pedir cuando cambia el carrito.
+ */
+function useCuponesEvaluados(activo: boolean) {
+  const { lineas } = useCarrito();
+  const clave = JSON.stringify(lineas.map(itemDe));
+  const [lista, setLista] = useState<Evaluado[]>([]);
   useEffect(() => {
-    if (!activo) return;
+    if (!activo || !lineas.length) { setLista([]); return; }
     let vivo = true;
-    // Los de la cuenta (con sesión) o, sin sesión, los que ganó este navegador en la ruleta (si alguna vez giró).
-    const suyos = api<RuletaEstado | undefined>("cuenta/ruleta").then((m) => {
-      const d = m ? null : leerDispositivo(false);
-      return m ?? (d ? api<RuletaEstado>(`ruleta?d=${d}`) : undefined);
-    });
-    void Promise.allSettled([api<CuponesPublicos>("cupones"), suyos]).then(([pub, mio]) => {
-      if (!vivo) return;
-      const propios = mio.status === "fulfilled" && mio.value ? mio.value.cupones.map((c) => ({ codigo: c.codigo, nombre: c.nombre.replace(/^Ruleta: /, ""), propio: true })) : [];
-      const publicos = pub.status === "fulfilled" ? pub.value.cupones.map((c) => ({ codigo: c.codigo, nombre: c.detalle, propio: false })) : [];
-      setLista([...propios, ...publicos].filter((c, i, a) => a.findIndex((x) => x.codigo === c.codigo) === i).slice(0, 6));
-    });
-    return () => { vivo = false; };
-  }, [activo]);
+    // Un momento de espera: sumar varias prendas seguidas no dispara un pedido por cada una.
+    const t = setTimeout(() => {
+      const d = leerDispositivo(false);
+      api<CuponesEvaluados>("cupones/evaluar", { cuerpo: { items: lineas.map(itemDe), ...(d ? { dispositivo: d } : {}) } })
+        .then((r) => { if (vivo) setLista(r.cupones); })
+        .catch(() => { if (vivo) setLista([]); });
+    }, 350);
+    return () => { vivo = false; clearTimeout(t); };
+    // `clave` representa el contenido del carrito (las líneas cambian de identidad en cada render).
+  }, [activo, clave]);
   return lista;
+}
+
+const fechaCorta = (iso: string) => new Date(iso).toLocaleDateString("es-AR", { day: "numeric", month: "numeric", timeZone: "America/Argentina/Buenos_Aires" });
+
+function PanelCupones({ lista, alAplicar, ocupado }: { lista: Evaluado[]; alAplicar: (codigo: string) => void; ocupado: boolean }) {
+  const [todos, setTodos] = useState(false);
+  const mejor = lista.find((c) => c.aplicable)?.codigo;
+  const mostrados = todos ? lista : lista.slice(0, 3);
+  return (
+    <div className="mt-3" aria-label="Cupones disponibles" role="group">
+      <p className="text-xs font-bold text-tinta-suave">Cupones disponibles ({lista.length})</p>
+      <ul className="mt-1.5 space-y-2">
+        {mostrados.map((c) => (
+          <li key={c.codigo} className={`flex items-stretch overflow-hidden rounded-xl border ${c.aplicable ? "border-ahorro/40 bg-white" : "border-linea bg-fondo-suave"}`}>
+            <div className={`flex w-[5.5rem] shrink-0 items-center justify-center px-2 py-2 text-center ${c.aplicable ? "bg-ahorro-claro text-ahorro" : "bg-fondo-suave text-tinta-tenue"}`}>
+              <b className="text-[13px] leading-tight">{c.detalle}</b>
+            </div>
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-2 border-l border-dashed border-linea px-3 py-2">
+              <div className="min-w-0 text-xs">
+                {c.codigo === mejor && <span className="mb-0.5 inline-block rounded bg-ahorro px-1.5 py-0.5 text-[10px] font-bold text-white">Mejor opción</span>}
+                <p className="truncate font-bold" title={c.nombre}>{c.nombre}{c.propio ? " · tuyo" : ""}</p>
+                <p className={c.aplicable ? "font-bold text-ahorro" : "text-tinta-suave"}>
+                  {c.aplicable ? (c.envioGratis ? "Envío gratis" : `Ahorrás ${formatearPesos(c.ahorro)}`) : c.falta !== null ? `Te faltan ${formatearPesos(c.falta)}` : (c.motivo ?? "No aplica a este carrito")}
+                </p>
+                <p className="text-tinta-tenue">{[c.minimo > 0 ? `Desde ${formatearPesos(c.minimo)}` : null, c.hasta ? `hasta el ${fechaCorta(c.hasta)}` : null].filter(Boolean).join(" · ")}</p>
+              </div>
+              <button type="button" onClick={() => alAplicar(c.codigo)} disabled={!c.aplicable || ocupado} aria-label={`Aplicar el cupón ${c.nombre}`}
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold ${c.aplicable ? "bg-tinta text-white" : "border border-linea text-tinta-tenue"} disabled:opacity-60`}>{c.aplicable ? "Aplicar" : "No disponible"}</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {lista.length > 3 && <button type="button" onClick={() => setTodos(!todos)} className="font-bold underline">{todos ? "Ver menos" : `Ver los ${lista.length} cupones`}</button>}
+        <Link href="/cupones" className="underline">Cupones y promociones</Link>
+      </div>
+    </div>
+  );
 }
 
 export function CampoCupon() {
@@ -230,7 +273,7 @@ export function CampoCupon() {
   const aplicar = () => { if (texto.trim()) ponerCupon(texto); };
   // "La promoción X te descuenta más…" es informativo; el resto, un error.
   const informativo = avisoCupon?.startsWith("La promoción");
-  const disponibles = useCuponesDisponibles(!aplicado && (abierto || !!avisoCupon || !!cupon));
+  const disponibles = useCuponesEvaluados(!aplicado);
 
   if (aplicado) {
     return (
@@ -255,20 +298,7 @@ export function CampoCupon() {
           <button type="button" onClick={aplicar} disabled={cotizando || !texto.trim()} className="boton-borde shrink-0 px-4 py-2.5 disabled:opacity-50">Aplicar</button>
         </div>
       )}
-      {disponibles.length > 0 && (
-        <div className="mt-2">
-          <p className="text-xs text-tinta-tenue">Cupones disponibles</p>
-          <ul className="mt-1 flex flex-wrap gap-2">
-            {disponibles.map((c) => (
-              <li key={c.codigo}>
-                <button type="button" onClick={() => ponerCupon(c.codigo)} disabled={cotizando} title={c.propio ? "Ganado en la ruleta: sólo lo usás vos" : undefined}
-                  className="rounded-full border border-linea px-3 py-1.5 text-left text-xs hover:border-tinta disabled:opacity-50"><b className="font-mono">{c.codigo}</b> · {c.nombre}{c.propio ? " · tuyo" : ""}</button>
-              </li>
-            ))}
-          </ul>
-          <Link href="/cupones" className="mt-1 inline-block text-xs underline">Ver todos los cupones</Link>
-        </div>
-      )}
+      {disponibles.length > 0 && <PanelCupones lista={disponibles} alAplicar={(codigo) => ponerCupon(codigo)} ocupado={cotizando} />}
       {avisoCupon && <p id={`${id}-aviso`} role={informativo ? "status" : "alert"} className={`mt-1.5 ${informativo ? "text-tinta-suave" : "font-bold text-oferta"}`}>{avisoCupon}</p>}
     </div>
   );

@@ -21,6 +21,7 @@ export function Footer({ config, categorias }: { config: ConfigPublica; categori
           {config.evento?.clave === "navidad" && <Link href="/amigo-invisible" className="block text-tinta-suave hover:text-marca">Amigo invisible</Link>}
           <Link href="/nuevos" className="block text-tinta-suave hover:text-marca">Nuevos</Link>
           <Link href="/cupones" className="block text-tinta-suave hover:text-marca">Cupones y promociones</Link>
+          {config.hayRuleta && <Link href="/ruleta" className="block text-tinta-suave hover:text-marca">Ruleta de descuentos</Link>}
           <Link href="/outfits" className="block text-tinta-suave hover:text-marca">Armá tu outfit</Link>
           <Link href="/venta-por-mayor" className="block text-tinta-suave hover:text-marca">Venta por mayor</Link>
         </nav>

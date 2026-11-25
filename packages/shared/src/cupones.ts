@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Items, MedioPago } from "./checkout.js";
 
 /*
  * Cupones y promociones por monto (backoffice). Los montos en centavos,
@@ -85,6 +86,38 @@ export function resumenCupon(c: { tipo: (typeof TIPOS_CUPON)[number]; valor: num
 export const CuponesPublicos = z.object({
   cupones: z.array(z.object({ codigo: z.string(), nombre: z.string(), descripcion: z.string().nullable(), detalle: z.string(), minimo: z.number().int(), hasta: z.string().nullable() })),
   promociones: z.array(z.object({ nombre: z.string(), detalle: z.string(), minimo: z.number().int(), hasta: z.string().nullable() })),
-  ruleta: z.object({ abierta: z.boolean(), evento: z.string().nullable() }),
+  /** si hay una ruleta abierta, y cada cuántos días se gira y cuántos dura el cupón (para la página de la ruleta) */
+  ruleta: z.object({ abierta: z.boolean(), evento: z.string().nullable(), cadaDias: z.number().int(), venceDias: z.number().int() }),
 });
 export type CuponesPublicos = z.infer<typeof CuponesPublicos>;
+
+/**
+ * «Cupones disponibles» del carrito: cada cupón (los que la tienda muestra y los que ganó este cliente en la ruleta) evaluado contra
+ * ESTE carrito: si aplica y cuánto ahorra, o cuánto falta para usarlo. El cliente se identifica con su sesión o, sin cuenta, con el
+ * identificador de su navegador; sólo se evalúan SUS cupones.
+ */
+export const PedidoEvaluar = z.object({
+  items: Items,
+  medioPago: MedioPago.optional(),
+  entrega: z.enum(["envio", "retiro"]).optional(),
+  dispositivo: z.string().regex(/^[A-Za-z0-9_-]{32,64}$/).optional(),
+}).strict();
+export type PedidoEvaluar = z.infer<typeof PedidoEvaluar>;
+
+export const CuponesEvaluados = z.object({
+  cupones: z.array(z.object({
+    codigo: z.string(), nombre: z.string(), detalle: z.string(), minimo: z.number().int(), hasta: z.string().nullable(),
+    /** lo ganó este cliente en la ruleta */
+    propio: z.boolean(),
+    /** se puede aplicar a este carrito (rige: uno por compra, el que más descuenta) */
+    aplicable: z.boolean(),
+    /** centavos que ahorra en este carrito (0 si no aplica o es envío gratis) */
+    ahorro: z.number().int(),
+    envioGratis: z.boolean(),
+    /** centavos que faltan de compra para usarlo (sólo si es por el mínimo) */
+    falta: z.number().int().nullable(),
+    /** por qué no aplica, si no es por el mínimo */
+    motivo: z.string().nullable(),
+  })),
+});
+export type CuponesEvaluados = z.infer<typeof CuponesEvaluados>;

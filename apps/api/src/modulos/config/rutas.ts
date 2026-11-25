@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type pg from "pg";
 import { AjusteDirecciones, ConfigPublica, DIRECCIONES_POR_DEFECTO, EnlaceLocal, leerPacks, PACKS_POR_DEFECTO, TIENDA_CERRADA_DE_FABRICA } from "@isu/shared";
 import { esquema, type Db } from "@isu/db";
+import { ruletaAbierta } from "../../lib/ruleta.js";
 import type { CacheCorta } from "../../lib/cache.js";
 import { CON_STOCK, DESCUENTO_VIGENTE_DE_P, EN_LIQUIDACION, FIN_RELAMPAGO, TEMPORADAS, enLiquidacion } from "../productos/consultas.js";
 
@@ -40,6 +41,7 @@ const POR_DEFECTO: ConfigPublica = {
   direcciones: { sugerencias: false, revisar: false },
   tiendaCerrada: TIENDA_CERRADA_DE_FABRICA,
   evento: null,
+  hayRuleta: false,
 };
 
 /** Slugs de las categorías de arriba (Hombre, Mujer, Niños…) que tienen algún producto publicado que cumple `condicion`. */
@@ -105,6 +107,7 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
     const promos = ev ? (await deps.pool.query<{ nombre: string }>(
       `SELECT nombre FROM tienda.cupones WHERE evento_id = $1 AND automatico AND activo AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())
           AND (usos_max IS NULL OR usos < usos_max) ORDER BY id`, [ev.id])).rows.map((r) => r.nombre) : [];
+    salida.hayRuleta = (await ruletaAbierta(deps.pool)).abierta;
     salida.evento = ev ? { clave: ev.clave, nombre: ev.nombre, hasta: ev.hasta?.toISOString() ?? null, promos } : null;
     salida.hayPacks = !!hayPacks.rowCount;
     salida.packsEn = packsEn;

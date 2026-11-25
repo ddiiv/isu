@@ -147,7 +147,7 @@ export async function construirApp(deps: Dependencias) {
   const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador, secreto: env.INTERNO_TOKEN, talo });
   await rutasCuentas(app, { pool, redis, env, colas });
   await rutasRuleta(app, { pool, redis, env });
-  await rutasCuponesPublicos(app, { pool, cache });
+  await rutasCuponesPublicos(app, { pool, cache, redis, env, descuentos });
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
   await rutasEnvios(app, { pool, redis, env, cotizador, transportes, descuentos });
@@ -171,7 +171,7 @@ export async function construirApp(deps: Dependencias) {
   await rutasChat(app, { redis, env, asistente });
   app.addHook("onClose", async () => { await asistente.cerrar(); });
   await rutasCuponesAdmin(app, { pool, env });
-  await rutasRuletaAdmin(app, { pool, env });
+  await rutasRuletaAdmin(app, { pool, env, redis, colas, cache, canalInvalidar: CANAL_INVALIDAR });
   await rutasEventosAdmin(app, { pool, env, redis, colas, cache, canalInvalidar: CANAL_INVALIDAR });
   await rutasChatAdmin(app, { pool, redis, env, cache, canalInvalidar: CANAL_INVALIDAR, asistente, iaDisponible: !!(deps.ia ?? ia) });
 

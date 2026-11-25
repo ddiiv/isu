@@ -111,3 +111,14 @@ Tres clases de cupón:
   backoffice (la lista de Cupones no los incluye). Cuando hay una ruleta abierta, `/cupones` muestra la rueda para girar con o sin cuenta.
 - API pública: `GET /v1/cupones` (visibles, promos vigentes y si hay ruleta abierta; sin datos de clientes ni cupones secretos). Hay una caché corta: un
   cambio de visibilidad tarda hasta un minuto en verse.
+
+# Página /ruleta y «Cupones disponibles» del carrito
+
+- **`/ruleta`:** la rueda (con o sin cuenta), cómo funciona (cada cuántos días se gira y cuánto dura el cupón salen de la configuración) y enlaces a
+  `/cupones` y Mi cuenta. Siempre existe, así no hay enlaces rotos: sin ruleta abierta lo dice y no se indexa. Se enlaza en el menú, el pie y el sitemap
+  sólo mientras haya una abierta (`config.hayRuleta`; prender o apagar la ruleta en el backoffice regenera las páginas).
+- **«Cupones disponibles»** (`PanelCupones` en `LineasCarrito.tsx`, sale en el cajón del carrito, la página del carrito y el checkout): cada cupón (los visibles y los
+  que ganó ese cliente: cuenta o navegador) evaluado contra ESE carrito, como en las tiendas grandes: «Mejor opción», «Ahorrás $X», «Te faltan $Y» o por qué no aplica,
+  y un botón «Aplicar». `POST /v1/cupones/evaluar` cotiza el mismo carrito con cada cupón (hasta 8), así que lo que dice es lo que de verdad pasaría; rige igual uno por
+  compra. Se vuelve a pedir cuando cambia el carrito. El cliente elige: no se aplica solo.
+- Sólo se evalúan los cupones de quien pregunta: la sesión de la cuenta o el identificador del navegador; nunca los de otro, y no se devuelve ningún dato de clientes.

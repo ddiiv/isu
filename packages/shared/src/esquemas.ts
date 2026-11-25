@@ -120,6 +120,8 @@ export const ConfigPublica = z.object({
   direcciones: z.object({ sugerencias: z.boolean(), revisar: z.boolean() }).default({ sugerencias: false, revisar: false }),
   /** Tienda apagada por el dueño (el aviso que ven los clientes). */
   tiendaCerrada: TiendaCerrada.default(TIENDA_CERRADA_DE_FABRICA),
+  /** Hay una ruleta abierta ahora (a mano o por un evento): la tienda enlaza /ruleta sólo entonces. */
+  hayRuleta: z.boolean().default(false),
   /** El evento de temporada vigente (Navidad…); null = ninguno. La clave dice qué tema poner; `hasta` es cuándo termina (si tiene fecha). */
   evento: z.object({
     clave: z.string(), nombre: z.string(), hasta: z.string().nullable(),

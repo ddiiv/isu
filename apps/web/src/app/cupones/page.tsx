@@ -64,7 +64,7 @@ export default async function Cupones() {
       )}
 
       {/* La ruleta, con o sin cuenta: la tarjeta se muestra sola si hay una abierta (si no, sólo este aviso). */}
-      {ruleta.abierta ? <Ruleta /> : (
+      {ruleta.abierta ? <><Ruleta /><p className="mt-3 text-sm"><Link href="/ruleta" className="underline">Cómo funciona la ruleta</Link></p></> : (
         <section aria-labelledby="titulo-ruleta-cupones" className="mt-12 rounded-[var(--radius-foto)] bg-fondo-suave p-6 sm:p-8">
           <h2 id="titulo-ruleta-cupones" className="text-2xl">Ganá cupones con la ruleta</h2>
           <p className="mt-2 max-w-2xl text-tinta-suave">Cuando hay una ruleta abierta (en Navidad y otras fechas), podés girar una vez por semana y ganar un cupón. Pasá de nuevo pronto.</p>

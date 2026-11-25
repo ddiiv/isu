@@ -1968,7 +1968,7 @@ describe("cupones visibles en la tienda (0038)", () => {
     // Las promos del evento sólo salen con el evento vigente.
     expect(p.promociones.map((x: { nombre: string }) => x.nombre)).not.toContain("2da unidad al 50%");
     expect(JSON.stringify(p)).not.toContain("RULETA-");
-    expect(p.ruleta).toEqual({ abierta: false, evento: null });
+    expect(p.ruleta).toEqual({ abierta: false, evento: null, cadaDias: 7, venceDias: 30 });
     // Se aplica en el carrito como cualquier otro: lo visible no cambia las reglas.
     const c = (await app.inject({ method: "POST", url: "/v1/carrito", headers: { "x-isu-interno": INTERNO, "x-isu-ip": "10.6.6.6" }, payload: { items: [{ sku: "QA-ADM-2-1", cantidad: 1 }, { sku: "QA-ADM-2-2", cantidad: 1 }], medioPago: "mercadopago", cupon: "QAADMVIS" } })).json();
     expect([c.cupon?.codigo, c.descuentoCupon]).toEqual(["QAADMVIS", 600_000]);
@@ -1989,7 +1989,53 @@ describe("cupones visibles en la tienda (0038)", () => {
 
   it("con una ruleta abierta, la tienda lo avisa (sin datos de nadie)", async () => {
     expect((await req("PUT", "/v1/admin/ruleta", operador, { manual: true, conEventos: true, cadaDias: 7, venceDias: 30 })).statusCode).toBe(200);
-    expect((await publico()).ruleta).toEqual({ abierta: true, evento: null });
+    expect((await publico()).ruleta).toEqual({ abierta: true, evento: null, cadaDias: 7, venceDias: 30 });
+    // Y la config le avisa a la tienda para enlazar /ruleta sólo entonces.
+    expect((await app.inject("/v1/config")).json().hayRuleta).toBe(true);
     expect((await req("PUT", "/v1/admin/ruleta", operador, { manual: false, conEventos: true, cadaDias: 7, venceDias: 30 })).statusCode).toBe(200);
+    expect((await app.inject("/v1/config")).json().hayRuleta).toBe(false);
+  });
+
+  it("«Cupones disponibles» del carrito: cada cupón evaluado contra ese carrito (ahorra $X o te faltan $Y), y sólo con los cupones de quien pregunta", async () => {
+    await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA adm%'");
+    await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMV10", nombre: "QA adm diez", valor: 10, visible: true });
+    await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMV20", nombre: "QA adm veinte", valor: 20, visible: true, minimo: 6_000_000 });
+    await req("POST", "/v1/admin/cupones", operador, { ...base, codigo: "QAADMSE2", nombre: "QA adm secreto 2", valor: 50 });
+    const dosJoggers = [{ sku: "QA-ADM-2-1", cantidad: 1 }, { sku: "QA-ADM-2-2", cantidad: 1 }];   // 2 × $20.000
+    const evaluar = (payload: unknown, token?: string, ip = "10.5.5.5") =>
+      app.inject({ method: "POST", url: "/v1/cupones/evaluar", headers: { "x-isu-interno": INTERNO, "x-isu-ip": ip, ...(token ? { "x-isu-sesion": token } : {}) }, payload: payload as object });
+    const r = await evaluar({ items: dosJoggers });
+    expect(r.statusCode, r.body).toBe(200);
+    const c = r.json().cupones as Array<{ codigo: string; aplicable: boolean; ahorro: number; falta: number | null; propio: boolean; detalle: string }>;
+    // Sólo lo visible (nunca el secreto); lo que se puede usar primero.
+    expect(c.map((x) => x.codigo)).toEqual(["QAADMV10", "QAADMV20"]);
+    expect(c[0]).toMatchObject({ aplicable: true, ahorro: 400_000, falta: null, propio: false, detalle: "10% OFF" });
+    expect(c[1]).toMatchObject({ aplicable: false, ahorro: 0, falta: 2_000_000 });
+    // Más prendas: el de 20% ya se desbloquea y pasa a ser la mejor opción (rige uno por compra, el que más descuenta).
+    const cinco = [{ sku: "QA-ADM-2-1", cantidad: 2 }, { sku: "QA-ADM-2-2", cantidad: 2 }];   // $80.000
+    const r2 = (await evaluar({ items: cinco })).json().cupones;
+    expect([r2[0].codigo, r2[0].aplicable, r2[0].ahorro]).toEqual(["QAADMV20", true, 1_600_000]);
+    // El carrito vacío o un identificador inventado no sirven.
+    expect((await evaluar({ items: [] })).statusCode).toBe(400);
+    expect((await evaluar({ items: dosJoggers, dispositivo: "corto" })).statusCode).toBe(400);
+
+    // Los cupones propios (ruleta): con el identificador del navegador, o con la sesión; nunca los de otro.
+    const guardado = (await req("GET", "/v1/admin/ruleta", operador)).json().premios.map((p: Record<string, unknown>) => ({ id: p.id, etiqueta: p.etiqueta, tipo: p.tipo, valor: p.valor, minimo: p.minimo, peso: p.peso, activo: p.activo }));
+    try {
+      await req("PUT", "/v1/admin/ruleta/premios", operador, { premios: [{ etiqueta: "10% OFF", tipo: "porcentaje", valor: 10, peso: 100, minimo: 0, activo: true }, { etiqueta: "Sin suerte", tipo: "nada", valor: 0, peso: 0, minimo: 0, activo: true }] });
+      await req("PUT", "/v1/admin/ruleta", operador, { manual: true, conEventos: true, cadaDias: 7, venceDias: 30 });
+      const { randomBytes } = await import("node:crypto");
+      const t = randomBytes(24).toString("base64url"), otro = randomBytes(24).toString("base64url");
+      const g = await app.inject({ method: "POST", url: "/v1/ruleta/girar", headers: { "x-isu-interno": INTERNO, "x-isu-ip": "10.5.5.9" }, payload: { dispositivo: t } });
+      expect(g.statusCode, g.body).toBe(200);
+      const codigo = g.json().cupon.codigo as string;
+      const mio = (await evaluar({ items: dosJoggers, dispositivo: t })).json().cupones;
+      expect(mio.find((x: { codigo: string }) => x.codigo === codigo)).toMatchObject({ propio: true, aplicable: true, ahorro: 400_000 });
+      expect((await evaluar({ items: dosJoggers })).json().cupones.some((x: { codigo: string }) => x.codigo === codigo)).toBe(false);
+      expect((await evaluar({ items: dosJoggers, dispositivo: otro })).json().cupones.some((x: { codigo: string }) => x.codigo === codigo)).toBe(false);
+    } finally {
+      await req("PUT", "/v1/admin/ruleta/premios", operador, { premios: guardado });
+      await req("PUT", "/v1/admin/ruleta", operador, { manual: false, conEventos: true, cadaDias: 7, venceDias: 30 });
+    }
   });
 });

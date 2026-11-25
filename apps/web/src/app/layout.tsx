@@ -57,7 +57,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
         <ProveedorCarrito>
           <CartelRelampago relampago={config.relampago} />
           <Anuncio texto={config.anuncio} envioGratisDesde={config.envioGratisDesde} />
-          <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, hayLiquidacion: config.hayLiquidacion, fotos }} evento={config.evento?.clave ?? null} />
+          <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, hayLiquidacion: config.hayLiquidacion, hayRuleta: config.hayRuleta, fotos }} evento={config.evento?.clave ?? null} />
           <main id="contenido">{children}</main>
           <OrigenYCupon />
           <Footer config={config} categorias={categorias} />

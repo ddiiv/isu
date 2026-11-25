@@ -51,13 +51,13 @@ async function apertura(db: pg.Pool | pg.PoolClient) {
 }
 
 /** ¿Hay una ruleta abierta ahora (a mano o por un evento vigente)? Es público: no lleva datos de nadie. */
-export async function ruletaAbierta(db: pg.Pool): Promise<{ abierta: boolean; evento: string | null }> {
+export async function ruletaAbierta(db: pg.Pool): Promise<{ abierta: boolean; evento: string | null; cadaDias: number; venceDias: number }> {
   const a = await apertura(db);
   const hayPremios = (await db.query("SELECT 1 FROM tienda.ruleta_premios WHERE activo AND peso > 0 LIMIT 1")).rowCount! > 0;
-  return { abierta: a.abierta && hayPremios, evento: a.porEvento?.nombre ?? null };
+  return { abierta: a.abierta && hayPremios, evento: a.porEvento?.nombre ?? null, cadaDias: a.config.cadaDias, venceDias: a.config.venceDias };
 }
 
-const cuponesSinUsar = async (db: pg.Pool | pg.PoolClient, q: Quien) =>
+export const cuponesDe = async (db: pg.Pool | pg.PoolClient, q: Quien) =>
   (await db.query<{ codigo: string; nombre: string; hasta: Date | null; minimo: number }>(
     `SELECT c.codigo, c.nombre, c.hasta, c.minimo FROM tienda.cupones c
       WHERE ${esInvitado(q) ? "c.id IN (SELECT cupon_id FROM tienda.ruleta_giros WHERE dispositivo = $1 AND cupon_id IS NOT NULL)" : "c.cliente_id = $1"}
@@ -79,7 +79,7 @@ async function liberaIp(db: pg.Pool | pg.PoolClient, q: Quien, cadaDias: number)
 
 /** Lo que ve quien consulta (su cuenta o su dispositivo; nunca los de otro). */
 export async function estadoRuleta(pool: pg.Pool, q: Quien): Promise<RuletaEstado> {
-  const [a, ultimo, premios, cupones] = await Promise.all([apertura(pool), ultimoGiro(pool, q), premiosDelSorteo(pool), cuponesSinUsar(pool, q)]);
+  const [a, ultimo, premios, cupones] = await Promise.all([apertura(pool), ultimoGiro(pool, q), premiosDelSorteo(pool), cuponesDe(pool, q)]);
   const propio = ultimo ? new Date(ultimo.getTime() + a.config.cadaDias * DIA) : null;
   const ip = await liberaIp(pool, q, a.config.cadaDias);
   const proximo = [propio, ip].filter((d): d is Date => !!d && d.getTime() > Date.now()).sort((x, y) => y.getTime() - x.getTime())[0] ?? null;
