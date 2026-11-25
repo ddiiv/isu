@@ -18,6 +18,8 @@ import { rutasCategorias } from "./modulos/categorias/rutas.js";
 import { rutasProductos } from "./modulos/productos/rutas.js";
 import { rutasFotos } from "./modulos/fotos/rutas.js";
 import { rutasCuentas } from "./modulos/cuentas/rutas.js";
+import { rutasRuleta } from "./modulos/cuentas/ruleta.js";
+import { rutasRuletaAdmin } from "./modulos/admin/ruleta.js";
 import { rutasPedidos } from "./modulos/pedidos/rutas.js";
 import { rutasCarritos } from "./modulos/carritos/rutas.js";
 import { rutasOutfits } from "./modulos/outfits/rutas.js";
@@ -34,6 +36,7 @@ import { crearIa, type Ia } from "./modulos/chat/ia.js";
 import { rutasChat } from "./modulos/chat/rutas.js";
 import { rutasChatAdmin } from "./modulos/admin/chat.js";
 import { rutasCuponesAdmin } from "./modulos/admin/cupones.js";
+import { rutasEventosAdmin } from "./modulos/admin/eventos.js";
 import { rutasIngresoAdmin } from "./modulos/admin/ingreso.js";
 import { rutasAdmin } from "./modulos/admin/rutas.js";
 import { crearTransportes, type Transportes } from "@isu/envios";
@@ -142,6 +145,7 @@ export async function construirApp(deps: Dependencias) {
   const cotizador = crearCotizadorEnvios({ pool, redis, transportes, log: app.log });
   const servicio = crearServicioPedidos({ pool, stocker, mp, colas, sitio: env.SITIO_URL, apiPublica: env.API_PUBLICA_URL, log: app.log, descuentos, transportes, cotizador, secreto: env.INTERNO_TOKEN, talo });
   await rutasCuentas(app, { pool, redis, env, colas });
+  await rutasRuleta(app, { pool, redis, env });
   const comprobantes = almacenDeComprobantes({ ...process.env, COMPROBANTES_DIR: env.COMPROBANTES_DIR });
   await rutasPedidos(app, { pool, redis, env, servicio, mp, colas, comprobantes, descuentos, cotizador });
   await rutasEnvios(app, { pool, redis, env, cotizador, transportes, descuentos });
@@ -165,6 +169,8 @@ export async function construirApp(deps: Dependencias) {
   await rutasChat(app, { redis, env, asistente });
   app.addHook("onClose", async () => { await asistente.cerrar(); });
   await rutasCuponesAdmin(app, { pool, env });
+  await rutasRuletaAdmin(app, { pool, env });
+  await rutasEventosAdmin(app, { pool, env, redis, colas, cache, canalInvalidar: CANAL_INVALIDAR });
   await rutasChatAdmin(app, { pool, redis, env, cache, canalInvalidar: CANAL_INVALIDAR, asistente, iaDisponible: !!(deps.ia ?? ia) });
 
   // ── SEO: redirecciones de la tienda anterior ──

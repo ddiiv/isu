@@ -27,8 +27,8 @@ export function MenuAcceso({ panel, children, className }: { panel: string; chil
   return <button type="button" className={className} onClick={() => window.dispatchEvent(new CustomEvent(EVENTO, { detail: panel }))}>{children}</button>;
 }
 
-export function MenuMovil({ categorias, fotos, hayPacks, hayLiquidacion }: {
-  categorias: CategoriaNodo[]; fotos: Record<string, FotoDelMenu[]>; hayPacks: boolean; hayLiquidacion: boolean;
+export function MenuMovil({ categorias, fotos, hayPacks, hayLiquidacion, amigoInvisible = false }: {
+  categorias: CategoriaNodo[]; fotos: Record<string, FotoDelMenu[]>; hayPacks: boolean; hayLiquidacion: boolean; amigoInvisible?: boolean;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
@@ -96,6 +96,7 @@ export function MenuMovil({ categorias, fotos, hayPacks, hayLiquidacion }: {
                 {categorias.map((c) => c.hijas.length || fotos[c.slug]?.length
                   ? <button key={c.id} type="button" className={`${enlace} text-left`} onClick={() => setPanel(c.slug)}>{c.nombre} {flecha}</button>
                   : <Link key={c.id} href={`/${c.slug}`} className={enlace} onClick={cerrar}>{c.nombre}</Link>)}
+                {amigoInvisible && <Link href="/amigo-invisible" className={`${enlace} text-oferta`} onClick={cerrar}>Amigo invisible</Link>}
                 {hayPacks && <Link href="/packs" className={`${enlace} text-ahorro`} onClick={cerrar}>Packs</Link>}
                 {hayLiquidacion && <Link href="/liquidacion" className={`${enlace} text-oferta`} onClick={cerrar}>Liquidación</Link>}
                 <Link href="/nuevos" className="pt-4 text-[15px] font-bold" onClick={cerrar}>Nuevos</Link>

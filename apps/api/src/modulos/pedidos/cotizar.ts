@@ -85,7 +85,7 @@ export interface Cotizado extends Cotizacion {
 export async function cotizar(
   pool: pg.Pool,
   items: ItemCarrito[],
-  opciones: { entrega?: "envio" | "retiro"; medioPago?: MedioPago; ajustes?: Ajustes; descuentos?: Descuentos; cupon?: string | null; email?: string | null } = {},
+  opciones: { entrega?: "envio" | "retiro"; medioPago?: MedioPago; ajustes?: Ajustes; descuentos?: Descuentos; cupon?: string | null; email?: string | null; clienteId?: number | null } = {},
 ): Promise<Cotizado> {
   const a = opciones.ajustes ?? await leerAjustes(pool);
   // Vale para el carrito, las opciones de envío y el pedido nuevo: los tres cotizan por acá.
@@ -165,7 +165,7 @@ export async function cotizar(
     });
     if (!conProblema.has(sku)) {
       subtotal += precio * cantidad;
-      paraCupon.push({ sku, productoId: f.producto_id, precio, mayorista: f.mayorista, rebajada: rebaja > 0, cantidad });
+      paraCupon.push({ sku, productoId: f.producto_id, precio, lista: f.precio, mayorista: f.mayorista, rebajada: rebaja > 0, cantidad });
     }
   }
 
@@ -199,7 +199,7 @@ export async function cotizar(
       subtotal += precioPack * g.cantidad;
       for (const { sku, n, f } of prendas) {
         // Para el cupón, cada prenda del pack es una línea con su clave: una prenda en pack cuenta como rebajada.
-        paraCupon.push({ sku: `${clave}|${sku}`, productoId: f!.producto_id, precio: conRebaja(f!.precio, pct, f!.mayorista), mayorista: f!.mayorista, rebajada: pct > 0, cantidad: n * g.cantidad });
+        paraCupon.push({ sku: `${clave}|${sku}`, productoId: f!.producto_id, precio: conRebaja(f!.precio, pct, f!.mayorista), lista: f!.precio, mayorista: f!.mayorista, rebajada: pct > 0, cantidad: n * g.cantidad });
       }
     }
   }
@@ -217,7 +217,11 @@ export async function cotizar(
       escrito = CODIGO.test(codigo) ? await buscarCupon(pool, codigo) : null;
       // Las promociones automáticas no se "escriben": no existen como código.
       if (!escrito || escrito.automatico) { avisoCupon = "Ese cupón no existe. Revisá que esté bien escrito."; escrito = null; }
-      else {
+      // Un cupón personal (ruleta) sólo vale para la cuenta que lo ganó: para cualquier otra, no existe.
+      else if (escrito.clienteId !== null && escrito.clienteId !== (opciones.clienteId ?? null)) {
+        avisoCupon = opciones.clienteId ? "Ese cupón no existe. Revisá que esté bien escrito." : "Ingresá a tu cuenta para usar este cupón.";
+        escrito = null;
+      } else {
         avisoCupon = motivoNoVigente(escrito);
         if (!avisoCupon && escrito.usosPorCliente !== null && opciones.email) {
           const usados = await pool.query<{ n: number }>(

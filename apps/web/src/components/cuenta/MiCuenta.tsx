@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { formatearPesos, type ClientePublico } from "@isu/shared/puro";
 import { api, type ErrorApi } from "@/lib/cliente-api";
+import { Ruleta } from "./Ruleta";
 
 interface Cuenta { cliente: ClientePublico; pedidos: Array<{ numero: string; estado: string; total: number; creadoEn: string; articulos: number }> }
 const ESTADOS: Record<string, string> = {
@@ -116,6 +117,8 @@ function Panel({ cuenta, alSalir, alCambiar }: { cuenta: Cuenta; alSalir: () => 
         <button type="button" onClick={salir} className="boton-borde py-2">Cerrar sesión</button>
       </div>
       {msg && <p role="status" className="mt-4 rounded-xl bg-marca-claro p-3 text-sm font-bold">{msg}</p>}
+      {/* Una vez por semana (en los eventos, o cuando se prende a mano): aparece sólo si hay algo para girar o cupones sin usar. */}
+      <Ruleta />
       <div className="mt-8 grid gap-10 lg:grid-cols-[1.4fr_1fr]">
         <section>
           <h2 className="text-2xl">Mis pedidos</h2>

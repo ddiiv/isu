@@ -13,6 +13,7 @@ export * from "./outfits.js";
 export * from "./envios.js";
 export * from "./chat.js";
 export * from "./cupones.js";
+export * from "./ruleta.js";
 export * from "./seo.js";
 export * from "./seo-datos.js";
 export * from "./packs.js";

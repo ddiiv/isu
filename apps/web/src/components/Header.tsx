@@ -32,17 +32,20 @@ export interface DatosMenu { hayPacks: boolean; hayLiquidacion: boolean; fotos: 
 const desplegable = "invisible absolute left-1/2 top-full z-50 -translate-x-1/2 translate-y-1 rounded-2xl border border-linea bg-white p-2 opacity-0 shadow-xl transition duration-200 ease-suave group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100";
 const item = "block rounded-xl px-3 py-2 hover:bg-fondo-suave";
 
-export function Header({ categorias, menu }: { categorias: CategoriaNodo[]; menu: DatosMenu }) {
+/** `evento`: la clave del evento de temporada vigente (navidad…) o null. */
+export function Header({ categorias, menu, evento = null }: { categorias: CategoriaNodo[]; menu: DatosMenu; evento?: string | null }) {
   const { hayPacks, hayLiquidacion, fotos } = menu;
+  // Edición Navidad: la sección «Amigo invisible» se enlaza sólo mientras el evento esté vigente.
+  const amigoInvisible = evento === "navidad";
   return (
     <header className="encabezado sticky top-0 z-40 border-b border-linea/70 bg-white">
       <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-6 lg:px-10 xl:h-20">
         <div className="flex items-center gap-3">
-          <MenuMovil categorias={categorias.map(paraMenu)} fotos={fotos} hayPacks={hayPacks} hayLiquidacion={hayLiquidacion} />
-          <Logo className="hidden xl:flex" />
+          <MenuMovil categorias={categorias.map(paraMenu)} fotos={fotos} hayPacks={hayPacks} hayLiquidacion={hayLiquidacion} amigoInvisible={amigoInvisible} />
+          <Logo className="hidden xl:flex" gorro={evento === "navidad"} />
         </div>
 
-        <Logo className="xl:hidden" />
+        <Logo className="xl:hidden" gorro={evento === "navidad"} />
         <nav aria-label="Categorías" className="hidden xl:block">
           <ul className="flex items-center gap-6 text-[15px] xl:gap-7">
             {categorias.map((c) => {
@@ -74,6 +77,7 @@ export function Header({ categorias, menu }: { categorias: CategoriaNodo[]; menu
                 </li>
               );
             })}
+            {amigoInvisible && <li><Link href="/amigo-invisible" className="py-7 font-bold text-oferta underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Amigo invisible</Link></li>}
             {hayPacks && <li><Link href="/packs" className="py-7 font-bold text-ahorro underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Packs</Link></li>}
             {hayLiquidacion && <li><Link href="/liquidacion" className="py-7 font-bold text-oferta underline decoration-transparent decoration-2 underline-offset-8 transition-colors duration-200 ease-suave hover:decoration-current">Liquidación</Link></li>}
           </ul>
@@ -99,10 +103,13 @@ export function Header({ categorias, menu }: { categorias: CategoriaNodo[]; menu
                 : <Link href={`/${c.slug}`} className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold">{c.nombre}</Link>}
             </li>
           ))}
+          {amigoInvisible && <li className="shrink-0"><Link href="/amigo-invisible" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-oferta">Amigo invisible</Link></li>}
           {hayPacks && <li className="shrink-0"><Link href="/packs" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-ahorro">Packs</Link></li>}
           {hayLiquidacion && <li className="shrink-0"><Link href="/liquidacion" className="block whitespace-nowrap rounded-full px-3 py-1.5 font-bold text-oferta">Liquidación</Link></li>}
         </ul>
       </nav>
+      {/* Edición Navidad: luces que titilan debajo del encabezado (CSS puro, decorativas). */}
+      {evento === "navidad" && <div className="guirnalda" aria-hidden="true" />}
     </header>
   );
 }

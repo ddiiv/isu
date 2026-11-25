@@ -61,6 +61,7 @@ export const CONFIG_RESPALDO: ConfigPublica = {
   direcciones: { sugerencias: false, revisar: false },
   // Sin API no se sabe: la tienda sigue abierta (el proxy recuerda el último estado que vio).
   tiendaCerrada: TIENDA_CERRADA_DE_FABRICA,
+  evento: null,
 };
 
 export const CATEGORIAS_RESPALDO: CategoriaNodo[] = [
@@ -124,7 +125,7 @@ export async function obtenerNuevos(cantidad = 8): Promise<ListadoProductos> {
 }
 
 /** Colecciones elegidas a mano en el backoffice (casillas "Destacado", "Nuevo" y "Pack") y la Liquidación (descuentos marcados). */
-export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion" | "relampago", limite = 200, temporada?: "invierno" | "verano"): Promise<ListadoProductos> {
+export async function obtenerColeccion(cual: "nuevos" | "destacados" | "packs" | "liquidacion" | "relampago" | "evento", limite = 200, temporada?: "invierno" | "verano"): Promise<ListadoProductos> {
   try {
     return (await pedirCatalogo(`/v1/productos?${new URLSearchParams({ coleccion: cual, limite: String(limite), ...(temporada ? { temporada } : {}) })}`, ListadoProductos, ["catalogo"])) ?? LISTADO_VACIO;
   } catch (err) {

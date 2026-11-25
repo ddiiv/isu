@@ -46,8 +46,9 @@ export async function rutasPedidos(app: FastifyInstance, deps: DepsRutasPedidos)
     await exigirTiendaAbierta(deps.pool);
     // Probar códigos es gratis para quien adivina: con tope por IP (sólo cuenta si escribió uno).
     if (req.body.cupon?.trim()) await frenar(deps.redis, "cupon-ip", ip(req), 40, 600);
+    const s = await sesionDe(req, deps);
     const c = await cotizar(deps.pool, req.body.items, {
-      entrega: req.body.entrega, medioPago: req.body.medioPago, descuentos: deps.descuentos, cupon: req.body.cupon, email: req.body.email,
+      entrega: req.body.entrega, medioPago: req.body.medioPago, descuentos: deps.descuentos, cupon: req.body.cupon, email: req.body.email, clienteId: s?.clienteId ?? null,
     });
     reply.headers(sinCache);
     // Con la opción de envío elegida en el checkout, el total la incluye. Si ya no está, sin opción (la tienda vuelve a pedir las opciones).

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- los datos estructurados son JSON sin tipo */
 import { describe, expect, it } from "vitest";
 import {
-  RedireccionEntrada, descripcionAutomatica, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, tituloProducto, calificadorProducto, categoriaGoogle, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
+  RedireccionEntrada, descripcionAutomatica, descripcionConEvento, tituloConEvento, descripcionCategoria, descripcionCategoriaPrincipal, descripcionInicio, descripcionProducto, tituloProducto, calificadorProducto, categoriaGoogle, detalleWhatsapp, feedXml, guiaEnTexto, horarioSchema, itemWhatsapp, itemsFeed, itemsFeedMayorista, jsonLdProducto, publicoDe, rutaPropia, rutaVieja, tipoDesdePortal, variantesWhatsapp,
   type ContextoSeo, type ProductoDetalle, type ProductoTarjeta,
 } from "./index.js";
 
@@ -356,5 +356,38 @@ describe("título de la ficha sin seoTitulo", () => {
   it("el título del feed lleva el género", () => {
     const f = itemsFeed(producto({ nombre: "Moron Short", migas: migas("Hombre", "Shorts y bermudas") }), ctx, "d");
     expect(f[0]!.title).toMatch(/^Moron Short de hombre - /);
+  });
+});
+
+describe("palabras clave de un evento de temporada (Navidad…)", () => {
+  const navidad = { ...ctx, evento: { nombre: "Navidad" } };
+  it("sin evento no cambia nada", () => {
+    expect(tituloConEvento("Packs", ctx)).toBe("Packs");
+    expect(descripcionConEvento("Hola.", ctx)).toBe("Hola.");
+    expect(descripcionInicio(["Mujer"], ctx)).not.toMatch(/Navidad/);
+  });
+  it("el título suma « · Navidad» sólo si entra en lo que muestra Google", () => {
+    expect(tituloConEvento("Nuevos ingresos", navidad)).toBe("Nuevos ingresos · Navidad");
+    const largo = "Ropa de mujer: remeras, tops y pantalones";
+    expect(tituloConEvento(largo, navidad)).toBe(largo);
+  });
+  it("las descripciones de inicio y categorías dicen «ofertas y regalos de Navidad», sin pasar de 158 caracteres", () => {
+    for (const d of [
+      descripcionInicio(["Mujer", "Hombre", "Niños"], navidad),
+      descripcionCategoriaPrincipal("Mujer", ["Remeras y tops", "Pantalones y calzas", "Buzos y camperas"], navidad),
+      descripcionCategoria("Remeras de hombre", [], navidad),
+    ]) {
+      expect(d).toMatch(/ofertas y regalos de Navidad/);
+      expect(d.length).toBeLessThanOrEqual(158);
+    }
+  });
+  it("la descripción de una prenda no habla del evento (no se sabe si esa prenda está en oferta)", () => {
+    const p = { nombre: "Remera", precio: 1_000_000, precioHasta: 1_000_000, colores: [], variantes: [], composicion: null, descripcion: null, seoDescripcion: null } as unknown as ProductoDetalle;
+    expect(descripcionProducto(p, navidad)).not.toMatch(/Navidad/);
+  });
+  it("una descripción ya armada suma la frase del evento si entra, y si no la deja como está", () => {
+    expect(descripcionConEvento("Lo último que llegó a Isuwaya.", navidad)).toBe("Lo último que llegó a Isuwaya. Ofertas y regalos de Navidad.");
+    const larga = "x".repeat(150);
+    expect(descripcionConEvento(larga, navidad)).toBe(larga);
   });
 });

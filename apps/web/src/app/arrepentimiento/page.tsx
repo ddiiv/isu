@@ -3,7 +3,11 @@ import { PaginaLegal } from "@/components/PaginaLegal";
 import { obtenerConfig } from "@/lib/api";
 import { FormArrepentimiento } from "@/components/FormArrepentimiento";
 
-export const metadata: Metadata = { title: "Botón de arrepentimiento", alternates: { canonical: "/arrepentimiento" } };
+export const metadata: Metadata = {
+  title: "Botón de arrepentimiento",
+  description: "Pedí la revocación de tu compra en Isuwaya sin registrarte y sin dar motivos: completá el formulario y te damos el código de trámite en el momento.",
+  alternates: { canonical: "/arrepentimiento" },
+};
 export const revalidate = 300;
 
 /*

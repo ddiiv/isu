@@ -4,7 +4,7 @@ import { z } from "zod";
  * Cupones y promociones por monto (backoffice). Los montos en centavos,
  * como todo en la tienda. Ver la migración 0011 y apps/api/src/lib/cupones.ts.
  */
-export const TIPOS_CUPON = ["porcentaje", "monto", "envio_gratis", "mezcla"] as const;
+export const TIPOS_CUPON = ["porcentaje", "monto", "envio_gratis", "mezcla", "segunda_unidad"] as const;
 export const ALCANCES_CUPON = ["todo", "categorias", "productos"] as const;
 export const CODIGO_CUPON = /^[A-Z0-9][A-Z0-9_-]{2,29}$/;
 
@@ -36,6 +36,8 @@ export const CuponEntrada = z.object({
   hasta: Fecha,
   usosMax: z.number().int().min(1).max(10_000_000).nullable().default(null),
   usosPorCliente: z.number().int().min(1).max(1000).nullable().default(null),
+  /** false = no se suma a la rebaja de la prenda: en cada prenda rige el mejor precio para el cliente (sólo porcentaje y 2da unidad). */
+  acumula: z.boolean().default(true),
   activo: z.boolean().default(true),
 }).strict().superRefine((c, ctx) => {
   const mal = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
@@ -51,6 +53,11 @@ export const CuponEntrada = z.object({
       if (i > 0 && t.desde <= c.escala[i - 1]!.desde) mal("escala", "Los tramos van de menor a mayor, sin repetir cantidad");
     });
   } else if (c.escala.length) mal("escala", "La escala es sólo para cupones de mezcla");
+  if (c.tipo === "segunda_unidad") {
+    if (c.valor < 1 || c.valor > 90) mal("valor", "El porcentaje de la 2da unidad va de 1 a 90");
+    if (c.tope !== null) mal("tope", "El tope es sólo para cupones de porcentaje o de mezcla");
+  }
+  if (!c.acumula && c.tipo !== "porcentaje" && c.tipo !== "segunda_unidad") mal("acumula", "«No se suma a la rebaja» es sólo para porcentaje y 2da unidad");
   if (c.tipo === "monto" && c.valor < 100) mal("valor", "El monto tiene que ser de al menos $1");
   if (c.tipo === "envio_gratis" && c.valor !== 0) mal("valor", "El envío gratis no lleva valor");
   if (c.alcance === "categorias" && !c.categoriaIds.length) mal("categoriaIds", "Elegí al menos una categoría");
@@ -63,6 +70,7 @@ export type CuponEntrada = z.infer<typeof CuponEntrada>;
 /** Cómo se lee un cupón en una línea: "15% OFF", "$5.000 OFF", "Envío gratis". */
 export function resumenCupon(c: { tipo: (typeof TIPOS_CUPON)[number]; valor: number; tope?: number | null }, pesos: (c: number) => string): string {
   if (c.tipo === "mezcla") return `Mezcla mayorista${c.tope ? `, hasta ${pesos(c.tope)} de descuento` : ""}`;
+  if (c.tipo === "segunda_unidad") return `2da unidad al ${c.valor}% OFF`;
   if (c.tipo === "porcentaje") return `${c.valor}% OFF${c.tope ? `, hasta ${pesos(c.tope)} de descuento` : ""}`;
   if (c.tipo === "monto") return `${pesos(c.valor)} OFF`;
   return "Envío gratis";

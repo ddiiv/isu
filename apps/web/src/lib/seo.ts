@@ -17,5 +17,7 @@ export function contextoSeo(config: ConfigPublica): ContextoSeo {
     descuentoTransferencia: config.descuentoTransferencia,
     // Lo que dice /devoluciones.
     diasDevolucion: 30,
+    // El evento vigente (Navidad…): sus palabras clave van a los títulos y descripciones.
+    evento: config.evento ? { nombre: config.evento.nombre } : null,
   };
 }

@@ -24,7 +24,9 @@ export function crearDescuentos(pool: pg.Pool, cache: { obtener<T>(k: string, f:
               -- una categoría de arriba incluye sus subcategorías
               COALESCE((SELECT array_agg(c.id) FROM tienda.categorias c WHERE c.id = ANY(d.categoria_ids) OR c.padre_id = ANY(d.categoria_ids)), '{}') AS categoria_ids
          FROM tienda.descuentos d
-        WHERE d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())`,
+        WHERE d.activo AND (d.desde IS NULL OR d.desde <= now()) AND (d.hasta IS NULL OR d.hasta > now())
+          -- los de un evento (Navidad…) sólo valen mientras el evento esté vigente
+          AND (d.evento_id IS NULL OR tienda.evento_vigente(d.evento_id))`,
     );
     return rows.map((r) => ({ porcentaje: r.porcentaje, hastaMs: r.hasta_ms, relampago: r.relampago, alcance: r.alcance, categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids) }));
   });

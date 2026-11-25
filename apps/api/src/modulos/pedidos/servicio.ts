@@ -166,7 +166,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
     if (medioPago === "transferencia" && !a.datosTransferencia.cbu && !a.datosTransferencia.alias) {
       throw new ErrorHttp(400, "sin_transferencia", "La transferencia todavía no está disponible. Elegí otro medio de pago.");
     }
-    const c = await cotizar(pool, datos.items, { entrega: entrega.tipo, medioPago, ajustes: a, descuentos: deps.descuentos, cupon: datos.cupon, email: contacto.email });
+    const c = await cotizar(pool, datos.items, { entrega: entrega.tipo, medioPago, ajustes: a, descuentos: deps.descuentos, cupon: datos.cupon, email: contacto.email, clienteId: ctx.clienteId });
     if (c.problemas.length) {
       throw new ErrorHttp(409, "carrito_cambio", c.problemas[0]!.mensaje, { problemas: c.problemas });
     }
@@ -226,7 +226,7 @@ export function crearServicioPedidos(deps: DepsPedidos) {
        */
       if (c.aplicado) {
         const cu = (await cli.query<{ activo: boolean; desde: Date | null; hasta: Date | null; usos: number; usos_max: number | null; usos_por_cliente: number | null }>(
-          "SELECT activo, desde, hasta, usos, usos_max, usos_por_cliente FROM tienda.cupones WHERE id = $1 FOR UPDATE", [c.aplicado.cupon.id])).rows[0];
+          "SELECT (activo AND (evento_id IS NULL OR tienda.evento_vigente(evento_id))) AS activo, desde, hasta, usos, usos_max, usos_por_cliente FROM tienda.cupones WHERE id = $1 FOR UPDATE", [c.aplicado.cupon.id])).rows[0];
         const motivo = !cu ? "Ese cupón ya no existe." : motivoNoVigente({ ...c.aplicado.cupon, activo: cu.activo, desde: cu.desde, hasta: cu.hasta, usos: cu.usos, usosMax: cu.usos_max });
         if (motivo) throw new ErrorHttp(409, "cupon", motivo, { cupon: c.aplicado.cupon.codigo });
         if (cu!.usos_por_cliente !== null) {

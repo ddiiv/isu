@@ -120,6 +120,12 @@ export const ConfigPublica = z.object({
   direcciones: z.object({ sugerencias: z.boolean(), revisar: z.boolean() }).default({ sugerencias: false, revisar: false }),
   /** Tienda apagada por el dueño (el aviso que ven los clientes). */
   tiendaCerrada: TiendaCerrada.default(TIENDA_CERRADA_DE_FABRICA),
+  /** El evento de temporada vigente (Navidad…); null = ninguno. La clave dice qué tema poner; `hasta` es cuándo termina (si tiene fecha). */
+  evento: z.object({
+    clave: z.string(), nombre: z.string(), hasta: z.string().nullable(),
+    /** Los nombres de las promociones automáticas vigentes de este evento («2da unidad al 50%»…), para la página del evento. */
+    promos: z.array(z.string()).default([]),
+  }).nullable().default(null),
 });
 export type ConfigPublica = z.infer<typeof ConfigPublica>;
 

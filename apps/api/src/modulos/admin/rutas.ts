@@ -16,6 +16,7 @@ import { iguales } from "../../lib/cripto.js";
 import { leerTiendaCerrada } from "../../lib/tienda.js";
 import { conRebaja, descuentoMaximo } from "../../lib/descuentos.js";
 import { NO_TERMINADO_DE_P } from "../productos/consultas.js";
+import { topeDelEvento } from "./eventos.js";
 import { leerAjustes } from "../pedidos/cotizar.js";
 import type { ServicioPedidos } from "../pedidos/servicio.js";
 import { ARGON_ADMIN } from "./ingreso.js";
@@ -816,7 +817,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
     const a = await exigir(pool, req, "operador");
     const r = await pool.query(
       "UPDATE tienda.descuentos SET nombre=$2, porcentaje=$3, alcance=$4, categoria_ids=$5, producto_ids=$6, desde=$7, hasta=$8, activo=$9, liquidacion=$10, temporada=$11, actualizado_en=now() WHERE id = $1 AND NOT relampago",
-      [req.params.id, ...aFila(req.body)]);
+      [req.params.id, ...aFila(req.body)]).catch((e) => { throw topeDelEvento(e); });
     if (!r.rowCount) throw new ErrorHttp(404, "no_encontrado", "No existe ese descuento.");
     await auditar(pool, a, "editar_descuento", "descuento", req.params.id, req.body, ip(req));
     await invalidar([]);
@@ -933,7 +934,7 @@ export async function rutasAdmin(app: FastifyInstance, deps: DepsAdmin) {
   }).strict();
   const AJUSTES: Record<string, z.ZodType> = {
     // hayPacks, packsEn, hayLiquidacion y liquidacionEn no se guardan: salen de los productos y los descuentos.
-    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "liquidacionTemporadas", "relampago", "direcciones"].includes(k))),
+    ...Object.fromEntries(Object.entries(ConfigPublica.shape).filter(([k]) => !["mediosPago", "hayPacks", "packsEn", "hayLiquidacion", "liquidacionEn", "liquidacionTemporadas", "relampago", "direcciones", "evento"].includes(k))),
     locales: z.array(Local).max(20),
     costoEnvio: z.number().int().min(0).max(100_000_000),
     horasPagoOnline: z.number().int().min(1).max(72),

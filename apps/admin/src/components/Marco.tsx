@@ -40,6 +40,8 @@ const ICONOS: Record<string, string> = {
   relampagos: "M13 2 4 14h7l-1 8 9-12h-7z",
   descuentos: "M5 19 19 5M7.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm9 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
   cupones: "M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4zm10 0v10",
+  eventos: "M5 5h14v15H5zM5 10h14M9 3v4m6-4v4",
+  ruleta: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 0v9l6.400 6.400M12 12H3",
   asistente: "M5 5h14v10H9l-4 4z M9 10h.01M12 10h.01M15 10h.01",
   redirecciones: "M5 12h11m-4-4 4 4-4 4M19 5v14",
   ajustes: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
@@ -74,6 +76,8 @@ const GRUPOS: Array<{ titulo: string | null; items: Item[] }> = [
     { href: "/descuentos", texto: "Descuentos", rol: "lectura", icono: "descuentos" },
     { href: "/relampagos", texto: "Relámpagos", rol: "lectura", icono: "relampagos" },
     { href: "/cupones", texto: "Cupones", rol: "lectura", icono: "cupones" },
+    { href: "/eventos", texto: "Eventos", rol: "lectura", icono: "eventos" },
+    { href: "/ruleta", texto: "Ruleta", rol: "lectura", icono: "ruleta" },
   ] },
   { titulo: "Tienda", items: [
     { href: "/asistente", texto: "Asistente", rol: "lectura", icono: "asistente" },

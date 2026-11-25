@@ -6,7 +6,7 @@ import { Migas } from "@/components/Migas";
 import { SinProductos } from "@/components/SinProductos";
 import { TextoCategoria } from "@/components/TextoCategoria";
 import { contextoSeo } from "@/lib/seo";
-import { descripcionCategoria } from "@isu/shared";
+import { descripcionCategoria, tituloConEvento } from "@isu/shared";
 
 export const revalidate = 300;
 
@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: { params: Promise<{ categoria
   const [listado, config] = await Promise.all([obtenerProductos(r.cat.slug, r.hija.slug).catch(() => null), obtenerConfig()]);
   const titulo = `${r.hija.nombre} de ${r.cat.nombre.toLowerCase()}`;
   return {
-    title: r.hija.seoTitulo || titulo,
+    title: tituloConEvento(r.hija.seoTitulo || titulo, contextoSeo(config)),
     description: r.hija.seoDescripcion || descripcionCategoria(titulo, listado?.productos ?? [], contextoSeo(config)),
     alternates: { canonical: `/${r.cat.slug}/${r.hija.slug}` },
   };

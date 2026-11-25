@@ -78,6 +78,7 @@ export function crearCarritos(d: DepsCarritos) {
           `SELECT v.sku, p.nombre, col.nombre AS color, v.talle, v.precio,
                   COALESCE((SELECT max(ds.porcentaje) FROM tienda.descuentos ds
                              WHERE ds.activo AND (ds.desde IS NULL OR ds.desde <= now()) AND (ds.hasta IS NULL OR ds.hasta > now())
+                               AND (ds.evento_id IS NULL OR tienda.evento_vigente(ds.evento_id))
                                AND (ds.alcance = 'todo' OR (ds.alcance = 'productos' AND p.id = ANY(ds.producto_ids))
                                     OR (ds.alcance = 'categorias' AND EXISTS (SELECT 1 FROM tienda.producto_categorias pc JOIN tienda.categorias ca ON ca.id = pc.categoria_id
                                                                                WHERE pc.producto_id = p.id AND (ca.id = ANY(ds.categoria_ids) OR ca.padre_id = ANY(ds.categoria_ids)))))), 0)::int AS rebaja,

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { compararTalles, esClaro, type AjustePacks, type ProductoTarjeta } from "@isu/shared/puro";
+import { compararTalles, esClaro, formatearPesos, type AjustePacks, type ProductoTarjeta } from "@isu/shared/puro";
 import { TarjetaProducto } from "./TarjetaProducto";
 import { evento, item } from "@/lib/ga";
 
@@ -16,9 +16,11 @@ type Orden = "destacados" | "precio" | "precio-desc" | "nuevos";
 const ORDENES: Array<[Orden, string]> = [["destacados", "Destacados"], ["precio", "Menor precio"], ["precio-desc", "Mayor precio"], ["nuevos", "Más nuevos"]];
 
 export function Grilla({
-  productos, lista, descuento, cuotas, filtros = true, packs, prioridad = true,
+  productos, lista, descuento, cuotas, filtros = true, packs, prioridad = true, presupuestos,
 }: {
   productos: ProductoTarjeta[]; lista: string; descuento: number; cuotas: number; filtros?: boolean; packs?: AjustePacks;
+  /** Topes de presupuesto (centavos) para ofrecer «Hasta $X» arriba de la grilla (ej.: Amigo invisible). Sólo salen los que filtran algo. */
+  presupuestos?: number[];
   /** false en las grillas de abajo del pliegue: que no le peleen la red al banner (el LCP). */
   prioridad?: boolean;
 }) {
@@ -26,6 +28,8 @@ export function Grilla({
   const [colores, setColores] = useState<string[]>([]);
   const [orden, setOrden] = useState<Orden>("destacados");
   const [soloStock, setSoloStock] = useState(false);
+  // Presupuesto elegido (centavos): el precio que se paga hoy no pasa de esto. null = sin tope.
+  const [hasta, setHasta] = useState<number | null>(null);
   const [abierto, setAbierto] = useState(false);
   // La URL se escribe recién después de leerla (si no, el estado vacío inicial la borra).
   const [leido, setLeido] = useState(false);
@@ -39,8 +43,11 @@ export function Grilla({
     const o = q.get("orden") as Orden | null;
     if (o && ORDENES.some(([v]) => v === o)) setOrden(o);
     setSoloStock(q.get("stock") === "1");
+    // En la URL va en pesos (?hasta=15000); sólo vale si es uno de los topes que ofrece la página.
+    const h = Number(q.get("hasta")) * 100;
+    if (presupuestos?.includes(h)) setHasta(h);
     setLeido(true);
-  }, []);
+  }, [presupuestos]);
 
   useEffect(() => {
     if (!filtros || !leido) return;
@@ -50,9 +57,10 @@ export function Grilla({
     poner("color", colores.join(","));
     poner("orden", orden === "destacados" ? "" : orden);
     poner("stock", soloStock ? "1" : "");
+    poner("hasta", hasta ? String(hasta / 100) : "");
     const s = q.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${s ? `?${s}` : ""}`);
-  }, [talles, colores, orden, soloStock, filtros, leido]);
+  }, [talles, colores, orden, soloStock, hasta, filtros, leido]);
 
   const opciones = useMemo(() => {
     const t = new Set<string>();
@@ -67,6 +75,7 @@ export function Grilla({
   const visibles = useMemo(() => {
     let r = productos.filter((p) =>
       (!soloStock || !p.agotado) &&
+      (hasta === null || p.precio <= hasta) &&
       (!talles.length || talles.some((t) => p.talles.includes(t))) &&
       (!colores.length || p.colores.some((c) => c.hay && colores.includes(c.clave))),
     );
@@ -74,7 +83,10 @@ export function Grilla({
     if (orden === "precio-desc") r = [...r].sort((a, b) => b.precio - a.precio);
     if (orden === "nuevos") r = [...r].sort((a, b) => b.creadoEn.localeCompare(a.creadoEn));
     return r;
-  }, [productos, talles, colores, orden, soloStock]);
+  }, [productos, talles, colores, orden, soloStock, hasta]);
+
+  // Los topes que de verdad filtran: dejan al menos una prenda y no las dejan a todas.
+  const topes = useMemo(() => (presupuestos ?? []).filter((t) => { const n = productos.filter((p) => p.precio <= t).length; return n > 0 && n < productos.length; }), [presupuestos, productos]);
 
   useEffect(() => {
     if (!productos.length) return;
@@ -82,7 +94,8 @@ export function Grilla({
   }, [productos, lista]);
 
   const alternar = (arr: string[], set: (v: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-  const activos = talles.length + colores.length + (soloStock ? 1 : 0);
+  const activos = talles.length + colores.length + (soloStock ? 1 : 0) + (hasta ? 1 : 0);
+  const limpiar = () => { setTalles([]); setColores([]); setSoloStock(false); setHasta(null); };
   const chip = (activo: boolean) =>
     `rounded-full border px-3.5 py-1.5 text-sm transition ${activo ? "border-tinta bg-tinta text-white" : "border-linea hover:border-tinta"}`;
 
@@ -90,6 +103,13 @@ export function Grilla({
     <div>
       {filtros && (
         <div className="sticky top-29 z-30 -mx-4 border-b border-linea bg-white/95 px-4 py-3 sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0">
+          {topes.length > 0 && (
+            <div role="group" aria-label="Mi presupuesto" className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-bold">Mi presupuesto</span>
+              {topes.map((t) => <button key={t} type="button" aria-pressed={hasta === t} onClick={() => setHasta(hasta === t ? null : t)} className={chip(hasta === t)}>Hasta {formatearPesos(t)}</button>)}
+              {hasta !== null && <button type="button" onClick={() => setHasta(null)} className="text-sm font-bold text-marca underline">Ver todo</button>}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <button type="button" onClick={() => setAbierto(!abierto)} aria-expanded={abierto} aria-controls="panel-filtros"
               className="inline-flex items-center gap-2 rounded-full border border-tinta px-4 py-2 text-sm font-bold">
@@ -133,7 +153,7 @@ export function Grilla({
                 Sólo con stock
               </label>
               {activos > 0 && (
-                <button type="button" onClick={() => { setTalles([]); setColores([]); setSoloStock(false); }} className="text-sm font-bold text-marca underline">
+                <button type="button" onClick={limpiar} className="text-sm font-bold text-marca underline">
                   Limpiar filtros
                 </button>
               )}
@@ -152,7 +172,7 @@ export function Grilla({
       ) : (
         <div className="mt-10 rounded-[var(--radius-foto)] border border-dashed border-linea px-6 py-14 text-center">
           <p className="font-display text-2xl">No hay prendas con esos filtros</p>
-          <button type="button" onClick={() => { setTalles([]); setColores([]); setSoloStock(false); }} className="boton-borde mt-5">Ver todo</button>
+          <button type="button" onClick={limpiar} className="boton-borde mt-5">Ver todo</button>
         </div>
       )}
     </div>

@@ -39,6 +39,7 @@ const POR_DEFECTO: ConfigPublica = {
   cifras: [],
   direcciones: { sugerencias: false, revisar: false },
   tiendaCerrada: TIENDA_CERRADA_DE_FABRICA,
+  evento: null,
 };
 
 /** Slugs de las categorías de arriba (Hombre, Mujer, Niños…) que tienen algún producto publicado que cumple `condicion`. */
@@ -96,6 +97,15 @@ export async function rutasConfig(app: FastifyInstance, deps: { db: Db; pool: pg
         WHERE ${FIN_RELAMPAGO} AND EXISTS (SELECT 1 FROM tienda.productos p WHERE p.visible AND p.en_stocker AND ${CON_STOCK} AND ${DESCUENTO_VIGENTE_DE_P})
         ORDER BY d.porcentaje DESC, d.hasta LIMIT 1`);
     salida.relampago = relampago.rows[0] ? { porcentaje: relampago.rows[0].porcentaje, hasta: relampago.rows[0].hasta.toISOString() } : null;
+    // El evento de temporada vigente (hay uno solo a la vez).
+    const evento = await deps.pool.query<{ id: number; clave: string; nombre: string; hasta: Date | null }>(
+      "SELECT id, clave, nombre, hasta FROM tienda.eventos WHERE tienda.evento_vigente(id) LIMIT 1");
+    const ev = evento.rows[0];
+    // Las promociones automáticas de ese evento que hoy valen (las mismas que aplica el carrito).
+    const promos = ev ? (await deps.pool.query<{ nombre: string }>(
+      `SELECT nombre FROM tienda.cupones WHERE evento_id = $1 AND automatico AND activo AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())
+          AND (usos_max IS NULL OR usos < usos_max) ORDER BY id`, [ev.id])).rows.map((r) => r.nombre) : [];
+    salida.evento = ev ? { clave: ev.clave, nombre: ev.nombre, hasta: ev.hasta?.toISOString() ?? null, promos } : null;
     salida.hayPacks = !!hayPacks.rowCount;
     salida.packsEn = packsEn;
     salida.hayLiquidacion = !!hayLiquidacion.rowCount;

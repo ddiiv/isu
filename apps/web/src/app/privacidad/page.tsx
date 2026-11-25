@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { PaginaLegal } from "@/components/PaginaLegal";
 
-export const metadata: Metadata = { title: "Política de privacidad", alternates: { canonical: "/privacidad" } };
+export const metadata: Metadata = {
+  title: "Política de privacidad",
+  description: "Política de privacidad de Isuwaya: qué datos recolectamos, para qué los usamos, con quién los compartimos, cuánto los guardamos y los derechos que tenés (Ley 25.326).",
+  alternates: { canonical: "/privacidad" },
+};
 
 export default function Privacidad() {
   return (

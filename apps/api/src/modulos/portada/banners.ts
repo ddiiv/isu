@@ -113,6 +113,7 @@ export async function bannersPublicos(pool: pg.Pool, desc: Descuentos): Promise<
   const { rows } = await pool.query<FilaBanner>(
     `SELECT ${COLUMNAS_BANNER} FROM tienda.banners
       WHERE activo AND (foto IS NOT NULL OR titulo IS NOT NULL) AND (desde IS NULL OR desde <= now()) AND (hasta IS NULL OR hasta > now())
+        AND (evento_id IS NULL OR tienda.evento_vigente(evento_id))
       ORDER BY orden, id LIMIT 30`,
   );
   const vars = await variablesDeBanners(pool);

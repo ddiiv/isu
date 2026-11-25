@@ -50,14 +50,14 @@ export default async function Layout({ children }: { children: React.ReactNode }
   // La primera foto es casi siempre lo más grande de la pantalla: conectarse antes al dominio de fotos.
   if (CDN_FOTOS?.startsWith("http")) preconnect(new URL(CDN_FOTOS).origin);
   return (
-    <html lang="es-AR" className={`${display.variable} ${texto.variable}`}>
+    <html lang="es-AR" className={`${display.variable} ${texto.variable}`} data-evento={config.evento?.clave}>
       <head><ConsentimientoGa /></head>
       <body>
         <a href="#contenido" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:shadow">Saltar al contenido</a>
         <ProveedorCarrito>
           <CartelRelampago relampago={config.relampago} />
           <Anuncio texto={config.anuncio} envioGratisDesde={config.envioGratisDesde} />
-          <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, hayLiquidacion: config.hayLiquidacion, fotos }} />
+          <Header categorias={categorias} menu={{ hayPacks: config.hayPacks, hayLiquidacion: config.hayLiquidacion, fotos }} evento={config.evento?.clave ?? null} />
           <main id="contenido">{children}</main>
           <OrigenYCupon />
           <Footer config={config} categorias={categorias} />

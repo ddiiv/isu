@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { maxPorcentajePack } from "@isu/shared";
+import { descripcionConEvento, maxPorcentajePack, tituloConEvento } from "@isu/shared";
 import { obtenerCategorias, obtenerConfig } from "@/lib/api";
 import { PaginaSeccion } from "@/components/PaginaSeccion";
+import { contextoSeo } from "@/lib/seo";
 
 /* /packs/hombre, /packs/mujer, /packs/ninos: los packs de una categoría de arriba (etapa 9). */
 export const revalidate = 300;
@@ -11,11 +12,13 @@ export async function generateStaticParams() { return []; }
 const categoria = async (slug: string) => (await obtenerCategorias()).find((c) => c.slug === slug);
 
 export async function generateMetadata({ params }: { params: Promise<{ categoria: string }> }): Promise<Metadata> {
-  const [c, { packs }] = await Promise.all([categoria((await params).categoria), obtenerConfig()]);
+  const [c, config] = await Promise.all([categoria((await params).categoria), obtenerConfig()]);
   if (!c) return {};
+  const { packs } = config;
+  const ctx = contextoSeo(config);
   return {
-    title: `Packs ${c.nombre}: llevá más, pagá menos`,
-    description: `Packs de ${c.nombre.toLowerCase()}: de ${packs.minimo} a ${packs.maximo} prendas con tus talles y colores, hasta ${maxPorcentajePack(packs)}% OFF en cada una.`,
+    title: tituloConEvento(`Packs ${c.nombre}: llevá más, pagá menos`, ctx),
+    description: descripcionConEvento(`Packs de ${c.nombre.toLowerCase()}: de ${packs.minimo} a ${packs.maximo} prendas con tus talles y colores, hasta ${maxPorcentajePack(packs)}% OFF en cada una.`, ctx),
     alternates: { canonical: `/packs/${c.slug}` },
   };
 }

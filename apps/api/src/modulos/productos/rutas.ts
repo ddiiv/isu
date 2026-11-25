@@ -54,7 +54,7 @@ export async function rutasProductos(app: FastifyInstance, deps: { pool: pg.Pool
           z.object({ nuevos: z.coerce.number().int().min(1).max(24) }).strict(),
           // Colecciones elegidas en el backoffice (sección del inicio y su página).
           z.object({
-            coleccion: z.enum(["nuevos", "destacados", "packs", "liquidacion", "relampago"]), limite: z.coerce.number().int().min(1).max(200).default(200),
+            coleccion: z.enum(["nuevos", "destacados", "packs", "liquidacion", "relampago", "evento"]), limite: z.coerce.number().int().min(1).max(200).default(200),
             // Etapa 9: /packs/hombre, /liquidacion/mujer (una categoría de arriba, con sus hijas).
             categoria: slug.optional(),
             // Sólo Liquidación: la de invierno o la de verano.

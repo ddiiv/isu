@@ -13,11 +13,11 @@ import { puede, useYo } from "@/components/Marco";
  * gana el que más le descuenta. Va después de la rebaja de la prenda y antes
  * del descuento por transferencia.
  */
-type Tipo = "porcentaje" | "monto" | "envio_gratis" | "mezcla";
+type Tipo = "porcentaje" | "monto" | "envio_gratis" | "mezcla" | "segunda_unidad";
 interface Tramo { desde: number; mayorista: number }
 interface Cupon {
   id?: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Tipo; valor: number;
-  alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; minimo: number; tope: number | null; escala: Tramo[]; maxMayorista: number;
+  alcance: "todo" | "categorias" | "productos"; categoriaIds: number[]; productoIds: number[]; sobreRebajas: boolean; acumula: boolean; minimo: number; tope: number | null; escala: Tramo[]; maxMayorista: number;
   desde: string | null; hasta: string | null; usosMax: number | null; usosPorCliente: number | null; activo: boolean;
   usos?: number; vigente?: boolean; creadoPor?: string; creadoEn?: string; pedidosPagados?: number; descontado?: number; vendido?: number;
 }
@@ -25,7 +25,7 @@ interface Uso { numero: string; email: string; estado: string; total: number; de
 
 const vacio: Cupon = {
   codigo: "", nombre: "", automatico: false, tipo: "porcentaje", valor: 10, alcance: "todo", categoriaIds: [], productoIds: [],
-  sobreRebajas: true, minimo: 0, tope: null, escala: [], maxMayorista: 5, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
+  sobreRebajas: true, acumula: true, minimo: 0, tope: null, escala: [], maxMayorista: 5, desde: null, hasta: null, usosMax: null, usosPorCliente: null, activo: true,
 };
 const aLocal = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const deLocal = (v: string) => (v ? new Date(v).toISOString() : null);
@@ -53,7 +53,7 @@ export default function Cupones() {
   const cuerpoDe = (c: Cupon) => ({
     automatico: c.automatico, codigo: c.automatico ? null : c.codigo?.trim().toUpperCase() || null, nombre: c.nombre, tipo: c.tipo,
     valor: c.tipo === "envio_gratis" ? 0 : c.valor, alcance: c.alcance, categoriaIds: c.categoriaIds, productoIds: c.productoIds,
-    sobreRebajas: c.sobreRebajas, minimo: c.minimo, tope: c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, escala: c.tipo === "mezcla" ? c.escala : [], maxMayorista: c.maxMayorista ?? 5, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
+    sobreRebajas: c.sobreRebajas, acumula: c.tipo === "porcentaje" || c.tipo === "segunda_unidad" ? c.acumula : true, minimo: c.minimo, tope: c.tipo === "porcentaje" || c.tipo === "mezcla" ? c.tope : null, escala: c.tipo === "mezcla" ? c.escala : [], maxMayorista: c.maxMayorista ?? 5, desde: c.desde, hasta: c.hasta, usosMax: c.usosMax, usosPorCliente: c.usosPorCliente, activo: c.activo,
   });
   async function guardar() {
     if (!f) return;
@@ -155,12 +155,12 @@ export default function Cupones() {
               </Campo>
               <div className="grid grid-cols-2 gap-3">
                 <Campo etiqueta="Descuento">
-                  <select className={claseEntrada} value={f.tipo} onChange={(e) => { const t = e.target.value as Tipo; setF({ ...f, tipo: t, valor: t === "porcentaje" ? 10 : t === "monto" ? 500_000 : 0, escala: t === "mezcla" && !f.escala.length ? [{ desde: 3, mayorista: 1 }] : f.escala }); }}>
-                    <option value="porcentaje">Porcentaje</option><option value="monto">Monto fijo</option><option value="envio_gratis">Envío gratis</option><option value="mezcla">Mezcla (prendas a precio mayorista)</option>
+                  <select className={claseEntrada} value={f.tipo} onChange={(e) => { const t = e.target.value as Tipo; setF({ ...f, tipo: t, valor: t === "porcentaje" ? 10 : t === "segunda_unidad" ? 50 : t === "monto" ? 500_000 : 0, acumula: t === "porcentaje" || t === "segunda_unidad" ? f.acumula : true, escala: t === "mezcla" && !f.escala.length ? [{ desde: 3, mayorista: 1 }] : f.escala }); }}>
+                    <option value="porcentaje">Porcentaje</option><option value="monto">Monto fijo</option><option value="envio_gratis">Envío gratis</option><option value="mezcla">Mezcla (prendas a precio mayorista)</option><option value="segunda_unidad">2da unidad con descuento</option>
                   </select>
                 </Campo>
-                {f.tipo === "porcentaje" && (
-                  <Campo etiqueta="Porcentaje" error={err("valor")}>
+                {(f.tipo === "porcentaje" || f.tipo === "segunda_unidad") && (
+                  <Campo etiqueta={f.tipo === "segunda_unidad" ? "Descuento en la 2da unidad" : "Porcentaje"} error={err("valor")}>
                     <span className="relative block"><input type="number" min={1} max={90} className={`${claseEntrada} pr-8`} value={f.valor} aria-invalid={!!err("valor")}
                       onChange={(e) => setF({ ...f, valor: Math.max(0, Math.min(90, Math.trunc(Number(e.target.value)) || 0)) })} />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-tinta-tenue">%</span></span>
@@ -168,6 +168,11 @@ export default function Cupones() {
                 )}
                 {f.tipo === "monto" && <Campo etiqueta="Monto" error={err("valor")}><EntradaPesos valor={f.valor} onChange={(v) => setF({ ...f, valor: v ?? 0 })} /></Campo>}
               </div>
+              {f.tipo === "segunda_unidad" && <p className="text-xs text-tinta-tenue">Entre cualquier prenda del carrito: se arman pares de a dos, de la más cara a la más barata, y la más barata de cada par lleva el descuento. Nunca baja una prenda del precio mayorista.</p>}
+              {(f.tipo === "porcentaje" || f.tipo === "segunda_unidad") && (
+                <Casilla etiqueta="No se suma a la rebaja de la prenda" marcada={!f.acumula} onChange={(v) => setF({ ...f, acumula: !v })}
+                  ayuda="En cada prenda rige el mejor precio para el cliente (el de la rebaja o el de esta promoción), nunca los dos. Es lo que usa Navidad." />
+              )}
               {f.tipo === "envio_gratis" && <p className="text-xs text-tinta-tenue">Deja el envío en $0 con cualquier transporte, salvo Mercado Envíos (lo cobra Mercado Pago en su checkout).</p>}
               <Campo etiqueta="Compra mínima" ayuda="Sobre el total de productos ya rebajados. Vacío = sin mínimo." error={err("minimo")}>
                 <EntradaPesos valor={f.minimo || null} onChange={(v) => setF({ ...f, minimo: v ?? 0 })} />

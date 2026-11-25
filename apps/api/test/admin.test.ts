@@ -16,6 +16,7 @@ import { ARGON_ADMIN } from "../src/modulos/admin/ingreso.js";
 import { firmaOpinar } from "@isu/envios";
 import { BANNERS_SUGERIDOS, MEDIOS_PAGO } from "@isu/shared";
 import { armarBanner } from "../src/modulos/portada/banners.js";
+import { promocionesVigentes } from "../src/lib/cupones.js";
 import { almacenDeComprobantes } from "@isu/almacen";
 
 /*
@@ -104,6 +105,12 @@ const limpiar = async () => {
   await pool.query("DELETE FROM tienda.categorias WHERE slug LIKE 'qa-adm%'");
   await pool.query("DELETE FROM tienda.redirecciones WHERE desde LIKE '/qa-adm%'");
   await pool.query("DELETE FROM tienda.banners WHERE alt LIKE 'QA adm%'");
+  // Los eventos de verdad (Navidad…) quedan apagados y sin fechas; los de prueba se borran.
+  await pool.query("UPDATE tienda.eventos SET activo = false, desde = NULL, hasta = NULL WHERE clave NOT LIKE 'qa-adm%'");
+  await pool.query("DELETE FROM tienda.eventos WHERE clave LIKE 'qa-adm%'");
+  // Ruleta: las cuentas de prueba (se llevan sus giros y cupones personales) y la ruleta como la deja la migración.
+  await pool.query("DELETE FROM tienda.clientes WHERE email LIKE 'qa-adm-ruleta%'");
+  await pool.query("UPDATE tienda.ruleta SET manual = false, con_eventos = true, cada_dias = 7, vence_dias = 30");
   await pool.query("DELETE FROM tienda.transferencias_recibidas WHERE externo LIKE 'qa-adm-%'");
 };
 
@@ -1607,5 +1614,283 @@ describe("guías de talles con Excel (etapa 10)", () => {
     const hojas = leerXlsx(x.rawPayload);
     expect(hojas.find((h) => h.nombre === "QA Excel nueva")?.filas).toEqual([["Medida", "1", "2", "3 (L)"], ["Ancho muslo", 26, "27,5", "28-29"], ["Bota", "-", 20, 21]]);
     await pool.query("DELETE FROM tienda.guias_talles WHERE nombre = 'QA Excel nueva'");
+  });
+});
+
+describe("eventos de temporada (0032)", () => {
+  const en = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
+  const evento = (cambios: object, token = operador) => req("PUT", "/v1/admin/eventos/navidad", token, cambios);
+  const ficha = async () => (await app.inject("/v1/productos/qa-adm-3")).json();
+  const config = async () => (await app.inject("/v1/config")).json();
+  const hayBanner = async () => (await app.inject("/v1/portada")).json().banners.some((b: { titulo: string | null }) => b.titulo === "QA adm evento");
+  const hayPromo = async () => (await promocionesVigentes(pool)).some((c) => c.nombre === "QA adm promo evento");
+
+  it("sólo el backoffice los ve y los cambia: sin sesión 401, lectura no cambia nada, un evento que no existe 404", async () => {
+    expect((await req("GET", "/v1/admin/eventos")).statusCode).toBe(401);
+    expect((await req("PUT", "/v1/admin/eventos/navidad", undefined, { activo: true })).statusCode).toBe(401);
+    expect((await req("PUT", "/v1/admin/eventos/navidad/vinculos", undefined, {})).statusCode).toBe(401);
+    const lista = await req("GET", "/v1/admin/eventos", lectura2);
+    expect(lista.statusCode).toBe(200);
+    expect(lista.json().eventos.find((e: { clave: string }) => e.clave === "navidad")).toMatchObject({ activo: false, vigente: false });
+    expect((await evento({ activo: true }, lectura2)).statusCode).toBe(403);
+    expect((await req("PUT", "/v1/admin/eventos/navidad/vinculos", lectura2, {})).statusCode).toBe(403);
+    expect((await req("PUT", "/v1/admin/eventos/no-existe", operador, { activo: true })).statusCode).toBe(404);
+    expect((await app.inject("/v1/config")).json().evento).toBeNull();
+  });
+
+  it("banners de Navidad (0034): vienen atados al evento, salen primeros al prenderlo y se van al apagarlo", async () => {
+    const titulos = async () => (await app.inject("/v1/portada")).json().banners.map((b: { titulo: string | null }) => b.titulo);
+    const suyos = ["Navidad en Isuwaya", "2da unidad al 50% OFF", "10% OFF en compras de más de $120.000"];
+    for (const t of suyos) expect(await titulos()).not.toContain(t);
+    expect((await evento({ activo: true })).statusCode).toBe(200);
+    const prendido = await titulos();
+    for (const t of suyos) expect(prendido).toContain(t);
+    // Primero el de Navidad, y los otros después (orden de Portada).
+    expect(prendido.indexOf("Navidad en Isuwaya")).toBeLessThan(prendido.indexOf("2da unidad al 50% OFF"));
+    expect((await evento({ activo: false })).statusCode).toBe(200);
+    for (const t of suyos) expect(await titulos()).not.toContain(t);
+  });
+
+  it("descuento, promoción y banner atados a Navidad: nada hasta prenderla, todo junto al prenderla, y todo se va al apagarla", async () => {
+    const d = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm navidad 25", porcentaje: 25, alcance: "productos", productoIds: [ids["qa-adm-3"]] });
+    const c = await req("POST", "/v1/admin/cupones", operador, { automatico: true, nombre: "QA adm promo evento", tipo: "porcentaje", valor: 10 });
+    const b = await req("POST", "/v1/admin/banners", operador, { alt: "QA adm evento", titulo: "QA adm evento", orden: -100 });
+    expect([d.statusCode, c.statusCode, b.statusCode], d.body + c.body + b.body).toEqual([201, 201, 200]);
+    // Sin atar al evento, el descuento y la promo valen como siempre.
+    expect((await ficha()).descuento).toBe(25);
+    expect(await hayPromo()).toBe(true);
+    expect(await hayBanner()).toBe(true);
+
+    const vinc = await req("PUT", "/v1/admin/eventos/navidad/vinculos", operador, { descuentos: [d.json().id], cupones: [c.json().id], banners: [b.json().banner.id] });
+    expect(vinc.statusCode, vinc.body).toBe(200);
+    // Atados y el evento apagado: la tienda queda como si no existieran.
+    expect((await ficha()).descuento).toBeNull();
+    expect(await hayPromo()).toBe(false);
+    expect(await hayBanner()).toBe(false);
+    expect((await config()).evento).toBeNull();
+    const lista = (await req("GET", "/v1/admin/eventos", operador)).json();
+    expect(lista.eventos.find((e: { clave: string }) => e.clave === "navidad")).toMatchObject({ descuentos: 1, cupones: 1, banners: 1, vigente: false });
+    expect(lista.disponibles.descuentos.find((x: { id: number }) => x.id === d.json().id).evento).toBe("navidad");
+
+    // Se prende: todo junto.
+    expect((await evento({ activo: true })).statusCode).toBe(200);
+    expect((await ficha()).descuento).toBe(25);
+    expect(await hayPromo()).toBe(true);
+    expect(await hayBanner()).toBe(true);
+    expect((await config()).evento).toMatchObject({ clave: "navidad", nombre: "Navidad", hasta: null });
+
+    // Con fecha de fin vencida el evento deja de estar vigente aunque siga prendido.
+    expect((await evento({ activo: true, desde: en(-48), hasta: en(-1) })).statusCode).toBe(200);
+    expect((await ficha()).descuento).toBeNull();
+    expect((await config()).evento).toBeNull();
+    // Programado para más adelante: tampoco.
+    expect((await evento({ activo: true, desde: en(24), hasta: en(48) })).statusCode).toBe(200);
+    expect(await hayBanner()).toBe(false);
+    // Fechas al revés: no se aceptan.
+    expect((await evento({ activo: true, desde: en(10), hasta: en(5) })).statusCode).toBe(400);
+
+    // En curso con fecha de fin: la tienda la informa.
+    const fin = en(48);
+    expect((await evento({ activo: true, hasta: fin })).statusCode).toBe(200);
+    expect((await config()).evento).toMatchObject({ clave: "navidad", nombre: "Navidad", hasta: fin });
+
+    // Se apaga: vuelve todo a la normalidad.
+    expect((await evento({ activo: false })).statusCode).toBe(200);
+    expect((await ficha()).descuento).toBeNull();
+    expect(await hayPromo()).toBe(false);
+    expect(await hayBanner()).toBe(false);
+
+    // Soltar los vínculos devuelve las filas a funcionar solas.
+    await req("PUT", "/v1/admin/eventos/navidad/vinculos", operador, { descuentos: [], cupones: [], banners: [] });
+    expect((await ficha()).descuento).toBe(25);
+    expect(await hayPromo()).toBe(true);
+    // Y todo quedó en la auditoría.
+    const acciones = (await pool.query("SELECT accion FROM tienda.auditoria WHERE entidad = 'evento' AND entidad_id = 'navidad' AND actor = 'qa-adm-op@test.com'")).rows.map((r) => r.accion);
+    expect(acciones).toEqual(expect.arrayContaining(["prender_evento", "apagar_evento", "vincular_evento"]));
+  });
+
+  it("un descuento relámpago o un id que no existe no se pueden atar; y hay un solo evento activo a la vez", async () => {
+    const r = await req("POST", "/v1/admin/relampagos", operador, { nombre: "QA adm relámpago evento", porcentaje: 10, productoIds: [ids["qa-adm-3"]], hasta: en(5) });
+    expect(r.statusCode, r.body).toBe(201);
+    expect((await req("PUT", "/v1/admin/eventos/navidad/vinculos", operador, { descuentos: [r.json().id] })).statusCode).toBe(400);
+    expect((await req("PUT", "/v1/admin/eventos/navidad/vinculos", operador, { cupones: [2_000_000_000] })).statusCode).toBe(400);
+
+    await pool.query("INSERT INTO tienda.eventos (clave, nombre) VALUES ('qa-adm-cupido', 'QA Cupido')");
+    expect((await evento({ activo: true })).statusCode).toBe(200);
+    expect((await req("PUT", "/v1/admin/eventos/qa-adm-cupido", operador, { activo: true })).statusCode).toBe(200);
+    const activos = (await req("GET", "/v1/admin/eventos", operador)).json().eventos.filter((e: { activo: boolean }) => e.activo).map((e: { clave: string }) => e.clave);
+    expect(activos).toEqual(["qa-adm-cupido"]);
+    expect((await config()).evento).toMatchObject({ clave: "qa-adm-cupido" });
+  });
+  it("promos de Navidad: tope de 25 % por descuento, 2da unidad al 50 % y nunca se suma a la rebaja de la prenda", async () => {
+    await pool.query("DELETE FROM tienda.descuentos WHERE nombre LIKE 'QA adm navidad%' OR nombre = 'QA adm relámpago evento'");
+    await pool.query("DELETE FROM tienda.cupones WHERE nombre LIKE 'QA adm%'");   // las promos de pruebas anteriores no se mezclan con las de Navidad
+    const carro = async (items: Array<{ sku: string; cantidad: number }>) => (await app.inject({ method: "POST", url: "/v1/carrito", payload: { items, medioPago: "mercadopago" } })).json();
+    // Las dos promos de Navidad vienen atadas de la migración; el test anterior las soltó, así que se vuelven a atar.
+    const promos = (await pool.query<{ id: number }>("SELECT id FROM tienda.cupones WHERE creado_por = 'migracion 0033'")).rows.map((r) => r.id);
+    expect(promos).toHaveLength(2);
+    const vincular = (descuentos: number[]) => req("PUT", "/v1/admin/eventos/navidad/vinculos", operador, { descuentos, cupones: promos });
+    const joggers = [{ sku: "QA-ADM-2-1", cantidad: 1 }, { sku: "QA-ADM-2-2", cantidad: 1 }];   // 2 × $20.000, mayorista $8.000
+    expect((await req("GET", "/v1/admin/eventos", operador)).json().eventos.find((e: { clave: string }) => e.clave === "navidad").descuentoMax).toBe(25);
+
+    // El tope lo hace cumplir la base: ni atando uno de 30 %, ni subiéndole el % a uno ya atado.
+    const alto = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm navidad 30", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-3"]] });
+    const v = await vincular([alto.json().id]);
+    expect([v.statusCode, v.json().error]).toEqual([400, "tope_evento"]);
+    await req("DELETE", `/v1/admin/descuentos/${alto.json().id}`, operador);   // sin atar, el de 30 % valdría siempre
+    const bien = await req("POST", "/v1/admin/descuentos", operador, { nombre: "QA adm navidad 25", porcentaje: 25, alcance: "productos", productoIds: [ids["qa-adm-3"]] });
+    expect((await vincular([bien.json().id])).statusCode).toBe(200);
+    const sube = await req("PUT", `/v1/admin/descuentos/${bien.json().id}`, operador, { nombre: "QA adm navidad 25", porcentaje: 30, alcance: "productos", productoIds: [ids["qa-adm-3"]] });
+    expect([sube.statusCode, sube.json().error]).toEqual([400, "tope_evento"]);
+
+    // Con el evento apagado, las promos de Navidad (cargadas por la migración) no existen para el cliente.
+    expect((await evento({ activo: false })).statusCode).toBe(200);
+    let c = await carro(joggers);
+    expect([c.descuentoCupon, c.cupon]).toEqual([0, null]);
+    // Prendido: la 2da unidad al 50 % entre cualquier prenda (el piso mayorista deja $12.000 de margen, alcanza para los $10.000).
+    expect((await evento({ activo: true })).statusCode).toBe(200);
+    c = await carro(joggers);
+    expect([c.subtotal, c.descuentoCupon, c.total, c.cupon.nombre]).toEqual([4_000_000, 1_000_000, 3_000_000, "2da unidad al 50%"]);
+    // La campera ($50.000, mayorista $20.000) con el 25 % de Navidad queda en $37.500. La 2da unidad NO se suma: la 2da baja de
+    // $37.500 a $25.000 (el 50 % de la lista), o sea $12.500 menos; no el 50 % sobre $37.500.
+    c = await carro([{ sku: "QA-ADM-3-1", cantidad: 2 }]);
+    expect([c.lineas[0].precio, c.subtotal, c.descuentoCupon, c.total]).toEqual([3_750_000, 7_500_000, 1_250_000, 6_250_000]);
+  });
+  it("Amigo invisible: la colección «evento» trae sólo las prendas con un descuento de Navidad vigente, y la config lista las promos del evento", async () => {
+    // El test anterior dejó Navidad prendida y el 25 % atado a la campera.
+    const slugs = async () => (await app.inject("/v1/productos?coleccion=evento")).json().productos.map((x: { slug: string }) => x.slug);
+    expect(await slugs()).toEqual(["qa-adm-3"]);
+    expect((await config()).evento.promos).toEqual(["10% OFF en compras de más de $120.000", "2da unidad al 50%"]);
+    // Apagada: la colección queda vacía y la config no trae evento (la página da 404 y nada la enlaza).
+    expect((await evento({ activo: false })).statusCode).toBe(200);
+    expect(await slugs()).toEqual([]);
+    expect((await config()).evento).toBeNull();
+  });
+});
+
+describe("ruleta (0037)", () => {
+  const sesion = (method: "GET" | "POST", url: string, token?: string, payload?: unknown) =>
+    app.inject({ method, url, headers: { ...IP, ...(token ? { "x-isu-sesion": token } : {}) }, ...(payload !== undefined ? { payload: payload as object } : {}) });
+  const registrar = async (n: string) => {
+    const r = await app.inject({ method: "POST", url: "/v1/cuenta/registro", headers: IP, payload: { email: `qa-adm-ruleta-${n}@test.com`, contrasena: "una-clave-larga-1", nombre: "Ruleta", apellido: `Prueba ${n}` } });
+    expect(r.statusCode, r.body).toBe(201);
+    return r.json().token as string;
+  };
+  const premios = (lista: Array<{ etiqueta: string; tipo: string; valor: number; peso: number; minimo?: number }>) =>
+    req("PUT", "/v1/admin/ruleta/premios", operador, { premios: lista.map((p) => ({ minimo: 0, activo: true, ...p })) });
+  const config = (c: Partial<{ manual: boolean; conEventos: boolean; cadaDias: number; venceDias: number }>) =>
+    req("PUT", "/v1/admin/ruleta", operador, { manual: false, conEventos: true, cadaDias: 7, venceDias: 30, ...c });
+  const carro = async (token: string | undefined, cupon: string, cantidad = 2) => (await sesion("POST", "/v1/carrito", token, { items: [{ sku: "QA-ADM-2-1", cantidad }], medioPago: "mercadopago", cupon })).json();
+  const atras = (token: string, dias: number) => pool.query("UPDATE tienda.ruleta_giros SET creado_en = now() - make_interval(days => $1) WHERE cliente_id = (SELECT cliente_id FROM tienda.sesiones WHERE id = encode(sha256($2::bytea), 'hex'))", [dias, token]);
+  const SOLO_10 = [{ etiqueta: "10% OFF", tipo: "porcentaje", valor: 10, peso: 100 }, { etiqueta: "Sin suerte", tipo: "nada", valor: 0, peso: 0 }];
+  let original: Array<Record<string, unknown>> = [];
+  let a = "", b = "";
+
+  beforeAll(async () => {
+    original = (await req("GET", "/v1/admin/ruleta", operador)).json().premios.map((p: Record<string, unknown>) => ({ id: p.id, etiqueta: p.etiqueta, tipo: p.tipo, valor: p.valor, minimo: p.minimo, peso: p.peso, activo: p.activo }));
+    expect(original.length).toBeGreaterThanOrEqual(8);
+  });
+  afterAll(async () => {
+    await req("PUT", "/v1/admin/ruleta/premios", operador, { premios: original });
+    await config({});
+    await req("PUT", "/v1/admin/eventos/navidad", operador, { activo: false });
+  });
+
+  it("sólo la cuenta ve y gira SU ruleta; el backoffice pide sesión y rol", async () => {
+    for (const r of [await sesion("GET", "/v1/cuenta/ruleta"), await sesion("POST", "/v1/cuenta/ruleta/girar")]) expect(r.statusCode).toBe(401);
+    // La sesión del backoffice no sirve para la cuenta, ni la de una cuenta para el backoffice.
+    expect((await app.inject({ method: "GET", url: "/v1/cuenta/ruleta", headers: { ...IP, "x-isu-admin": operador } })).statusCode).toBe(401);
+    a = await registrar("a");
+    expect((await sesion("GET", "/v1/admin/ruleta", a)).statusCode).toBe(401);
+    expect((await sesion("GET", "/v1/cuenta/ruleta", a)).statusCode).toBe(200);
+    expect((await req("GET", "/v1/admin/ruleta")).statusCode).toBe(401);
+    expect((await req("GET", "/v1/admin/ruleta", lectura2)).statusCode).toBe(200);
+    expect((await req("PUT", "/v1/admin/ruleta", lectura2, { manual: true, conEventos: true, cadaDias: 7, venceDias: 30 })).statusCode).toBe(403);
+    expect((await req("PUT", "/v1/admin/ruleta/premios", lectura2, { premios: SOLO_10.map((p) => ({ minimo: 0, activo: true, ...p })) })).statusCode).toBe(403);
+    // Valores inválidos: no se aceptan.
+    expect((await req("PUT", "/v1/admin/ruleta", operador, { manual: true, conEventos: true, cadaDias: 0, venceDias: 30 })).statusCode).toBe(400);
+    expect((await premios([{ etiqueta: "x", tipo: "porcentaje", valor: 0, peso: 10 }, { etiqueta: "Nada", tipo: "nada", valor: 0, peso: 10 }])).statusCode).toBe(400);
+    expect((await premios([{ etiqueta: "Sólo nada", tipo: "nada", valor: 0, peso: 0 }, { etiqueta: "Nada 2", tipo: "nada", valor: 0, peso: 0 }])).statusCode).toBe(400);
+  });
+
+  it("apagada (sin evento ni activación a mano) no deja girar", async () => {
+    expect((await config({})).statusCode).toBe(200);
+    const e = (await sesion("GET", "/v1/cuenta/ruleta", a)).json();
+    expect([e.disponible, e.motivo]).toEqual([false, "apagada"]);
+    const g = await sesion("POST", "/v1/cuenta/ruleta/girar", a);
+    expect([g.statusCode, g.json().error]).toEqual([409, "ruleta_apagada"]);
+  });
+
+  it("prendida a mano: el sorteo es del servidor, el cupón es personal y de un solo uso, y se gira una vez por semana", async () => {
+    expect((await premios(SOLO_10)).statusCode).toBe(200);
+    expect((await config({ manual: true })).statusCode).toBe(200);
+    b = await registrar("b");
+    const g = await sesion("POST", "/v1/cuenta/ruleta/girar", a);
+    expect(g.statusCode, g.body).toBe(200);
+    const r = g.json();
+    expect([r.premio.etiqueta, r.indice]).toEqual(["10% OFF", 0]);
+    expect(r.cupon.codigo).toMatch(/^RULETA-[A-Z0-9]{8}$/);
+    const fila = (await pool.query("SELECT c.tipo, c.valor, c.usos_max, c.acumula, c.evento_id, c.hasta, c.cliente_id, cl.email FROM tienda.cupones c JOIN tienda.clientes cl ON cl.id = c.cliente_id WHERE c.codigo = $1", [r.cupon.codigo])).rows[0];
+    expect(fila).toMatchObject({ tipo: "porcentaje", valor: 10, usos_max: 1, acumula: false, evento_id: null, email: "qa-adm-ruleta-a@test.com" });
+    expect(Math.round((new Date(fila.hasta).getTime() - Date.now()) / 86_400_000)).toBe(30);
+
+    // Una vez por semana: el segundo giro inmediato se rechaza y dice cuándo.
+    const otra = await sesion("POST", "/v1/cuenta/ruleta/girar", a);
+    expect([otra.statusCode, otra.json().error]).toEqual([409, "ruleta_espera"]);
+    expect(otra.json().proximoGiro).toBeTruthy();
+    const e = (await sesion("GET", "/v1/cuenta/ruleta", a)).json();
+    expect([e.disponible, e.motivo, e.cupones.map((c: { codigo: string }) => c.codigo)]).toEqual([false, "espera", [r.cupon.codigo]]);
+    // Los cupones de A no aparecen en la cuenta de B.
+    expect((await sesion("GET", "/v1/cuenta/ruleta", b)).json().cupones).toEqual([]);
+
+    // Sólo A lo puede usar: B y un invitado no.
+    const deA = await carro(a, r.cupon.codigo);
+    expect([deA.descuentoCupon, deA.cupon?.codigo]).toEqual([400_000, r.cupon.codigo]);
+    expect((await carro(b, r.cupon.codigo)).avisoCupon).toBe("Ese cupón no existe. Revisá que esté bien escrito.");
+    expect((await carro(undefined, r.cupon.codigo)).avisoCupon).toBe("Ingresá a tu cuenta para usar este cupón.");
+
+    // Pasada la semana vuelve a girar.
+    await atras(a, 8);
+    expect((await sesion("POST", "/v1/cuenta/ruleta/girar", a)).statusCode).toBe(200);
+    expect((await sesion("GET", "/v1/cuenta/ruleta", a)).json().cupones).toHaveLength(2);
+  });
+
+  it("un premio «sin premio» no genera cupón pero gasta el giro", async () => {
+    expect((await premios([{ etiqueta: "Casi ganás", tipo: "nada", valor: 0, peso: 100 }, { etiqueta: "10% OFF", tipo: "porcentaje", valor: 10, peso: 0 }])).statusCode).toBe(200);
+    await atras(a, 8);
+    const antes = (await pool.query("SELECT count(*)::int AS n FROM tienda.cupones WHERE creado_por = 'ruleta' AND cliente_id IS NOT NULL AND codigo LIKE 'RULETA-%' AND cliente_id = (SELECT id FROM tienda.clientes WHERE email = 'qa-adm-ruleta-a@test.com')")).rows[0].n;
+    const g = await sesion("POST", "/v1/cuenta/ruleta/girar", a);
+    expect([g.json().premio.etiqueta, g.json().cupon]).toEqual(["Casi ganás", null]);
+    const despues = (await pool.query("SELECT count(*)::int AS n FROM tienda.cupones WHERE creado_por = 'ruleta' AND cliente_id = (SELECT id FROM tienda.clientes WHERE email = 'qa-adm-ruleta-a@test.com')")).rows[0].n;
+    expect(despues).toBe(antes);
+    expect((await sesion("POST", "/v1/cuenta/ruleta/girar", a)).statusCode).toBe(409);
+  });
+
+  it("en un evento aparece sola y el cupón queda atado a él: se va cuando el evento se apaga", async () => {
+    expect((await premios(SOLO_10)).statusCode).toBe(200);
+    expect((await config({ manual: false })).statusCode).toBe(200);
+    expect((await sesion("GET", "/v1/cuenta/ruleta", b)).json().disponible).toBe(false);
+    expect((await req("PUT", "/v1/admin/eventos/navidad", operador, { activo: true, hasta: new Date(Date.now() + 3 * 86_400_000).toISOString() })).statusCode).toBe(200);
+    const e = (await sesion("GET", "/v1/cuenta/ruleta", b)).json();
+    expect([e.disponible, e.evento]).toEqual([true, "Navidad"]);
+    const g = (await sesion("POST", "/v1/cuenta/ruleta/girar", b)).json();
+    const fila = (await pool.query("SELECT c.evento_id, c.hasta FROM tienda.cupones c WHERE c.codigo = $1", [g.cupon.codigo])).rows[0];
+    expect(fila.evento_id).not.toBeNull();
+    // Dura lo que queda del evento (3 días), no los 30 de la ruleta.
+    expect(Math.round((new Date(fila.hasta).getTime() - Date.now()) / 86_400_000)).toBe(3);
+    // (Con 1 prenda: con 2, la promo «2da unidad al 50%» del evento descuenta más y rige ella: uno solo por compra.)
+    expect((await carro(b, g.cupon.codigo, 1)).descuentoCupon).toBe(200_000);
+    expect((await carro(b, g.cupon.codigo)).cupon.nombre).toBe("2da unidad al 50%");
+    // Se apaga el evento: la ruleta se cierra y el cupón deja de valer.
+    expect((await req("PUT", "/v1/admin/eventos/navidad", operador, { activo: false })).statusCode).toBe(200);
+    expect((await sesion("GET", "/v1/cuenta/ruleta", b)).json()).toMatchObject({ disponible: false, motivo: "apagada", cupones: [] });
+    expect((await carro(b, g.cupon.codigo)).avisoCupon).toBe("Ese cupón ya no está vigente.");
+  });
+
+  it("el sorteo respeta los pesos (con una fuente de azar fija) y nunca elige un premio de peso 0", async () => {
+    const { elegirPremio } = await import("../src/lib/ruleta.js");
+    const ps = [{ id: 1, etiqueta: "A", tipo: "porcentaje" as const, valor: 5, minimo: 0, peso: 70 }, { id: 2, etiqueta: "B", tipo: "nada" as const, valor: 0, minimo: 0, peso: 30 }];
+    expect([0, 69, 70, 99].map((x) => elegirPremio(ps, () => x).premio.etiqueta)).toEqual(["A", "A", "B", "B"]);
+    expect(() => elegirPremio([{ ...ps[0]!, peso: 0 }], () => 0)).toThrow();
   });
 });

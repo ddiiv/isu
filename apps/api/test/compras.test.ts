@@ -806,6 +806,20 @@ describe("cupones", () => {
     expect((await carrito({})).descuentoCupon).toBe(200_000);
   });
 
+  it("la transferencia va siempre al final: su % se calcula sobre lo que queda después de la rebaja de la prenda y del cupón", async () => {
+    const trans = (extra: Record<string, unknown> = {}) => carrito({ medioPago: "transferencia", ...extra });
+    // 2 × $10.000 (mayorista $6.000). Sin ningún descuento: 20 % de $20.000.
+    expect((await trans()).descuento).toBe(400_000);
+    // Rebaja de la prenda 20 % → $16.000; la transferencia (20 %) es sobre $16.000, no sobre $20.000.
+    await pool.query("INSERT INTO tienda.descuentos (nombre, porcentaje, alcance, creado_por) VALUES ('QA rebaja', 20, 'todo', 'qa')");
+    const r = await trans();
+    expect([r.subtotal, r.descuento, r.total]).toEqual([1_600_000, 320_000, 1_280_000]);
+    // Más un cupón de 5 % (sobre $8.000 c/u = $400): quedan $15.200 y la transferencia es el 20 % de eso.
+    await cupon({ codigo: "QATRANS5", valor: 5 });
+    const c = await trans({ cupon: "QATRANS5" });
+    expect([c.descuentoCupon, c.descuento, c.total]).toEqual([80_000, 304_000, 1_216_000]);
+  });
+
   it("porcentaje: se aplica sobre el precio (mayúsculas y espacios no importan); uno que no existe avisa y no cambia nada", async () => {
     await cupon({ codigo: "QA10" });
     const c = await carrito({ cupon: " qa10 " });

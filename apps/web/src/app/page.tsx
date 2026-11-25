@@ -20,8 +20,11 @@ export const revalidate = 300;
 /* Lo que se lee debajo de «Isuwaya» en Google: qué es, para quién y las condiciones de hoy. */
 export async function generateMetadata(): Promise<Metadata> {
   const [config, categorias] = await Promise.all([obtenerConfig(), obtenerCategorias()]);
-  const description = descripcionInicio(categorias.map((c) => c.nombre), contextoSeo(config));
-  return { description, openGraph: { description } };
+  const ctx = contextoSeo(config);
+  const description = descripcionInicio(categorias.map((c) => c.nombre), ctx);
+  // Con un evento vigente, el título del inicio suma sus palabras clave (sin pasar de lo que Google muestra).
+  const title = config.evento ? { absolute: `${SITIO.nombre} · Ropa urbana y casual · Ofertas de ${config.evento.nombre}` } : undefined;
+  return { ...(title ? { title } : {}), description, openGraph: { description } };
 }
 
 const FONDOS = ["bg-marca", "bg-tinta", "bg-ahorro"];

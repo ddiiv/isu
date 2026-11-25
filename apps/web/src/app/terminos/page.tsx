@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PaginaLegal } from "@/components/PaginaLegal";
 
-export const metadata: Metadata = { title: "Términos y condiciones", alternates: { canonical: "/terminos" } };
+export const metadata: Metadata = {
+  title: "Términos y condiciones",
+  description: "Términos y condiciones de compra en Isuwaya: precios y stock, medios de pago, envíos y retiro, cambios, devoluciones y arrepentimiento, y tu cuenta.",
+  alternates: { canonical: "/terminos" },
+};
 
 export default function Terminos() {
   return (

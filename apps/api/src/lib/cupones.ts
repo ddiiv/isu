@@ -7,6 +7,8 @@ import { centavos, conDescuento, formatearPesos } from "@isu/shared";
  * Reglas:
  *   · se calcula sobre el precio que ya tiene la rebaja de la prenda; el
  *     descuento por transferencia va después, sobre lo que queda
+ *   · un cupón que NO acumula (Navidad…) no se suma a la rebaja de la prenda: en cada prenda rige el mejor precio
+ *     para el cliente (el cupón se calcula sobre el precio de lista y sólo cuenta lo que mejora la rebaja)
  *   · UNO por compra: entre el cupón que escribió el cliente y las
  *     promociones automáticas, el que más le descuenta (no se suman)
  *   · el descuento se reparte por unidad (redondeado al peso hacia abajo):
@@ -20,13 +22,15 @@ export interface Cupon {
   codigo: string | null;
   nombre: string;
   automatico: boolean;
-  tipo: "porcentaje" | "monto" | "envio_gratis" | "mezcla";
+  tipo: "porcentaje" | "monto" | "envio_gratis" | "mezcla" | "segunda_unidad";
   valor: number;
   alcance: "todo" | "categorias" | "productos";
   /** ids de categoría, con las subcategorías de las elegidas ya sumadas */
   categorias: Set<number>;
   productos: Set<number>;
   sobreRebajas: boolean;
+  /** false = no se suma a la rebaja de la prenda: en cada prenda rige el mejor precio para el cliente */
+  acumula: boolean;
   minimo: number;
   /** porcentaje: el descuento no pasa de esto (centavos); null = sin tope */
   tope: number | null;
@@ -34,6 +38,8 @@ export interface Cupon {
   escala: Array<{ desde: number; mayorista: number }>;
   /** mezcla: máximo de prendas a mayorista por compra */
   maxMayorista: number;
+  /** cupón personal (ruleta): sólo lo puede usar esa cuenta; null = de cualquiera */
+  clienteId: number | null;
   desde: Date | null;
   hasta: Date | null;
   usosMax: number | null;
@@ -47,6 +53,8 @@ export interface LineaParaCupon {
   productoId: number;
   /** por unidad, ya con la rebaja de la prenda */
   precio: number;
+  /** por unidad, sin ninguna rebaja (el precio de lista) */
+  lista: number;
   /** precio mayorista (el piso); null = no cargado. Dato interno: no sale de la API. */
   mayorista: number | null;
   /** tiene rebaja (descuento masivo) */
@@ -69,21 +77,23 @@ export const normalizarCodigo = (s: string) => s.trim().toUpperCase().replace(/\
 export const CODIGO = /^[A-Z0-9][A-Z0-9_-]{2,29}$/;
 
 const SELECT = `
-  SELECT c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.producto_ids, c.sobre_rebajas, c.minimo, c.tope, c.escala, c.max_mayorista,
-         c.desde, c.hasta, c.usos_max, c.usos_por_cliente, c.usos, c.activo,
+  SELECT c.id, c.codigo, c.nombre, c.automatico, c.tipo, c.valor, c.alcance, c.producto_ids, c.sobre_rebajas, c.acumula, c.minimo, c.tope, c.escala, c.max_mayorista,
+         c.cliente_id, c.desde, c.hasta, c.usos_max, c.usos_por_cliente, c.usos,
+         -- el de un evento (Navidad…) sólo está activo mientras el evento esté vigente
+         (c.activo AND (c.evento_id IS NULL OR tienda.evento_vigente(c.evento_id))) AS activo,
          -- una categoría de arriba incluye sus subcategorías
          COALESCE((SELECT array_agg(k.id) FROM tienda.categorias k WHERE k.id = ANY(c.categoria_ids) OR k.padre_id = ANY(c.categoria_ids)), '{}') AS categoria_ids
     FROM tienda.cupones c`;
 
 interface FilaCupon {
   id: number; codigo: string | null; nombre: string; automatico: boolean; tipo: Cupon["tipo"]; valor: number; alcance: Cupon["alcance"];
-  producto_ids: number[]; categoria_ids: number[]; sobre_rebajas: boolean; minimo: number; tope: string | null; escala: Array<{ desde: number; mayorista: number }> | null; max_mayorista: number; desde: Date | null; hasta: Date | null;
+  producto_ids: number[]; categoria_ids: number[]; sobre_rebajas: boolean; acumula: boolean; minimo: number; tope: string | null; escala: Array<{ desde: number; mayorista: number }> | null; max_mayorista: number; cliente_id: number | null; desde: Date | null; hasta: Date | null;
   usos_max: number | null; usos_por_cliente: number | null; usos: number; activo: boolean;
 }
 const aCupon = (r: FilaCupon): Cupon => ({
   id: r.id, codigo: r.codigo, nombre: r.nombre, automatico: r.automatico, tipo: r.tipo, valor: r.valor, alcance: r.alcance,
-  categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids), sobreRebajas: r.sobre_rebajas, minimo: r.minimo, tope: r.tope === null ? null : Number(r.tope),
-  escala: r.escala ?? [], maxMayorista: r.max_mayorista,
+  categorias: new Set(r.categoria_ids), productos: new Set(r.producto_ids), sobreRebajas: r.sobre_rebajas, acumula: r.acumula, minimo: r.minimo, tope: r.tope === null ? null : Number(r.tope),
+  escala: r.escala ?? [], maxMayorista: r.max_mayorista, clienteId: r.cliente_id,
   desde: r.desde, hasta: r.hasta, usosMax: r.usos_max, usosPorCliente: r.usos_por_cliente, usos: r.usos, activo: r.activo,
 });
 
@@ -94,7 +104,7 @@ export async function buscarCupon(db: pg.Pool | pg.PoolClient, codigo: string, b
 
 export async function promocionesVigentes(db: pg.Pool | pg.PoolClient): Promise<Cupon[]> {
   const { rows } = await db.query<FilaCupon>(
-    `${SELECT} WHERE c.automatico AND c.activo AND (c.desde IS NULL OR c.desde <= now()) AND (c.hasta IS NULL OR c.hasta > now())
+    `${SELECT} WHERE c.automatico AND c.activo AND (c.evento_id IS NULL OR tienda.evento_vigente(c.evento_id)) AND (c.desde IS NULL OR c.desde <= now()) AND (c.hasta IS NULL OR c.hasta > now())
         AND (c.usos_max IS NULL OR c.usos < c.usos_max) ORDER BY c.id`);
   return rows.map(aCupon);
 }
@@ -130,7 +140,7 @@ export function aplicarCupon(
     return { error: `${c.codigo ? "Este cupón" : "Esta promoción"} es para compras desde ${formatearPesos(c.minimo)} (te faltan ${formatearPesos(c.minimo - subtotal)}).` };
   }
   const entra = (l: LineaParaCupon) =>
-    (c.sobreRebajas || !l.rebajada)
+    (c.sobreRebajas || !c.acumula || !l.rebajada)
     && (c.alcance === "todo"
       || (c.alcance === "productos" && c.productos.has(l.productoId))
       || (c.alcance === "categorias" && (categorias.get(l.productoId) ?? []).some((k) => c.categorias.has(k))));
@@ -193,15 +203,33 @@ export function aplicarCupon(
         porUnidad.set(l.sku, Math.min(pisoUnidad(l), Math.floor(deLinea / l.cantidad / 100) * 100));
       }
     };
-    if (c.tipo === "porcentaje") {
-      for (const l of descontables) porUnidad.set(l.sku, Math.min(pisoUnidad(l), l.precio - conDescuento(centavos(l.precio), c.valor)));
+    // Sin acumular, el % se calcula sobre el precio de lista y sólo cuenta lo que mejora la rebaja que la prenda ya tiene:
+    // en cada prenda rige el mejor precio para el cliente, nunca los dos descuentos juntos.
+    const base = (l: LineaParaCupon) => (c.acumula ? l.precio : l.lista);
+    const mejora = (l: LineaParaCupon) => Math.max(0, Math.min(pisoUnidad(l), l.precio - conDescuento(centavos(base(l)), c.valor)));
+    if (c.tipo === "segunda_unidad") {
+      // Pares de a dos entre todas las prendas elegibles, de la más cara a la más barata: la más barata de cada par lleva el %.
+      const unidades = elegibles.flatMap((l) => Array.from({ length: l.cantidad }, () => l)).sort((x, y) => y.precio - x.precio || (x.sku < y.sku ? -1 : 1));
+      const total = new Map<string, number>();
+      for (let i = 1; i < unidades.length; i += 2) {
+        const l = unidades[i]!;
+        total.set(l.sku, (total.get(l.sku) ?? 0) + mejora(l));
+      }
+      // Por unidad de la línea, al peso hacia abajo (el total nunca pasa de lo que corresponde).
+      for (const l of elegibles) porUnidad.set(l.sku, Math.floor((total.get(l.sku) ?? 0) / l.cantidad / 100) * 100);
+    } else if (c.tipo === "porcentaje") {
+      for (const l of descontables) porUnidad.set(l.sku, mejora(l));
       // Con tope: si el porcentaje se pasa, el descuento queda en el tope (repartido igual que un monto).
       if (c.tope !== null && descontables.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0) > c.tope) repartir(c.tope);
     } else repartir(c.valor);
   }
   const descuento = elegibles.reduce((s, l) => s + (porUnidad.get(l.sku) ?? 0) * l.cantidad, 0);
   // Sin piso verificable en ninguna prenda no se dice por qué: el precio mayorista no se muestra.
-  if (descuento <= 0) return { error: descontables.length ? "Este cupón no descuenta nada en este carrito." : "Este cupón no aplica a estas prendas." };
+  if (descuento <= 0) {
+    if (c.tipo === "segunda_unidad" && elegibles.reduce((n, l) => n + l.cantidad, 0) < 2) return { error: `Sumá otra prenda y la 2da unidad va al ${c.valor}% OFF.` };
+    if (!c.acumula && elegibles.some((l) => l.rebajada && pisoUnidad(l) > 0)) return { error: "Tus prendas ya tienen un descuento mejor que esta promoción (no se suman)." };
+    return { error: descontables.length ? "Este cupón no descuenta nada en este carrito." : "Este cupón no aplica a estas prendas." };
+  }
   return { cupon: c, descuento, porUnidad, envioGratis: false, ...(mezcla ? { mezcla } : {}) };
 }
 

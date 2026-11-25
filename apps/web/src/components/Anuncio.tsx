@@ -18,7 +18,7 @@ export function Anuncio({ texto, envioGratisDesde }: { texto: string | null; env
     : falta > 0 ? `🚚 Te faltan ${formatearPesos(falta)} para el envío gratis` : "🚚 ¡Tenés envío gratis!";
   if (!mensaje) return null;
   return (
-    <div className="bg-marca text-center text-[13px] font-bold tracking-wide text-white">
+    <div className="anuncio bg-marca text-center text-[13px] font-bold tracking-wide text-white">
       <p className="mx-auto max-w-7xl px-4 py-2" aria-live="polite">{mensaje}</p>
     </div>
   );

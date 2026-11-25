@@ -25,6 +25,8 @@ export interface ContextoSeo {
   descuentoTransferencia: number;
   /** días para cambios y devoluciones */
   diasDevolucion: number;
+  /** El evento de temporada vigente (Navidad…): suma sus palabras clave a títulos y descripciones. null/ausente = ninguno. */
+  evento?: { nombre: string } | null;
 }
 
 const DISPONIBLE = "https://schema.org/InStock";
@@ -207,10 +209,10 @@ const rangoTalles = (ts: string[]) => {
   if (!t.length) return null;
   return t.length === 1 ? `talle ${t[0]}` : `talles ${t[0]} al ${t.at(-1)}`;
 };
-const condicionesLista = (ctx: Pick<ContextoSeo, "cuotas" | "descuentoTransferencia">) =>
-  [ctx.descuentoTransferencia > 0 ? `${ctx.descuentoTransferencia}% OFF con transferencia` : null, ctx.cuotas > 1 ? `${ctx.cuotas} cuotas sin interés` : null, "envíos a todo el país"]
+const condicionesLista = (ctx: Pick<ContextoSeo, "cuotas" | "descuentoTransferencia" | "evento">) =>
+  [ctx.evento ? `ofertas y regalos de ${ctx.evento.nombre}` : null, ctx.descuentoTransferencia > 0 ? `${ctx.descuentoTransferencia}% OFF con transferencia` : null, ctx.cuotas > 1 ? `${ctx.cuotas} cuotas sin interés` : null, "envíos a todo el país"]
     .filter((x): x is string => !!x);
-const condiciones = (ctx: Pick<ContextoSeo, "cuotas" | "descuentoTransferencia">) => condicionesLista(ctx).join(", ");
+const condiciones = (ctx: Pick<ContextoSeo, "cuotas" | "descuentoTransferencia" | "evento">) => condicionesLista(ctx).join(", ");
 /** La primera versión que entra entera (Google corta ~160): de la más completa a la más corta. */
 const laQueEntra = (versiones: string[], max = 158) => versiones.find((v) => v.length <= max) ?? recortar(versiones.at(-1)!, max);
 const recortar = (t: string, max = 158) => {
@@ -250,14 +252,15 @@ export function tituloProducto(p: Pick<ProductoDetalle, "nombre" | "migas" | "se
  * descripción larga, sale de ahí; si no, se arma con colores, talles y precio
  * (que es lo que mira quien compara).
  */
-export function descripcionProducto(p: ProductoDetalle, ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia">): string {
+export function descripcionProducto(p: ProductoDetalle, ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia" | "evento">): string {
   if (p.seoDescripcion) return p.seoDescripcion;
   const colores = p.colores.map((c) => sinUnico(c.nombre)).filter((c): c is string => !!c);
   const talles = rangoTalles(p.variantes.filter((v) => v.stock > 0).map((v) => v.talle ?? ""));
   const desde = `${p.precio < p.precioHasta ? "Desde " : ""}${formatearPesos(p.precio)}`;
   if (p.descripcion && p.descripcion.trim().length >= 80) return recortar(`${p.descripcion.trim()} ${desde}.`);
   const enColores = (n: number) => (colores.length ? ` en ${lista(colores, n)}${colores.length > n ? " y más colores" : ""}` : "");
-  const conds = condicionesLista(ctx);
+  // Las palabras del evento no van en una prenda: no se sabe si esa prenda está en oferta.
+  const conds = condicionesLista({ ...ctx, evento: null });
   const versiones: string[] = [];
   // La composición, sólo si está cargada, va en la versión más completa; si no entra, se descarta antes que el precio.
   for (const marca of [...(p.composicion ? [`, ${p.composicion.charAt(0).toLowerCase()}${p.composicion.slice(1)}, de ${ctx.marca}`] : []), ` de ${ctx.marca}`, ""]) {
@@ -287,8 +290,25 @@ export function descripcionAutomatica(p: ProductoDetalle, marca: string): string
   return frases.filter(Boolean).join(" ");
 }
 
+/**
+ * Con un evento vigente (Navidad…), suma sus palabras clave al título si entra en lo que Google muestra
+ * (~60 caracteres con « · Isuwaya»); si no entra, lo deja como está.
+ */
+export function tituloConEvento(titulo: string, ctx: Pick<ContextoSeo, "evento">, max = 50): string {
+  if (!ctx.evento) return titulo;
+  const con = `${titulo} · ${ctx.evento.nombre}`;
+  return con.length <= max ? con : titulo;
+}
+
+/** Lo mismo para una descripción ya armada: «… Ofertas y regalos de Navidad.» si entra (Google corta ~160). */
+export function descripcionConEvento(texto: string, ctx: Pick<ContextoSeo, "evento">, max = 158): string {
+  if (!ctx.evento) return texto;
+  const con = `${texto.replace(/\s+$/, "")} Ofertas y regalos de ${ctx.evento.nombre}.`;
+  return con.length <= max ? con : texto;
+}
+
 /** Lo mismo para una categoría: qué hay, cuántas prendas, desde qué precio. */
-export function descripcionCategoria(titulo: string, productos: ProductoTarjeta[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia">): string {
+export function descripcionCategoria(titulo: string, productos: ProductoTarjeta[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia" | "evento">): string {
   if (!productos.length) return recortar(`${titulo} de ${ctx.marca}: ${condiciones(ctx)}.`);
   const minimo = Math.min(...productos.map((p) => p.precio));
   const talles = rangoTalles(productos.flatMap((p) => p.talles));
@@ -304,7 +324,7 @@ export function descripcionCategoria(titulo: string, productos: ProductoTarjeta[
  */
 
 /** La del inicio: qué es la tienda, para quién y las condiciones de hoy (los envíos primero). */
-export function descripcionInicio(categorias: string[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia">): string {
+export function descripcionInicio(categorias: string[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia" | "evento">): string {
   const para = categorias.length ? ` para ${lista(categorias.map((c) => c.toLowerCase()), 4)}` : "";
   const conds = ["envíos a todo el país", ...condicionesLista(ctx).filter((c) => !c.startsWith("envíos"))];
   const versiones: string[] = [];
@@ -323,7 +343,7 @@ export function descripcionInicio(categorias: string[], ctx: Pick<ContextoSeo, "
  * subcategorías de verdad: «Explorá toda la ropa de mujer Isuwaya: remeras y
  * tops, pantalones y calzas…».
  */
-export function descripcionCategoriaPrincipal(nombre: string, hijas: string[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia">): string {
+export function descripcionCategoriaPrincipal(nombre: string, hijas: string[], ctx: Pick<ContextoSeo, "marca" | "cuotas" | "descuentoTransferencia" | "evento">): string {
   const base = `Explorá toda la ropa de ${nombre.toLowerCase()} ${ctx.marca}`;
   const subs = [...new Set(hijas.map((h) => h.trim().toLowerCase()).filter(Boolean))];
   const conds = condicionesLista(ctx);

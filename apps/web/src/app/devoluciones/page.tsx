@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PaginaLegal } from "@/components/PaginaLegal";
 
-export const metadata: Metadata = { title: "Cambios y devoluciones", alternates: { canonical: "/devoluciones" } };
+export const metadata: Metadata = {
+  title: "Cambios y devoluciones",
+  description: "Cambios y devoluciones en Isuwaya: 30 días corridos para cambiar el talle o el color, cambios sin costo en nuestros locales, prendas con falla y derecho de arrepentimiento.",
+  alternates: { canonical: "/devoluciones" },
+};
 
 export default function Devoluciones() {
   return (

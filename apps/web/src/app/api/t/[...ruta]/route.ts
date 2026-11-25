@@ -19,6 +19,9 @@ const REGLAS: Regla[] = [
   { metodo: "POST", patron: new RegExp(`^pedidos/${NUM}/comprobante$`), api: (m) => `/v1/pedidos/${m[1]}/comprobante`, binario: true },
   { metodo: "GET", patron: /^cuenta$/, api: () => "/v1/cuenta" },
   { metodo: "PATCH", patron: /^cuenta$/, api: () => "/v1/cuenta" },
+  // Ruleta de descuentos: siempre con la sesión de la cuenta (la API devuelve 401 sin ella).
+  { metodo: "GET", patron: /^cuenta\/ruleta$/, api: () => "/v1/cuenta/ruleta" },
+  { metodo: "POST", patron: /^cuenta\/ruleta\/girar$/, api: () => "/v1/cuenta/ruleta/girar" },
   { metodo: "POST", patron: /^cuenta\/registro$/, api: () => "/v1/cuenta/registro", sesion: "crea" },
   { metodo: "POST", patron: /^cuenta\/ingresar$/, api: () => "/v1/cuenta/ingresar", sesion: "crea" },
   { metodo: "POST", patron: /^cuenta\/restablecer$/, api: () => "/v1/cuenta/restablecer", sesion: "crea" },
