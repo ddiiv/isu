@@ -36,6 +36,7 @@ const ICONOS: Record<string, string> = {
   categorias: "M4 5h7v7H4zm9 0h7v7h-7zM4 14h7v6H4zm9 0h7v6h-7z",
   talles: "M3 8h18v8H3zM7 8v3m4-3v4m4-4v3m4-3v4",
   portada: "M4 5h16v14H4zm0 10 4-4 3 3 3-3 6 6",
+  catalogo: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
   resenas: "m12 4 2.5 5 5.5.8-4 3.9.9 5.5L12 16.6 7.1 19.2l.9-5.5-4-3.9 5.5-.8z",
   relampagos: "M13 2 4 14h7l-1 8 9-12h-7z",
   descuentos: "M5 19 19 5M7.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm9 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
@@ -70,6 +71,7 @@ const GRUPOS: Array<{ titulo: string | null; items: Item[] }> = [
     { href: "/categorias", texto: "Categorías", rol: "lectura", icono: "categorias" },
     { href: "/guias-talles", texto: "Guías de talles", rol: "lectura", icono: "talles" },
     { href: "/portada", texto: "Portada", rol: "lectura", icono: "portada" },
+    { href: "/catalogo-pdf", texto: "Catálogo PDF", rol: "lectura", icono: "catalogo" },
     { href: "/resenas", texto: "Reseñas", rol: "lectura", icono: "resenas" },
   ] },
   { titulo: "Promociones", items: [

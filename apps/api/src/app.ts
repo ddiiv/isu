@@ -38,6 +38,7 @@ import { rutasChat } from "./modulos/chat/rutas.js";
 import { rutasChatAdmin } from "./modulos/admin/chat.js";
 import { rutasCuponesAdmin } from "./modulos/admin/cupones.js";
 import { rutasEventosAdmin } from "./modulos/admin/eventos.js";
+import { rutasCatalogoPdf } from "./modulos/admin/catalogo.js";
 import { rutasIngresoAdmin } from "./modulos/admin/ingreso.js";
 import { rutasAdmin } from "./modulos/admin/rutas.js";
 import { crearTransportes, type Transportes } from "@isu/envios";
@@ -171,6 +172,7 @@ export async function construirApp(deps: Dependencias) {
   await rutasChat(app, { redis, env, asistente });
   app.addHook("onClose", async () => { await asistente.cerrar(); });
   await rutasCuponesAdmin(app, { pool, env });
+  await rutasCatalogoPdf(app, { pool, env, fotos });
   await rutasRuletaAdmin(app, { pool, env, redis, colas, cache, canalInvalidar: CANAL_INVALIDAR });
   await rutasEventosAdmin(app, { pool, env, redis, colas, cache, canalInvalidar: CANAL_INVALIDAR });
   await rutasChatAdmin(app, { pool, redis, env, cache, canalInvalidar: CANAL_INVALIDAR, asistente, iaDisponible: !!(deps.ia ?? ia) });

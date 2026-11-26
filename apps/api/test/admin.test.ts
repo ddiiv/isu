@@ -17,6 +17,8 @@ import { firmaOpinar } from "@isu/envios";
 import { BANNERS_SUGERIDOS, MEDIOS_PAGO } from "@isu/shared";
 import { armarBanner } from "../src/modulos/portada/banners.js";
 import { promocionesVigentes } from "../src/lib/cupones.js";
+import { armarPdfCatalogo, frenteYEspalda } from "../src/modulos/admin/catalogo.js";
+import { PDFDocument } from "pdf-lib";
 import { almacenDeComprobantes } from "@isu/almacen";
 
 /*
@@ -2037,5 +2039,52 @@ describe("cupones visibles en la tienda (0038)", () => {
       await req("PUT", "/v1/admin/ruleta/premios", operador, { premios: guardado });
       await req("PUT", "/v1/admin/ruleta", operador, { manual: false, conEventos: true, cadaDias: 7, venceDias: 30 });
     }
+  });
+});
+
+describe("catálogo en PDF (0040)", () => {
+  it("elige frente y espalda: las de isu-fotos (modelo, si no la prenda sola), del mismo color; si no hay, las dos primeras", () => {
+    const f = (clave: string, origen: string | null, color: number | null = 1) => ({ producto_id: 1, clave, origen, alt: null, color_id: color });
+    const fotos = [f("a", "ia/Remera/Negro/Solo-Frente"), f("b", "ia/Remera/Rojo/Mujer/Espalda", 2), f("c", "ia/Remera/Negro/Mujer/Frente"), f("d", "ia/Remera/Negro/Mujer/Espalda")];
+    expect(frenteYEspalda(fotos).map((x) => x?.clave)).toEqual(["c", "d"]);
+    expect(frenteYEspalda([f("a", "ia/R/N/Solo-Frente"), f("b", "ia/R/N/Solo-Espalda")]).map((x) => x?.clave)).toEqual(["a", "b"]);
+    // Frente del modelo en un color y espalda del modelo en otro: mejor el par de la prenda sola del mismo color (misma prenda adelante y atrás).
+    expect(frenteYEspalda([f("m1", "ia/R/Azul/Mujer/Frente", 1), f("m2", "ia/R/Gris/Mujer/Espalda", 2), f("s1", "ia/R/Azul/Solo-Frente", 1), f("s2", "ia/R/Azul/Solo-Espalda", 1)]).map((x) => x?.clave)).toEqual(["s1", "s2"]);
+    // Sin vistas (fotos viejas o subidas a mano): las dos primeras; con una sola, sin espalda.
+    expect(frenteYEspalda([f("x", null), f("y", null), f("z", null)]).map((x) => x?.clave)).toEqual(["x", "y"]);
+    // Sin vistas, la otra foto del mismo color antes que la de otro color.
+    expect(frenteYEspalda([f("x", null, 1), f("y", null, 2), f("z", null, 1)]).map((x) => x?.clave)).toEqual(["x", "z"]);
+    expect(frenteYEspalda([f("x", null)]).map((x) => x?.clave ?? null)).toEqual(["x", null]);
+    // La vista también se lee del texto alternativo que pone isu-fotos («Nombre - Color - Espalda»).
+    expect(frenteYEspalda([{ ...f("p", null), alt: "Remera - Negro - Espalda" }, { ...f("q", null), alt: "Remera - Negro - Frente" }]).map((x) => x?.clave)).toEqual(["q", "p"]);
+  });
+
+  it("sólo el backoffice: se elige qué entra (operador) y se descarga el PDF compacto", async () => {
+    expect((await req("GET", "/v1/admin/catalogo")).statusCode).toBe(401);
+    expect((await req("GET", "/v1/admin/catalogo/pdf")).statusCode).toBe(401);
+    expect((await req("PUT", "/v1/admin/catalogo", lectura2, { ids: [ids["qa-adm-1"]] })).statusCode).toBe(403);
+    // Sin nada elegido: aviso, no un PDF vacío.
+    expect((await req("PUT", "/v1/admin/catalogo", operador, { ids: [] })).statusCode).toBe(200);
+    const vacio = await req("GET", "/v1/admin/catalogo/pdf", operador);
+    expect([vacio.statusCode, vacio.json().error]).toEqual([400, "catalogo_vacio"]);
+
+    expect((await req("PUT", "/v1/admin/catalogo", operador, { ids: [ids["qa-adm-1"], ids["qa-adm-2"]] })).statusCode).toBe(200);
+    const lista = (await req("GET", "/v1/admin/catalogo", lectura2)).json().productos as Array<{ id: number; enCatalogo: boolean; sku: string }>;
+    expect(lista.filter((p) => p.enCatalogo).map((p) => p.sku).sort()).toEqual(["QA-ADM-1", "QA-ADM-2"]);
+    const r = await req("GET", "/v1/admin/catalogo/pdf", lectura2);
+    expect(r.statusCode, r.body.slice(0, 200)).toBe(200);
+    expect(r.headers["content-type"]).toBe("application/pdf");
+    expect(String(r.headers["content-disposition"])).toMatch(/attachment; filename="catalogo-isuwaya-/);
+    expect(r.rawPayload.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    // Compacto: 16 productos por hoja, sin tapa.
+    expect((await PDFDocument.load(r.rawPayload)).getPageCount()).toBe(1);
+    const acciones = (await pool.query("SELECT accion FROM tienda.auditoria WHERE entidad = 'catalogo'")).rows.map((x) => x.accion);
+    expect(acciones).toEqual(expect.arrayContaining(["seleccionar_catalogo", "descargar_catalogo"]));
+  });
+
+  it("16 productos por hoja: 17 productos son 2 hojas; sin foto, igual sale la ficha", async () => {
+    const ficha = { nombre: "Remera ñandú «prueba» 😀", sku: "ISUQA", colores: ["Negro"], talles: ["M", "S"], frente: null, espalda: null };
+    const pdf = await armarPdfCatalogo(Array.from({ length: 17 }, () => ficha), async () => null);
+    expect((await PDFDocument.load(pdf)).getPageCount()).toBe(2);
   });
 });
