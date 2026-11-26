@@ -145,6 +145,26 @@ describe("grilla por categoría", () => {
     expect(p.foto.clave).toMatch(/x2aaaa$/);
     expect(p.fotoHover.clave).toMatch(/x1aaaa$/);
   });
+  it("con foto de la prenda sola de frente, esa va en la grilla y la de modelo al pasar el mouse", async () => {
+    const invalidar = async () => { await redis.publish(CANAL_INVALIDAR, "{}"); await new Promise((r) => setTimeout(r, 150)); };
+    const negro = (await pool.query("SELECT c.id, c.producto_id FROM tienda.producto_colores c JOIN tienda.productos p ON p.id = c.producto_id WHERE p.stocker_id = $1 AND c.clave = 'negro'", [BASE + 1])).rows[0];
+    // La espalda con la vista en `origen`; el frente sólo en el texto alternativo (foto subida a mano).
+    await pool.query("INSERT INTO tienda.fotos (producto_id, tipo, color_id, clave, orden, origen, alt) VALUES ($1,'color',$2,'p/qa-solo/espalda',7,'ia/qa/Solo-Espalda',NULL), ($1,'color',$2,'p/qa-solo/frente',8,NULL,'Remera - Negro - Solo-Frente')",
+      [negro.producto_id, negro.id]);
+    try {
+      await invalidar();
+      const p = (await get("/v1/productos?categoria=mujer&sub=remeras-y-tops")).json().productos.find((x: { nombre: string }) => x.nombre === "Remera qa oversize");
+      expect(p.foto).toMatchObject({ clave: "p/qa-solo/frente", solo: "frente" });
+      expect(p.colores[0].foto.clave).toBe("p/qa-solo/frente");
+      expect(p.fotoHover.clave).toMatch(/x2aaaa$/);
+      expect(p.fotoHover.solo).toBeUndefined();
+      const ficha = (await get("/v1/productos/remera-qa-oversize")).json();
+      expect(ficha.colores[0].fotos.map((f: { solo?: string }) => f.solo)).toEqual([undefined, "espalda", "frente"]);
+    } finally {
+      await pool.query("DELETE FROM tienda.fotos WHERE producto_id = $1 AND clave LIKE 'p/qa-solo/%'", [negro.producto_id]);
+      await invalidar();
+    }
+  });
   it("los agotados van al final, marcados", async () => {
     const ps = qa((await get("/v1/productos?categoria=mujer")).json().productos);
     expect(ps.at(-1)).toMatchObject({ nombre: "Calza qa agotada", agotado: true });

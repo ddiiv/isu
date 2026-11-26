@@ -24,6 +24,10 @@ import { src, srcVideo } from "@/lib/fotos";
  * al checkout). Sin stock en el color elegido: "Consultar por WhatsApp", con
  * el producto, el color y el talle ya escritos en el mensaje.
  */
+/** Primero las de modelo; al final la prenda sola, de frente y de espalda (sin cambiar el orden dentro de cada grupo). */
+const PUESTO = { frente: 1, espalda: 2 } as const;
+const soloAlFinal = (fotos: FotoPublica[]) => [...fotos].sort((a, b) => (a.solo ? PUESTO[a.solo] : 0) - (b.solo ? PUESTO[b.solo] : 0));
+
 export function FichaProducto({ p, config }: { p: ProductoDetalle; config: ConfigPublica }) {
   const hay = (c: string | null) => p.variantes.some((v) => v.color === c && v.stock > 0);
   // Abre en el color de la foto principal (la primera de exhibición), si hay stock; si no, en el primero que tenga.
@@ -60,9 +64,9 @@ export function FichaProducto({ p, config }: { p: ProductoDetalle; config: Confi
       ...(colorActual?.fotos ?? []),
       ...p.exhibicion.filter((f) => f.color === null),
     ];
-    if (delColorElegido.length) return delColorElegido;
     // Un color sin ninguna foto: mejor las del producto (la principal primero) que "foto próximamente".
-    return [...p.exhibicion, ...(p.colores.find((c) => c.fotos.length)?.fotos ?? [])];
+    const lista = delColorElegido.length ? delColorElegido : [...p.exhibicion, ...(p.colores.find((c) => c.fotos.length)?.fotos ?? [])];
+    return soloAlFinal(lista);
   }, [p.exhibicion, p.colores, colorActual, color]);
 
   // El video (si está publicado) va segundo, después de la foto principal.

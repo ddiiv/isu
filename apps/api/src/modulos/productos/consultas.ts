@@ -19,10 +19,18 @@ import {
 interface FilaProducto { id: number; slug: string; nombre: string; creado_en: Date; nuevo: boolean }
 interface FilaVariante { producto_id: number; color_id: number | null; talle: string | null; precio: number; precio_mayorista: number | null; stock: number }
 interface FilaColor { id: number; producto_id: number; clave: string; nombre: string; hex: string | null }
-interface FilaFoto { producto_id: number; tipo: "color" | "exhibicion"; color_id: number | null; clave: string; ancho: number | null; alto: number | null; alt: string | null }
+interface FilaFoto { producto_id: number; tipo: "color" | "exhibicion"; color_id: number | null; clave: string; ancho: number | null; alto: number | null; alt: string | null; origen: string | null }
 
-const foto = (f: FilaFoto | undefined): FotoPublica | null =>
-  f ? { clave: f.clave, ancho: f.ancho, alto: f.alto, alt: f.alt } : null;
+/** La vista la dice el final de `origen` («ia/…/Solo-Frente») o, si no, del texto alternativo («Nombre - Color - Solo-Frente»). */
+const SOLO = /(?:\/| - )solo-(frente|espalda)\s*$/i;
+export const vistaSola = (f: { origen: string | null; alt: string | null }) =>
+  (SOLO.exec(f.origen ?? "") ?? SOLO.exec(f.alt ?? ""))?.[1]!.toLowerCase() as "frente" | "espalda" | undefined;
+
+const foto = (f: FilaFoto | undefined): FotoPublica | null => {
+  if (!f) return null;
+  const solo = vistaSola(f);
+  return { clave: f.clave, ancho: f.ancho, alto: f.alto, alt: f.alt, ...(solo && { solo }) };
+};
 
 export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrarAgotados: boolean, desc: Descuentos): Promise<ProductoTarjeta[]> {
   if (!productos.length) return [];
@@ -37,7 +45,7 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       [ids],
     ),
     pool.query<FilaFoto>(
-      `SELECT producto_id, tipo, color_id, clave, ancho, alto, alt FROM tienda.fotos
+      `SELECT producto_id, tipo, color_id, clave, ancho, alto, alt, origen FROM tienda.fotos
         WHERE producto_id = ANY($1::int[]) ORDER BY (tipo = 'exhibicion') DESC, orden, id`,
       [ids],
     ),
@@ -67,14 +75,17 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
     const preciosLista = (agotado ? variantes : conStock).map((v) => v.precio);
     const fotos = F.get(p.id) ?? [];
     const usados = new Set(variantes.map((v) => v.color_id));
+    // En la grilla va primero la prenda sola de frente; las de modelo se ven al pasar el mouse y en la ficha.
+    const frentes = fotos.filter((f) => vistaSola(f) === "frente");
+    const frenteDe = (id: number | undefined) => frentes.find((f) => f.color_id === id);
     const colores = (C.get(p.id) ?? []).filter((c) => usados.has(c.id)).map((c) => ({
       clave: c.clave,
       nombre: c.nombre,
       hex: c.hex,
-      foto: foto(fotos.find((f) => f.tipo === "color" && f.color_id === c.id)),
+      foto: foto(frenteDe(c.id) ?? fotos.find((f) => f.tipo === "color" && f.color_id === c.id)),
       hay: conStock.some((v) => v.color_id === c.id),
     }));
-    // Principal: la primera de exhibición; si no hay, la de color del primer color con stock.
+    // Sin foto sola de frente: la primera de exhibición; si no hay, la de color del primer color con stock.
     const primerColor = colores.find((c) => c.hay) ?? colores[0];
     const idPrimer = (C.get(p.id) ?? []).find((c) => c.clave === primerColor?.clave)?.id;
     const ordenadas = [
@@ -82,6 +93,13 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       ...fotos.filter((f) => f.tipo === "color" && f.color_id === idPrimer),
       ...fotos.filter((f) => f.tipo === "color" && f.color_id !== idPrimer),
     ];
+    // La del primer color con stock; si ese no la tiene, la de otro color (primero los que hay).
+    const porColor = [...colores].sort((a, b) => Number(b.hay) - Number(a.hay))
+      .map((c) => frenteDe((C.get(p.id) ?? []).find((x) => x.clave === c.clave)?.id)).find(Boolean);
+    const principal = frenteDe(idPrimer) ?? porColor ?? frentes[0] ?? ordenadas[0];
+    const resto = ordenadas.filter((f) => f !== principal);
+    const modelos = resto.filter((f) => !vistaSola(f));
+    const segunda = (principal && modelos.find((f) => f.color_id === principal.color_id)) ?? modelos[0] ?? resto[0];
     salida.push({
       id: p.id,
       slug: p.slug,
@@ -91,8 +109,8 @@ export async function tarjetas(pool: pg.Pool, productos: FilaProducto[], mostrar
       precioLista: pct ? Math.min(...preciosLista) : null,
       descuento: pct || null,
       descuentoHasta: pct ? vencen.get(p.id) ?? null : null,
-      foto: foto(ordenadas[0]),
-      fotoHover: foto(ordenadas[1]),
+      foto: foto(principal),
+      fotoHover: foto(segunda),
       colores,
       talles: [...new Set(conStock.map((v) => v.talle).filter((t): t is string => !!t))].sort(compararTalles),
       agotado,
@@ -278,7 +296,7 @@ export async function detalle(pool: pg.Pool, slug: string, desc: Descuentos): Pr
       [p.id],
     ),
     pool.query<FilaColor>("SELECT id, producto_id, clave, nombre, hex FROM tienda.producto_colores WHERE producto_id = $1 AND activo ORDER BY orden, id", [p.id]),
-    pool.query<FilaFoto>("SELECT producto_id, tipo, color_id, clave, ancho, alto, alt FROM tienda.fotos WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
+    pool.query<FilaFoto>("SELECT producto_id, tipo, color_id, clave, ancho, alto, alt, origen FROM tienda.fotos WHERE producto_id = $1 ORDER BY orden, id", [p.id]),
     pool.query<{ nombre: string; slug: string; padre_nombre: string | null; padre_slug: string | null }>(
       `SELECT c.nombre, c.slug, pa.nombre AS padre_nombre, pa.slug AS padre_slug
          FROM tienda.categorias c LEFT JOIN tienda.categorias pa ON pa.id = c.padre_id

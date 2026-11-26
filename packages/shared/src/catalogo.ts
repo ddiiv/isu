@@ -13,6 +13,8 @@ export const FotoPublica = z.object({
   ancho: z.number().int().nullable(),
   alto: z.number().int().nullable(),
   alt: z.string().nullable(),
+  /** Foto de la prenda sola (sin modelo): su vista. Las de modelo no lo traen. */
+  solo: z.enum(["frente", "espalda"]).optional(),
 });
 export type FotoPublica = z.infer<typeof FotoPublica>;
 
